@@ -2,11 +2,13 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using System;
+using System.Linq;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.Friction;
 using Content.Shared.Gravity;
 using Content.Shared.Movement.Systems;
 using Content.Shared.Throwing;
+using Content.Shared.ZLevel;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -27,6 +29,7 @@ public sealed class SharedZLevelSystem : VirtualController
 {
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
 
     private EntityQuery<ZLevelKinematicsComponent> _kinematicsQuery;
@@ -58,6 +61,7 @@ public sealed class SharedZLevelSystem : VirtualController
         SubscribeLocalEvent<ZLevelPositionComponent, MapUidChangedEvent>(OnMapChanged);
         SubscribeLocalEvent<ZLevelPositionComponent, PreventCollideEvent>(OnPreventCollide);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnDZTileChanged);
+        SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnBoundaryChanged);
     }
 
     public override void UpdateBeforeSolve(bool prediction, float frameTime)
@@ -89,7 +93,7 @@ public sealed class SharedZLevelSystem : VirtualController
         }
 
         var xy = _map.TileIndicesFor(transform.GridUid.Value, grid, transform.Coordinates);
-        return _map.TryGetZLevelSupportTile(
+        return TryGetSupportTile(
             transform.GridUid.Value,
             grid,
             xy,
@@ -160,6 +164,7 @@ public sealed class SharedZLevelSystem : VirtualController
 
         Dirty(uid, position);
         Dirty(uid, kinematics);
+        _boundaries.RefreshBoundary(uid);
         RefreshEntity(uid);
         return true;
     }
@@ -185,6 +190,7 @@ public sealed class SharedZLevelSystem : VirtualController
 
         Dirty(uid, position);
         Dirty(uid, kinematics);
+        _boundaries.RefreshBoundary(uid);
         RefreshEntity(uid);
         return true;
     }
@@ -200,12 +206,11 @@ public sealed class SharedZLevelSystem : VirtualController
 
     /// <summary>
     /// Attempts to traverse the entity to an adjacent z-level through an explicit traversal object such as stairs or ladders.
-    /// This validates destination support and optionally allows connector-specific overrides of the default ceiling rule.
+    /// This validates destination support and the connector channels resolved by the shared boundary system.
     /// </summary>
     public bool TryTraverseAdjacentLevel(
         EntityUid uid,
         int zOffset,
-        bool overrideBoundaryBlock = false,
         bool requireDirectDestinationSupport = true)
     {
         if (zOffset is 0 || !EnsureZLevelEntity(uid))
@@ -224,13 +229,12 @@ public sealed class SharedZLevelSystem : VirtualController
         var targetZ = currentZ + zOffset;
         var xy = _map.TileIndicesFor(transform.GridUid.Value, grid, transform.Coordinates);
 
-        if (!overrideBoundaryBlock &&
-            !_map.CanTraverseZLevelBoundary(transform.GridUid.Value, grid, xy, currentZ, targetZ))
+        if (!_boundaries.CanTraverse(transform.GridUid.Value, grid, xy, currentZ, targetZ))
         {
             return false;
         }
 
-        if (!_map.TryGetZLevelSupportTile(transform.GridUid.Value, grid, xy, targetZ, Math.Max(0, kinematics.MaxStepDownDepth), out var support))
+        if (!TryGetSupportTile(transform.GridUid.Value, grid, xy, targetZ, Math.Max(0, kinematics.MaxStepDownDepth), out var support))
             return false;
 
         if (requireDirectDestinationSupport && support.GridIndices.Z != targetZ)
@@ -325,6 +329,26 @@ public sealed class SharedZLevelSystem : VirtualController
         }
     }
 
+    private void OnBoundaryChanged(ref ZLevelBoundaryChangedEvent args)
+    {
+        var query = EntityQueryEnumerator<ZLevelPositionComponent, ZLevelKinematicsComponent, TransformComponent, PhysicsComponent>();
+        while (query.MoveNext(out var uid, out var position, out var kinematics, out var transform, out var physics))
+        {
+            if (transform.GridUid != args.Grid.Owner)
+                continue;
+
+            var xy = _map.TileIndicesFor(args.Grid.Owner, args.Grid.Comp, transform.Coordinates);
+            if (xy != args.Tile)
+                continue;
+
+            var range = Math.Max(1, kinematics.MaxStepDownDepth) + 1;
+            if (position.ZLevel < args.LowerZ - range || position.ZLevel > args.LowerZ + 1 + range)
+                continue;
+
+            ResolveVerticalState((uid, position, kinematics, transform, physics), 0f);
+        }
+    }
+
     private void RefreshEntity(EntityUid uid)
     {
         if (!_positionQuery.TryComp(uid, out var dzPosition) ||
@@ -381,16 +405,7 @@ public sealed class SharedZLevelSystem : VirtualController
         var traversing = true;
         while (dzPosition.LocalZOffset < 0f)
         {
-            var currentTile = _map.GetZLevelTileRef(transform.GridUid.Value, grid, new ZLevelTileIndices(xy.X, xy.Y, dzPosition.ZLevel));
-            if (!currentTile.Tile.IsEmpty)
-            {
-                dzPosition.LocalZOffset = 0f;
-                dzKinematics.VerticalVelocity = 0f;
-                traversing = false;
-                break;
-            }
-
-            if (!_map.CanTraverseZLevelBoundary(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1))
+            if (!_boundaries.CanBodyPass(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1))
             {
                 dzPosition.LocalZOffset = 0f;
                 dzKinematics.VerticalVelocity = 0f;
@@ -404,7 +419,7 @@ public sealed class SharedZLevelSystem : VirtualController
 
         while (traversing && dzPosition.LocalZOffset >= 1f)
         {
-            if (!_map.CanTraverseZLevelBoundary(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel + 1))
+            if (!_boundaries.CanBodyPass(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel + 1))
             {
                 dzPosition.LocalZOffset = MathF.BitDecrement(1f);
                 dzKinematics.VerticalVelocity = 0f;
@@ -462,7 +477,46 @@ public sealed class SharedZLevelSystem : VirtualController
         if (dzPosition.LocalZOffset > 0.001f)
             return false;
 
-        return !_map.IsZLevelTileEmpty(gridUid, grid, new ZLevelTileIndices(xy.X, xy.Y, dzPosition.ZLevel));
+        return !_map.IsZLevelTileEmpty(gridUid, grid, new ZLevelTileIndices(xy.X, xy.Y, dzPosition.ZLevel)) &&
+               !_boundaries.CanBodyPass(gridUid, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1);
+    }
+
+    private bool TryGetSupportTile(
+        EntityUid gridUid,
+        MapGridComponent grid,
+        Vector2i xy,
+        int startZ,
+        int maxDropDepth,
+        out ZLevelTileRef tile)
+    {
+        tile = ZLevelTileRef.Zero;
+        if (maxDropDepth < 0)
+            return false;
+
+        foreach (var z in _map.GetExistingZLevelLayersAt(gridUid, grid, xy, startZ - maxDropDepth, startZ).Reverse())
+        {
+            var candidate = _map.GetZLevelTileRef(gridUid, grid, new ZLevelTileIndices(xy.X, xy.Y, z));
+            if (candidate.Tile.IsEmpty || _boundaries.CanBodyPass(gridUid, grid, xy, z, z - 1))
+                continue;
+
+            var reachable = true;
+            for (var currentZ = startZ; currentZ > z; currentZ--)
+            {
+                if (_boundaries.CanBodyPass(gridUid, grid, xy, currentZ, currentZ - 1))
+                    continue;
+
+                reachable = false;
+                break;
+            }
+
+            if (!reachable)
+                return false;
+
+            tile = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private Tile GetStampSourceTile(EntityUid gridUid, MapGridComponent grid, Vector2i xy, int sourceZ)

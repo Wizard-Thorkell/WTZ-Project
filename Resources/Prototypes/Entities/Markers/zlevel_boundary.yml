@@ -1,0 +1,69 @@
+# Mapper-visible markers for explicit vertical boundary semantics.
+
+- type: entity
+  id: ZLevelFloorOpeningMarker
+  parent: MarkerBase
+  name: Z-level floor opening
+  description: Opens free movement, atmosphere, visibility, sound, interaction, and effects through the boundary below.
+  components:
+  - type: Sprite
+    layers:
+    - state: red
+      shader: unshaded
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    opens:
+    - Body
+    - Atmosphere
+    - Visibility
+    - Interaction
+    - Sound
+    - Effects
+
+- type: entity
+  id: ZLevelShaftMarker
+  parent: MarkerBase
+  name: Z-level shaft
+  description: Opens every vertical channel through the boundary above.
+  components:
+  - type: Sprite
+    layers:
+    - state: blue
+      shader: unshaded
+  - type: ZLevelBoundary
+    boundaryOffset: 1
+    opens: All
+
+- type: entity
+  id: ZLevelGrateBoundaryMarker
+  parent: MarkerBase
+  name: Z-level grate boundary
+  description: Allows atmosphere, visibility, sound, and effects while blocking free vertical movement.
+  components:
+  - type: Sprite
+    layers:
+    - state: green
+      shader: unshaded
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    opens:
+    - Atmosphere
+    - Visibility
+    - Sound
+    - Effects
+    closes:
+    - Body
+
+- type: entity
+  id: ZLevelSealedBoundaryMarker
+  parent: MarkerBase
+  name: Z-level sealed boundary
+  description: Explicitly closes every channel through the boundary above.
+  components:
+  - type: Sprite
+    layers:
+    - state: pink
+      shader: unshaded
+  - type: ZLevelBoundary
+    boundaryOffset: 1
+    closes: All

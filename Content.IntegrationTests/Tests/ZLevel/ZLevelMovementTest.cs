@@ -5,6 +5,7 @@
 using Content.IntegrationTests.Tests.Helpers;
 using Content.IntegrationTests.Tests.Movement;
 using Content.Shared.StepTrigger.Systems;
+using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using NUnit.Framework;
@@ -98,16 +99,119 @@ public sealed class ZLevelMovementTest : MovementTest
 
             map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(playerTile.X, playerTile.Y, 0), new Tile(1));
             map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(playerTile.X, playerTile.Y, 1), new Tile(1));
+            SEntMan.SpawnEntity("ZLevelStairsUp", map.GridTileToLocal(MapData.Grid, grid, playerTile));
 
-            Assert.That(zLevel.TryTraverseAdjacentLevel(player, 1, overrideBoundaryBlock: true), Is.True);
+            Assert.That(zLevel.TryTraverseAdjacentLevel(player, 1), Is.True);
             Assert.That(zLevel.GetZLevel(player), Is.EqualTo(1));
 
-            Assert.That(zLevel.TryTraverseAdjacentLevel(player, -1, overrideBoundaryBlock: true), Is.True);
+            Assert.That(zLevel.TryTraverseAdjacentLevel(player, -1), Is.True);
             Assert.That(zLevel.GetZLevel(player), Is.EqualTo(0));
 
             map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(playerTile.X, playerTile.Y, 1), Tile.Empty);
-            Assert.That(zLevel.TryTraverseAdjacentLevel(player, 1, overrideBoundaryBlock: true), Is.False);
+            Assert.That(zLevel.TryTraverseAdjacentLevel(player, 1), Is.False);
             Assert.That(zLevel.GetZLevel(player), Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    public async Task ZLevelBoundaryChannelsResolveIndependently()
+    {
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var xform = SEntMan.System<SharedTransformSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
+            var tile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
+
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 0), new Tile(1));
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), new Tile(1));
+
+            Assert.That(boundaries.TryGetBoundary(MapData.Grid, grid, tile, 0, 1, out var defaultBoundary), Is.True);
+            Assert.That(defaultBoundary.DefaultOpen, Is.False);
+            Assert.That(defaultBoundary.IsOpen(ZLevelBoundaryChannels.Atmosphere), Is.False);
+
+            var marker = SEntMan.SpawnEntity(null, playerCoords);
+            var component = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(marker);
+            boundaries.SetBoundary(
+                (marker, component),
+                true,
+                1,
+                ZLevelBoundaryChannels.TraversalUp |
+                ZLevelBoundaryChannels.Atmosphere |
+                ZLevelBoundaryChannels.Visibility,
+                ZLevelBoundaryChannels.Visibility);
+            xform.AnchorEntity(marker, SEntMan.GetComponent<TransformComponent>(marker));
+
+            Assert.That(boundaries.TryGetBoundary(MapData.Grid, grid, tile, 0, 1, out var explicitBoundary), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(explicitBoundary.DefaultOpen, Is.False);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Body), Is.False);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.TraversalUp), Is.True);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.TraversalDown), Is.False);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Atmosphere), Is.True);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Visibility), Is.False,
+                    "Forced-closed channels must win over forced-open channels.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelBodyOpeningRemovesTileSupport()
+    {
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var xform = SEntMan.System<SharedTransformSystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            var player = ToServer(Player);
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
+            var tile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
+
+            var position = SEntMan.EnsureComponent<ZLevelPositionComponent>(player);
+            position.ZLevel = 1;
+            position.LocalZOffset = 0f;
+            var kinematics = SEntMan.EnsureComponent<ZLevelKinematicsComponent>(player);
+            kinematics.MaxStepDownDepth = 2;
+            kinematics.VerticalVelocity = 0f;
+
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 0), new Tile(1));
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), new Tile(1));
+
+            var marker = SEntMan.SpawnEntity(null, playerCoords);
+            SEntMan.EnsureComponent<ZLevelPositionComponent>(marker).ZLevel = 1;
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(marker);
+            boundaries.SetBoundary(
+                (marker, boundary),
+                true,
+                -1,
+                ZLevelBoundaryChannels.Body,
+                ZLevelBoundaryChannels.None);
+            xform.AnchorEntity(marker, SEntMan.GetComponent<TransformComponent>(marker));
+
+            Assert.That(zLevel.TryGetSupportTile(player, out var support), Is.True);
+            Assert.That(support.GridIndices.Z, Is.EqualTo(0),
+                "An explicit body opening must make the upper tile non-supporting.");
+        });
+
+        await RunSeconds(1f);
+
+        await Server.WaitAssertion(() =>
+        {
+            var player = ToServer(Player);
+            var position = SEntMan.GetComponent<ZLevelPositionComponent>(player);
+            var kinematics = SEntMan.GetComponent<ZLevelKinematicsComponent>(player);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(position.ZLevel, Is.EqualTo(0));
+                Assert.That(position.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
+                Assert.That(kinematics.Grounded, Is.True);
+            });
         });
     }
 
@@ -136,7 +240,6 @@ public sealed class ZLevelMovementTest : MovementTest
             var traversal = SEntMan.SpawnEntity(null, playerCoords);
             var traversalComp = SEntMan.EnsureComponent<ZLevelTraversalComponent>(traversal);
             traversalComp.ZOffset = 1;
-            traversalComp.OverridesBoundaryBlock = true;
 
             var attempt = new StepTriggerAttemptEvent { Source = traversal, Tripper = player };
             SEntMan.EventBus.RaiseLocalEvent(traversal, ref attempt);
@@ -149,6 +252,16 @@ public sealed class ZLevelMovementTest : MovementTest
             var traversalZ = SEntMan.EnsureComponent<ZLevelPositionComponent>(traversal);
             traversalZ.ZLevel = 1;
             traversalZ.LocalZOffset = 0f;
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(traversal);
+            boundaries.SetBoundary(
+                (traversal, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.Traversal,
+                ZLevelBoundaryChannels.None);
+            SEntMan.System<SharedTransformSystem>()
+                .AnchorEntity(traversal, SEntMan.GetComponent<TransformComponent>(traversal));
 
             attempt = new StepTriggerAttemptEvent { Source = traversal, Tripper = player };
             SEntMan.EventBus.RaiseLocalEvent(traversal, ref attempt);

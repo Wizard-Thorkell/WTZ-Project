@@ -20,13 +20,6 @@ public sealed partial class ZLevelTraversalComponent : Component
     public int ZOffset;
 
     /// <summary>
-    /// If true, the traversal may intentionally bypass the default ceiling block rule.
-    /// Stairs and ladders use this to connect floors that would otherwise be sealed.
-    /// </summary>
-    [DataField]
-    public bool OverridesBoundaryBlock = true;
-
-    /// <summary>
     /// If true, the destination floor must contain direct support at the target z-level.
     /// </summary>
     [DataField]

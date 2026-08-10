@@ -107,7 +107,6 @@ public sealed class ZLevelTraversalSystem : EntitySystem
             !_zLevel.TryTraverseAdjacentLevel(
                 user,
                 ent.Comp.ZOffset,
-                ent.Comp.OverridesBoundaryBlock,
                 ent.Comp.RequireDirectDestinationSupport))
         {
             if (popupOnFailure)

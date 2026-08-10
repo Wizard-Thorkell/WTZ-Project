@@ -77,6 +77,8 @@ Implemented movement and gameplay basics:
 - `SharedZLevelSystem`.
 - Opt-in entities can stand on upper floors.
 - Unsupported entities can fall to lower support layers.
+- Explicit body openings can remove support from an otherwise non-empty floor
+  tile without affecting unrelated boundary channels.
 - Vertical movement updates `PhysicsComponent.BodyStatus`.
 - Collisions between entities on different Z levels are prevented.
 - Tile friction and footstep lookup can use the support floor.
@@ -89,6 +91,9 @@ Implemented traversal and debug tooling:
 - `ZLevelStairsUp`, `ZLevelStairsDown`, and `ZLevelLadder` prototypes.
 - Interaction verbs for using traversal objects.
 - Step-trigger traversal support.
+- Stairs and ladders declare directed traversal channels on the boundary they
+  connect; traversal no longer bypasses ceiling checks through a special
+  boolean parameter.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
@@ -100,6 +105,8 @@ Implemented first-pass atmos:
 - Ceiling tiles above close vertical atmos adjacency.
 - ZLevel tile changes invalidate the changed tile and vertical neighbors.
 - Basic tests cover ceiling invalidation.
+- Explicit atmosphere openings override or reinforce the tile-derived default,
+  and placement/removal invalidates both sides of the boundary.
 
 Implemented first-pass client presentation:
 
@@ -109,6 +116,20 @@ Implemented first-pass client presentation:
 - Lower-floor sprites fade by depth.
 - Client targeting filters same-floor interactions and allows deliberate
   visible cross-floor examine/admin behavior.
+- Cross-floor visibility uses the same explicit boundary resolver as movement
+  and atmosphere.
+
+Implemented vertical boundary foundation:
+
+- `SharedZLevelBoundarySystem` preserves the upper-tile rule as a compatibility
+  default and applies content-driven open/closed overrides.
+- Independent channels exist for body passage, upward/downward traversal,
+  atmosphere, visibility, interaction, sound, and effects.
+- Forced-closed channels deterministically win when providers conflict.
+- Networked `ZLevelBoundaryComponent` providers can be enabled, moved, placed,
+  removed, or reconfigured while emitting boundary invalidation events.
+- Mapper-visible markers cover floor openings, shafts, grate-like boundaries,
+  and explicit seals.
 
 Partially implemented mapping and placement:
 
@@ -133,7 +154,8 @@ Verified recently:
 - Focused Robust lifecycle/PVS run: 12 passed, 0 skipped, 0 failed.
 - Broader Robust chunk, map, serialization, and physics runs: 17 passed,
   0 skipped, 0 failed.
-- Focused Content ZLevel run: 10 passed, 1 skipped, 0 failed.
+- Focused Content ZLevel run after explicit boundaries: 12 passed, 1 skipped,
+  0 failed.
 - The skipped test is an atmos containing-mixture test that needs a dedicated
   upper-floor fixture.
 
@@ -171,8 +193,8 @@ feature phases below remain the backlog and acceptance criteria for each area.
    bundles.
 2. [Done] Stabilize chunk lifecycle and replication, including sparse Z-only
    chunks, full states, delta deletion, and real client/server PVS coverage.
-3. [Next] Replace implicit ceiling behavior with explicit vertical boundaries.
-4. Add active vertical bodies and bounded caches so work scales with relevant
+3. [Done] Replace implicit ceiling behavior with explicit vertical boundaries.
+4. [Next] Add active vertical bodies and bounded caches so work scales with relevant
    entities and known layers.
 5. Integrate renderer and PVS behavior around visible floors and openings.
 6. Stabilize atmosphere on top of the shared boundary model.
@@ -271,17 +293,22 @@ vertical boundary semantics.
 
 Tasks:
 
-- Define a shared vertical boundary API.
-- Add components/prototypes for open floor, hole, shaft, grate, catwalk, ladder
+- [Done] Define a shared vertical boundary API.
+- [Partial] Add components/prototypes for open floor, hole, shaft, grate, catwalk, ladder
   shaft, stairwell, and ramp concepts.
-- Decide which concepts are tile definitions and which are anchored entities.
-- Add a way for traversal content to open or override the boundary between two
+- [Partial] Decide which concepts are tile definitions and which are anchored
+  entities. Explicit providers are anchored entities; final gameplay structures
+  and tile-definition integration remain to be selected per concept.
+- [Done] Add a way for traversal content to open or override the boundary between two
   adjacent floors.
-- Add support for one-way or restricted traversal if needed.
-- Make atmos, visibility, falling, and traversal all use the same boundary
+- [Done] Add support for one-way or restricted traversal through separate
+  upward and downward traversal channels.
+- [Done] Make atmos, visibility, falling, and traversal all use the same boundary
   decision.
-- Add mapper-visible markers for openings.
-- Add tests for each opening type.
+- [Done] Add mapper-visible markers for openings.
+- [Partial] Add tests for each opening type. Channel conflicts, free-fall holes,
+  stairs, and atmosphere lifecycle are covered; final ramp/catwalk gameplay
+  entities still need dedicated tests.
 
 Design notes:
 
@@ -292,11 +319,11 @@ Design notes:
 
 Exit criteria:
 
-- Players can fall through a mapped hole.
-- Atmos can leak through an open shaft.
-- A grate/catwalk can allow visibility or gas based on chosen design rules while
+- [Covered] Players can fall through a mapped hole.
+- [Covered] Atmos can leak through an explicit opening.
+- [Covered at boundary level] A grate/catwalk can allow visibility or gas based on chosen design rules while
   still supporting movement.
-- Stairs/ladders no longer need special hacks for the basic boundary rule.
+- [Covered] Stairs/ladders no longer need special hacks for the basic boundary rule.
 
 ### Phase 3: Interaction And Targeting Polish
 

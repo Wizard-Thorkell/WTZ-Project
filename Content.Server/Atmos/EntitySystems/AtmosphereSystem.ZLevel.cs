@@ -3,6 +3,7 @@
 
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
+using Content.Shared.ZLevel;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
@@ -17,6 +18,14 @@ public sealed partial class AtmosphereSystem
             InvalidateTile((ev.Entity.Owner, CompOrNull<GridAtmosphereComponent>(ev.Entity.Owner)), change.GridIndices);
             InvalidateVerticalNeighbors(ev.Entity.Owner, change.GridIndices);
         }
+    }
+
+    private void OnZLevelBoundaryChanged(ref ZLevelBoundaryChangedEvent ev)
+    {
+        InvalidateTile((ev.Grid.Owner, CompOrNull<GridAtmosphereComponent>(ev.Grid.Owner)),
+            new ZLevelTileIndices(ev.Tile.X, ev.Tile.Y, ev.LowerZ));
+        InvalidateTile((ev.Grid.Owner, CompOrNull<GridAtmosphereComponent>(ev.Grid.Owner)),
+            new ZLevelTileIndices(ev.Tile.X, ev.Tile.Y, ev.LowerZ + 1));
     }
 
     public void InvalidateTile(Entity<GridAtmosphereComponent?> entity, ZLevelTileIndices tile)

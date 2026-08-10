@@ -7,6 +7,9 @@ using Content.Shared.Tests;
 using NUnit.Framework;
 using System.Numerics;
 using Content.Shared.Atmos;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -48,6 +51,32 @@ public sealed class ZLevelAtmosTest : AtmosTest
             Assert.That(lowerTile, Is.Not.Null);
             Assert.That(lowerTile!.AdjacentTileAbove, Is.Null,
                 "Expected the source tile's vertical atmos adjacency to close after adding a ceiling tile above it.");
+
+            var marker = SEntMan.SpawnEntity(null, Xform(source).Coordinates);
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(marker);
+            SEntMan.System<SharedZLevelBoundarySystem>().SetBoundary(
+                (marker, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.Atmosphere,
+                ZLevelBoundaryChannels.None);
+            SEntMan.System<SharedTransformSystem>()
+                .AnchorEntity(marker, SEntMan.GetComponent<TransformComponent>(marker));
+
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            lowerTile = SAtmos.GetZLevelTileAtmosphere(RelevantAtmos, sourceZTile);
+            Assert.That(lowerTile, Is.Not.Null);
+            Assert.That(lowerTile!.AdjacentTileAbove, Is.Not.Null,
+                "Expected an explicit atmosphere opening to override the ceiling tile.");
+
+            SEntMan.DeleteEntity(marker);
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            lowerTile = SAtmos.GetZLevelTileAtmosphere(RelevantAtmos, sourceZTile);
+            Assert.That(lowerTile, Is.Not.Null);
+            Assert.That(lowerTile!.AdjacentTileAbove, Is.Null,
+                "Expected removing the explicit opening to restore the closed ceiling boundary.");
         });
     }
 

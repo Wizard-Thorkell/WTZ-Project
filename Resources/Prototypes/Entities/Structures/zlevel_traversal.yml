@@ -27,6 +27,14 @@
         hard: false
   - type: ZLevelTraversal
     zOffset: 1
+  - type: ZLevelBoundary
+    boundaryOffset: 1
+    opens:
+    - TraversalUp
+    - TraversalDown
+    - Atmosphere
+    - Visibility
+    - Sound
 
 - type: entity
   id: ZLevelStairsDown
@@ -57,6 +65,14 @@
         hard: false
   - type: ZLevelTraversal
     zOffset: -1
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    opens:
+    - TraversalUp
+    - TraversalDown
+    - Atmosphere
+    - Visibility
+    - Sound
 
 - type: entity
   id: ZLevelLadder
@@ -87,3 +103,11 @@
         hard: false
   - type: ZLevelTraversal
     zOffset: 1
+  - type: ZLevelBoundary
+    boundaryOffset: 1
+    opens:
+    - TraversalUp
+    - TraversalDown
+    - Atmosphere
+    - Visibility
+    - Sound

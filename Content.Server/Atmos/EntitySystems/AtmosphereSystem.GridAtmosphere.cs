@@ -1,6 +1,7 @@
 using Content.Server.Atmos.Components;
 using Content.Server.Atmos.Reactions;
 using Content.Shared.Atmos;
+using Content.Shared.ZLevel;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.Reactions;
 using Robust.Shared.Map;
@@ -232,19 +233,25 @@ public sealed partial class AtmosphereSystem
             return;
 
         var tileIndices = new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel);
-        foreach (var adjacency in _mapSystem.GetZLevelAdjacencies(uid, ent.Comp3, tileIndices))
+        for (var zOffset = 1; zOffset >= -1; zOffset -= 2)
         {
-            if (!adjacency.IsOpen)
+            var target = new ZLevelTileIndices(tileIndices.X, tileIndices.Y, tileIndices.Z + zOffset);
+            if (!_zLevelBoundaries.IsOpen(
+                    uid,
+                    ent.Comp3,
+                    tile.GridIndices,
+                    tileIndices.Z,
+                    target.Z,
+                    ZLevelBoundaryChannels.Atmosphere))
+            {
                 continue;
+            }
 
-            if (adjacency.Direction is not (ZLevelAdjacencyDirection.Up or ZLevelAdjacencyDirection.Down))
-                continue;
-
-            var adjacent = GetOrNewTile(uid, atmos, adjacency.Target);
+            var adjacent = GetOrNewTile(uid, atmos, target);
             if (activate)
                 AddActiveTile(atmos, adjacent);
 
-            if (adjacency.Direction == ZLevelAdjacencyDirection.Up)
+            if (zOffset > 0)
             {
                 tile.AdjacentToAbove = true;
                 tile.AdjacentTileAbove = adjacent;

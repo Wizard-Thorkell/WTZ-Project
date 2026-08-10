@@ -7,7 +7,9 @@ using System.Numerics;
 using Content.Client.Clickable;
 using Content.Client.Sprite;
 using Content.Shared.Input;
+using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Client.ComponentTrees;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
@@ -39,6 +41,7 @@ public sealed class ZLevelTargetingSystem : EntitySystem
     [Dependency] private readonly IPlayerManager _playerManager = default!;
     [Dependency] private readonly ClickableSystem _clickable = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly SpriteTreeSystem _spriteTree = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
 
@@ -183,7 +186,13 @@ public sealed class ZLevelTargetingSystem : EntitySystem
 
         var entityZ = _transform.GetZLevel((entity, xform, CompOrNull<ZLevelPositionComponent>(entity)));
         var xy = _map.TileIndicesFor(gridUid, grid, mapCoords);
-        return _map.IsZLevelStackOpen(gridUid, grid, xy, viewerZ, entityZ);
+        return _boundaries.IsStackOpen(
+            gridUid,
+            grid,
+            xy,
+            viewerZ,
+            entityZ,
+            ZLevelBoundaryChannels.Visibility);
     }
 
     private ViewerContext GetViewerContext()

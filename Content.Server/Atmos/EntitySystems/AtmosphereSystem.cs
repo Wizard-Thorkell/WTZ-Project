@@ -10,6 +10,8 @@ using Content.Shared.Damage.Systems;
 using Content.Shared.Decals;
 using Content.Shared.Doors.Components;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
 using Robust.Server.GameObjects;
 using Robust.Shared.Audio.Systems;
@@ -37,6 +39,7 @@ public sealed partial class AtmosphereSystem : SharedAtmosphereSystem
     [Dependency] private readonly GasTileOverlaySystem _gasTileOverlaySystem = default!;
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
+    [Dependency] private readonly SharedZLevelBoundarySystem _zLevelBoundaries = default!;
     [Dependency] private readonly TileSystem _tile = default!;
     [Dependency] private readonly MapSystem _map = default!;
     [Dependency] public readonly PuddleSystem Puddle = default!;
@@ -72,6 +75,7 @@ public sealed partial class AtmosphereSystem : SharedAtmosphereSystem
 
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
+        SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnZLevelBoundaryChanged);
         SubscribeLocalEvent<PrototypesReloadedEventArgs>(OnPrototypesReloaded);
 
         CacheDecals();
