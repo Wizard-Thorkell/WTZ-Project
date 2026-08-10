@@ -113,21 +113,17 @@ public sealed class PlaceableSurfaceSystem : EntitySystem
 
         foreach (var entity in args.DumpQueue)
         {
-            StampEntityToSurfaceZLevel(entity, ent);
             _transformSystem.SetWorldPositionRotation(entity, targetPos + _random.NextVector2Box() / 4, targetRot);
+            StampEntityToSurfaceZLevel(entity, ent);
         }
     }
 
     private void StampEntityToSurfaceZLevel(EntityUid entity, EntityUid surface)
     {
-        var zLevel = _transformSystem.GetZLevel((surface, Transform(surface), CompOrNull<ZLevelPositionComponent>(surface)));
-
-        if (zLevel == 0)
-        {
-            _zLevelSystem.ClearZLevelPosition(entity);
-            return;
-        }
-
-        _zLevelSystem.SetZLevelPosition(entity, zLevel);
+        var worldZLevel = _transformSystem.GetWorldZLevel((
+            surface,
+            Transform(surface),
+            CompOrNull<ZLevelPositionComponent>(surface)));
+        _zLevelSystem.StampWorldZLevelPosition(entity, worldZLevel);
     }
 }

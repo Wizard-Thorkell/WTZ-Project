@@ -254,6 +254,26 @@ public sealed class SharedZLevelSystem : VirtualController
     }
 
     /// <summary>
+    /// Stamps a world-space Z position onto an entity using its current grid's local frame.
+    /// Local layer zero without an offset keeps the canonical component-free representation.
+    /// </summary>
+    public bool StampWorldZLevelPosition(EntityUid uid, int worldZLevel, float localOffset = 0f)
+    {
+        if (!_transformQuery.TryComp(uid, out var transform))
+            return false;
+
+        var localZLevel = worldZLevel - _transform.GetZLevelFrameOrigin((uid, transform));
+
+        if (localZLevel == 0 && localOffset == 0f)
+        {
+            ClearZLevelPosition(uid);
+            return true;
+        }
+
+        return SetZLevelPosition(uid, localZLevel, localOffset);
+    }
+
+    /// <summary>
     /// Removes explicit vertical state and reports any resulting inherited-level change.
     /// </summary>
     public bool ClearZLevelPosition(EntityUid uid)

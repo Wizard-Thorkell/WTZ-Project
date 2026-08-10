@@ -155,18 +155,22 @@ public abstract partial class SharedHandsSystem
 
         // drop the item with heavy calculations from their hands and place it at the calculated interaction range position
         // The DoDrop is handle if there's no drop target
+        var dropWorldZLevel = TransformSystem.GetWorldZLevel((
+            ent.Owner,
+            userXform,
+            CompOrNull<ZLevelPositionComponent>(ent.Owner)));
         DoDrop(ent, handId, doDropInteraction: doDropInteraction);
-        StampEntityToWorldZLevel(entity.Value, GetWorldZLevel(ent));
 
-        // if there's no drop location stop here
-        if (targetDropLocation == null)
-            return true;
+        if (targetDropLocation != null)
+        {
+            // Move first so world Z is converted against the grid that actually receives the item.
+            var (itemPos, itemRot) = TransformSystem.GetWorldPositionRotation(entity.Value);
+            var origin = new MapCoordinates(itemPos, itemXform.MapID);
+            var target = TransformSystem.ToMapCoordinates(targetDropLocation.Value);
+            TransformSystem.SetWorldPositionRotation(entity.Value, GetFinalDropCoordinates(ent, origin, target, entity.Value), itemRot);
+        }
 
-        // otherwise, also move dropped item and rotate it properly according to grid/map
-        var (itemPos, itemRot) = TransformSystem.GetWorldPositionRotation(entity.Value);
-        var origin = new MapCoordinates(itemPos, itemXform.MapID);
-        var target = TransformSystem.ToMapCoordinates(targetDropLocation.Value);
-        TransformSystem.SetWorldPositionRotation(entity.Value, GetFinalDropCoordinates(ent, origin, target, entity.Value), itemRot);
+        _zLevelSystem.StampWorldZLevelPosition(entity.Value, dropWorldZLevel);
         return true;
     }
 
@@ -255,19 +259,4 @@ public abstract partial class SharedHandsSystem
             RaiseLocalEvent(entity.Value, new HandDeselectedEvent(ent));
     }
 
-    private int GetWorldZLevel(EntityUid uid)
-    {
-        return TransformSystem.GetZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
-    }
-
-    private void StampEntityToWorldZLevel(EntityUid uid, int zLevel)
-    {
-        if (zLevel == 0)
-        {
-            _zLevelSystem.ClearZLevelPosition(uid);
-            return;
-        }
-
-        _zLevelSystem.SetZLevelPosition(uid, zLevel);
-    }
 }

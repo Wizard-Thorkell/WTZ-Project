@@ -6,6 +6,7 @@ using Content.Shared.Gravity;
 using Content.Shared.Hands.Components;
 using Content.Shared.Hands.EntitySystems;
 using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.GameObjects;
 using Robust.Server.Player;
 using Robust.Shared.Containers;
@@ -141,7 +142,7 @@ public sealed class HandTests : GameTest
     }
 
     [Test]
-    public async Task TestPickupDropPreservesUpperFloorZLevel()
+    public async Task TestPickupDropPreservesUpperFloorZLevelOnDisplacedFrame()
     {
         var pair = Pair;
         var server = pair.Server;
@@ -151,6 +152,7 @@ public sealed class HandTests : GameTest
         var mapSystem = server.System<SharedMapSystem>();
         var sys = entMan.System<SharedHandsSystem>();
         var tSys = entMan.System<TransformSystem>();
+        var zSys = entMan.System<SharedZLevelSystem>();
 
         var data = await pair.CreateTestMap();
         await pair.RunTicksSync(5);
@@ -158,18 +160,28 @@ public sealed class HandTests : GameTest
         EntityUid item = default;
         EntityUid player = default;
         HandsComponent hands = default!;
+        EntityCoordinates originalPlayerCoordinates = default;
+        var playerHadZPosition = false;
+        var originalPlayerZLevel = 0;
+        var originalPlayerZOffset = 0f;
         await server.WaitPost(() =>
         {
             player = playerMan.Sessions.First().AttachedEntity!.Value;
-            var xform = entMan.GetComponent<TransformComponent>(player);
-            var playerZ = entMan.EnsureComponent<ZLevelPositionComponent>(player);
-            playerZ.ZLevel = 1;
-            playerZ.LocalZOffset = 0f;
+            originalPlayerCoordinates = entMan.GetComponent<TransformComponent>(player).Coordinates;
+            if (entMan.TryGetComponent<ZLevelPositionComponent>(player, out var originalPlayerZ))
+            {
+                playerHadZPosition = true;
+                originalPlayerZLevel = originalPlayerZ.ZLevel;
+                originalPlayerZOffset = originalPlayerZ.LocalZOffset;
+            }
 
+            tSys.SetCoordinates(player, data.GridCoords);
+            Assert.That(tSys.SetZLevelFrameOrigin(data.Grid, 5), Is.True);
+            Assert.That(zSys.SetZLevelPosition(player, 1), Is.True);
+
+            var xform = entMan.GetComponent<TransformComponent>(player);
             item = entMan.SpawnEntity("Crowbar", tSys.GetMapCoordinates(player, xform: xform));
-            var itemZ = entMan.EnsureComponent<ZLevelPositionComponent>(item);
-            itemZ.ZLevel = 1;
-            itemZ.LocalZOffset = 0f;
+            Assert.That(zSys.SetZLevelPosition(item, 1), Is.True);
 
             hands = entMan.GetComponent<HandsComponent>(player);
             sys.TryPickup(player, item, hands.ActiveHandId!);
@@ -191,9 +203,19 @@ public sealed class HandTests : GameTest
             Assert.That(sys.GetActiveItem((player, hands)), Is.Null);
             Assert.That(droppedZ.ZLevel, Is.EqualTo(1));
             Assert.That(droppedZ.LocalZOffset, Is.EqualTo(0f));
+            Assert.That(tSys.GetWorldZLevel((item, entMan.GetComponent<TransformComponent>(item), droppedZ)), Is.EqualTo(6));
         });
 
-        await server.WaitPost(() => mapSystem.DeleteMap(data.MapId));
+        await server.WaitPost(() =>
+        {
+            tSys.SetCoordinates(player, originalPlayerCoordinates);
+            if (playerHadZPosition)
+                zSys.SetZLevelPosition(player, originalPlayerZLevel, originalPlayerZOffset);
+            else
+                zSys.ClearZLevelPosition(player);
+
+            mapSystem.DeleteMap(data.MapId);
+        });
     }
 
     [Test]

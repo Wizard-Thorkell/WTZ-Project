@@ -26,7 +26,7 @@ namespace Content.Shared.Construction.Conditions
                 !entityManager.TrySystem<SharedZLevelSystem>(out var zLevelSystem))
                 return false;
 
-            if (!turfSystem.TryGetZLevelTileRef(location, zLevelSystem.GetZLevel(user), out var tileFound))
+            if (!turfSystem.TryGetZLevelTileRefAtWorldZ(location, zLevelSystem.GetWorldZLevel(user), out var tileFound))
                 return false;
 
             var tile = turfSystem.GetContentTileDefinition(tileFound);

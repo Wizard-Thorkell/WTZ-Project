@@ -315,7 +315,9 @@ public sealed partial class AnchorableSystem : EntitySystem
             return false;
 
         var tileIndices = _map.TileIndicesFor((gridUid.Value, grid), coordinates);
-        var zLevel = entity.IsValid() ? _zLevel.GetZLevel(entity) : 0;
+        var zLevel = entity.IsValid()
+            ? _transformSystem.WorldToLocalZLevel(gridUid.Value, _zLevel.GetWorldZLevel(entity))
+            : 0;
         return TileFree((gridUid.Value, grid), tileIndices, anchorBody.CollisionLayer, anchorBody.CollisionMask, zLevel);
     }
 
@@ -379,7 +381,9 @@ public sealed partial class AnchorableSystem : EntitySystem
             return false;
 
         var tile = _map.LocalToTile(gridUid.Value, grid, location);
-        var zLevel = source is { } uid ? _zLevel.GetZLevel(uid) : 0;
+        var zLevel = source is { } uid
+            ? _transformSystem.WorldToLocalZLevel(gridUid.Value, _zLevel.GetWorldZLevel(uid))
+            : 0;
         foreach (var entity in _zLevel.GetAnchoredEntitiesOnZLevel(gridUid.Value, grid, tile, zLevel))
         {
             // If we find another unstackable here, return true.

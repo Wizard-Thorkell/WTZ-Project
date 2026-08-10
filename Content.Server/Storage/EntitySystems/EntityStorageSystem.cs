@@ -80,7 +80,8 @@ public sealed class EntityStorageSystem : SharedEntityStorageSystem
         if (_map.TryFindGridAt(targetCoordinates, out var gridId, out var grid))
         {
             var indices = _mapSystem.TileIndicesFor(gridId, grid, targetCoordinates);
-            var zLevel = TransformSystem.GetZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
+            var worldZLevel = TransformSystem.GetWorldZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
+            var zLevel = TransformSystem.WorldToLocalZLevel(gridId, worldZLevel);
             return (gridId, new ZLevelTileIndices(indices.X, indices.Y, zLevel));
         }
 

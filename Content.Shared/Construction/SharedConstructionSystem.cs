@@ -27,7 +27,9 @@ namespace Content.Shared.Construction
                 return null;
 
             var tile = _map.TileIndicesFor(gridUid, grid, coords);
-            var zLevel = source is { } uid ? _zLevel.GetZLevel(uid) : 0;
+            var zLevel = source is { } uid
+                ? TransformSystem.WorldToLocalZLevel(gridUid, _zLevel.GetWorldZLevel(uid))
+                : 0;
             var ignored = _zLevel.GetAnchoredEntitiesOnZLevel(gridUid, grid, tile, zLevel).ToHashSet();
             return e => ignored.Contains(e);
         }

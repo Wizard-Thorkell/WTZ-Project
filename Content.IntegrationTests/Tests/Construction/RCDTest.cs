@@ -1,13 +1,17 @@
 using System.Numerics;
 using Content.IntegrationTests.Tests.Interaction;
 using Content.Shared.Charges.Systems;
+using Content.Shared.Interaction;
 using Content.Shared.Maps;
+using Content.Shared.Physics;
 using Content.Shared.RCD;
 using Content.Shared.RCD.Components;
+using Content.Shared.RCD.Systems;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
+using Robust.Shared.Maths;
 using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.Construction;
@@ -97,6 +101,95 @@ public sealed class RCDTest : InteractionTest
                 Assert.That(((ContentTileDefinition) TileMan[upper.Tile.TypeId]).ID, Is.EqualTo(floorSetting.Prototype));
                 Assert.That(map.GetTileRef(MapData.Grid, grid, floorIndices).Tile, Is.EqualTo(lowerFloor));
             });
+        });
+    }
+
+    [Test]
+    public async Task RCDValidationUsesWorldZLevelAcrossGridFrames()
+    {
+        var map = SEntMan.System<SharedMapSystem>();
+        var zLevel = SEntMan.System<SharedZLevelSystem>();
+        var rcdSystem = SEntMan.System<RCDSystem>();
+        var charges = SEntMan.System<SharedChargesSystem>();
+        var plating = (ContentTileDefinition) TileMan[PlatingRCD];
+        var rcd = await PlaceInHands(RCDProtoId);
+        Entity<MapGridComponent> targetGrid = default;
+        ZLevelTileRef targetTile = default;
+
+        await Server.WaitPost(() =>
+        {
+            var playerTransform = SEntMan.GetComponent<TransformComponent>(SPlayer);
+            var playerGrid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerIndices = map.TileIndicesFor(MapData.Grid, playerGrid, playerTransform.Coordinates);
+
+            Assert.That(Transform.SetZLevelFrameOrigin(MapData.Grid, 5), Is.True);
+            Assert.That(zLevel.SetZLevelPosition(SPlayer, 1), Is.True);
+            map.SetZLevelTile(
+                MapData.Grid,
+                playerGrid,
+                new ZLevelTileIndices(playerIndices.X, playerIndices.Y, 1),
+                new Tile(plating.TileId));
+
+            targetGrid = MapMan.CreateGridEntity(MapId);
+            var targetTileOffset = map.GridTileToWorld(targetGrid, targetGrid.Comp, Vector2i.Zero).Position;
+            Transform.SetWorldPosition(targetGrid, Transform.GetWorldPosition(SPlayer) - targetTileOffset);
+            Assert.That(Transform.SetZLevelFrameOrigin(targetGrid, 4), Is.True);
+            var targetIndices = new ZLevelTileIndices(0, 0, 2);
+            map.SetZLevelTile(targetGrid, targetGrid.Comp, targetIndices, new Tile(plating.TileId));
+            targetTile = map.GetZLevelTileRef(targetGrid, targetGrid.Comp, targetIndices);
+
+            charges.SetMaxCharges(ToServer(rcd), 1000);
+            charges.SetCharges(ToServer(rcd), 1000);
+        });
+
+        await SetRcdProto(rcd, RCDSettingDeconstruct);
+
+        await Server.WaitAssertion(() =>
+        {
+            var rcdUid = ToServer(rcd);
+            var component = SEntMan.GetComponent<RCDComponent>(rcdUid);
+            var turf = SEntMan.System<TurfSystem>();
+            var targetWorldZ = Transform.LocalToWorldZLevel(targetGrid, targetTile.GridIndices.Z);
+            SharedInteractionSystem.Ignored otherFloor = entity => !zLevel.IsOnWorldZLevel(entity, targetWorldZ);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(component.ProtoId, Is.EqualTo(RCDSettingDeconstruct));
+                Assert.That(charges.GetCurrentCharges(rcdUid), Is.GreaterThan(0));
+                Assert.That(zLevel.GetWorldZLevel(SPlayer), Is.EqualTo(6));
+                Assert.That(targetWorldZ, Is.EqualTo(6));
+                Assert.That(targetTile.Tile.IsEmpty, Is.False);
+                Assert.That(turf.GetContentTileDefinition(targetTile).Indestructible, Is.False);
+                Assert.That(turf.IsTileBlocked(targetTile, CollisionGroup.MobMask), Is.False);
+                Assert.That(InteractSys.InRangeUnobstructed(
+                    SPlayer,
+                    map.GridTileToWorld(targetGrid, targetGrid.Comp, Vector2i.Zero),
+                    predicate: otherFloor,
+                    popup: false), Is.True);
+            });
+
+            Assert.That(rcdSystem.IsRCDOperationStillValid(
+                rcdUid,
+                component,
+                targetGrid,
+                targetGrid.Comp,
+                targetTile,
+                Vector2i.Zero,
+                null,
+                SPlayer,
+                false), Is.True);
+
+            Assert.That(Transform.SetZLevelFrameOrigin(targetGrid, 3), Is.True);
+            Assert.That(rcdSystem.IsRCDOperationStillValid(
+                rcdUid,
+                component,
+                targetGrid,
+                targetGrid.Comp,
+                targetTile,
+                Vector2i.Zero,
+                null,
+                SPlayer,
+                false), Is.False);
         });
     }
 

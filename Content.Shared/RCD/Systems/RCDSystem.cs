@@ -134,7 +134,7 @@ public sealed class RCDSystem : EntitySystem
         var user = args.User;
         var location = args.ClickLocation;
         var prototype = _protoManager.Index(component.ProtoId);
-        var zLevel = _zLevel.GetZLevel(user);
+        var worldZLevel = _zLevel.GetWorldZLevel(user);
 
         // Initial validity checks
         if (!location.IsValid(EntityManager))
@@ -153,6 +153,7 @@ public sealed class RCDSystem : EntitySystem
             _popup.PopupClient(Loc.GetString("rcd-component-no-valid-grid"), uid, user);
             return;
         }
+        var zLevel = _transform.WorldToLocalZLevel(gridUid.Value, worldZLevel);
         var position = _mapSystem.TileIndicesFor(gridUid.Value, mapGrid, location);
         var tile = _mapSystem.GetZLevelTileRef(
             gridUid.Value,
@@ -219,7 +220,7 @@ public sealed class RCDSystem : EntitySystem
 
         // Try to start the do after
         var effect = Spawn(effectPrototype, _turf.GetTileCenter(tile));
-        _zLevel.SetZLevelPosition(effect, zLevel);
+        _zLevel.StampWorldZLevelPosition(effect, worldZLevel);
         var ev = new RCDDoAfterEvent(
             GetNetCoordinates(location),
             GetNetEntity(gridUid.Value),
@@ -370,14 +371,15 @@ public sealed class RCDSystem : EntitySystem
         }
 
         var zLevel = tile.GridIndices.Z;
-        if (_zLevel.GetZLevel(user) != zLevel ||
-            target is { } targetUid && _zLevel.GetZLevel(targetUid) != zLevel)
+        var worldZLevel = _transform.LocalToWorldZLevel(gridUid, zLevel);
+        if (!_zLevel.IsOnWorldZLevel(user, worldZLevel) ||
+            target is { } targetUid && !_zLevel.IsOnWorldZLevel(targetUid, worldZLevel))
         {
             return false;
         }
 
         // Exit if the target / target location is obstructed.
-        SharedInteractionSystem.Ignored otherFloor = entity => _zLevel.GetZLevel(entity) != zLevel;
+        SharedInteractionSystem.Ignored otherFloor = entity => !_zLevel.IsOnWorldZLevel(entity, worldZLevel);
         var unobstructed = (target == null)
             ? _interaction.InRangeUnobstructed(
                 user,

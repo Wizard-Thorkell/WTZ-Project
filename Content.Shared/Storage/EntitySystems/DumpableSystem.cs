@@ -4,6 +4,7 @@ using Content.Shared.Interaction;
 using Content.Shared.Item;
 using Content.Shared.Storage.Components;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Prototypes;
@@ -19,6 +20,7 @@ public sealed class DumpableSystem : EntitySystem
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly SharedDoAfterSystem _doAfterSystem = default!;
     [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     [Dependency] private readonly EntityQuery<ItemComponent> _itemQuery = default!;
 
@@ -138,11 +140,13 @@ public sealed class DumpableSystem : EntitySystem
         if (!evt.Handled)
         {
             var targetPos = _transformSystem.GetWorldPosition(uid);
+            var worldZLevel = _zLevel.GetWorldZLevel(uid);
 
             foreach (var entity in dumpQueue)
             {
                 var transform = Transform(entity);
                 _transformSystem.SetWorldPositionRotation(entity, targetPos + _random.NextVector2Box() / 4, _random.NextAngle(), transform);
+                _zLevel.StampWorldZLevelPosition(entity, worldZLevel);
             }
 
             return;

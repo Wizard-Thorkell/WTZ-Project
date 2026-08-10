@@ -40,7 +40,8 @@ public sealed partial class CableSystem
 
         var gridUid = _transform.GetGrid(args.ClickLocation)!.Value;
         var snapPos = _map.TileIndicesFor((gridUid, grid), args.ClickLocation);
-        var zLevel = _zLevel.GetZLevel(args.User);
+        var worldZLevel = _zLevel.GetWorldZLevel(args.User);
+        var zLevel = _transform.WorldToLocalZLevel(gridUid, worldZLevel);
         var zTile = _map.GetZLevelTileRef(gridUid, grid, new ZLevelTileIndices(snapPos.X, snapPos.Y, zLevel));
         var tileDef = (ContentTileDefinition)_tileManager[zTile.Tile.TypeId];
 
@@ -61,8 +62,7 @@ public sealed partial class CableSystem
             return;
 
         var newCable = Spawn(component.CablePrototypeId, _map.GridTileToLocal(gridUid, grid, snapPos));
-        if (zLevel != 0)
-            _zLevel.SetZLevelPosition(newCable, zLevel);
+        _zLevel.StampWorldZLevelPosition(newCable, worldZLevel);
 
         _adminLogger.Add(LogType.Construction, LogImpact.Low,
             $"{ToPrettyString(args.User):player} placed {ToPrettyString(newCable):cable} at {Transform(newCable).Coordinates}");

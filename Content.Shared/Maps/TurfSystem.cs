@@ -82,6 +82,28 @@ public sealed class TurfSystem : EntitySystem
     }
 
     /// <summary>
+    /// Attempts to get the tile at a world-space Z layer, converting it into the selected grid's local frame.
+    /// </summary>
+    public bool TryGetZLevelTileRefAtWorldZ(EntityCoordinates coordinates, int worldZLevel, out ZLevelTileRef tile)
+    {
+        tile = ZLevelTileRef.Zero;
+        if (!coordinates.IsValid(EntityManager))
+            return false;
+
+        var mapCoordinates = _transform.ToMapCoordinates(coordinates);
+        if (!_mapManager.TryFindGridAt(mapCoordinates, out var gridUid, out var grid))
+            return false;
+
+        var indices = _mapSystem.TileIndicesFor(gridUid, grid, coordinates);
+        var localZLevel = _transform.WorldToLocalZLevel(gridUid, worldZLevel);
+        tile = _mapSystem.GetZLevelTileRef(
+            gridUid,
+            grid,
+            new ZLevelTileIndices(indices.X, indices.Y, localZLevel));
+        return true;
+    }
+
+    /// <summary>
     ///     Returns true if a given tile is blocked by physics-enabled entities.
     /// </summary>
     public bool IsTileBlocked(TileRef turf, CollisionGroup mask, float minIntersectionArea = 0.1f)

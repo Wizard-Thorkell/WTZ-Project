@@ -85,8 +85,10 @@ Implemented movement and gameplay basics:
 - Vertical movement updates `PhysicsComponent.BodyStatus`.
 - Collisions between entities on different Z levels are prevented.
 - Tile friction and footstep lookup can use the support floor.
-- Pickup/drop logic clears held Z state and restores world Z state on drop.
-- Placeable surfaces stamp dropped objects to the surface floor.
+- Pickup/drop logic clears held Z state and restores world Z state on drop,
+  including transfers onto grids with displaced vertical frame origins.
+- Placeable surfaces and storage dumps preserve world Z while converting to the
+  destination grid's local frame.
 
 Implemented traversal and debug tooling:
 
@@ -201,6 +203,10 @@ Implemented moving-grid frame foundation:
 - Changing a frame regenerates physics contacts and replicates to clients.
 - Mapping and placement keep their active floor local to the selected grid,
   converting only at the map-coordinate boundary.
+- Shared world-Z stamping converts construction results, cable placement,
+  generic storage/entity-storage dumps, surface drops, and hand drops into the
+  destination grid's local frame. Newly created floor grids inherit the actor's
+  world-Z frame.
 
 Implemented sparse structural stability and collapse:
 
@@ -247,33 +253,35 @@ Partially implemented mapping and placement:
   `zcopytiles <gridUid> <x1> <y1> <x2> <y2> <sourceZ> <targetZ> [includeEmpty]`
   and `zcleartiles <gridUid> <x1> <y1> <x2> <y2> <z>`.
 
-Verified recently:
+Final verification on 2026-08-10:
 
 - Full `SpaceStation14.slnx` build: 0 errors.
-- Robust ZLevel map suite after sparse atmosphere enumeration support: 12
-  passed, 0 skipped, 0 failed.
-- Content ZLevel atmosphere suite: 7 passed, 0 skipped, 0 failed.
-- The former containing-mixture test is enabled and covers direct and inherited
-  upper-floor positions.
-- Combined Content ZLevel and hands regression: 24 passed, 0 skipped, 0 failed.
-- Full `SpaceStation14.slnx` build after atmosphere integration: 0 errors.
-- Moving-grid frame and coordinate suite: 5 shared integration tests passed.
-- Robust map lifecycle, coordinate, and replication suite: 13 tests passed.
-- Frame-aware FTL docking and displaced-origin PVS integration: 2 tests
-  passed.
-- `Content.Shared`, `Content.Server`, and `Content.Client` builds after frame
-  integration: 0 errors.
-- Pure structural solver suite: 2 passed, 0 skipped, 0 failed.
-- Structural integration flow: core propagation, vertical support, delayed
-  collapse cancellation, support removal, local-Z support reindexing, anchored
-  wall destruction, and turf collapse passed end to end.
-- `Content.Server` and `Content.Client` builds after structural diagnostics: 0
-  errors.
+- 55 focused tests passed across Robust shared/server integration, Content unit,
+  and Content integration suites.
+- Robust shared integration: 8 passed for coordinate serialization, tile-index
+  serialization, cross-floor collision isolation, and displaced frame origins.
+- Robust server integration: 13 passed for sparse map lifecycle, replication,
+  full states, deletion, and recreation.
+- Content unit: 2 structural solver tests passed.
+- Content integration: 32 passed for movement, atmosphere, construction, power,
+  hands, RCD, PVS, docking, and structural collapse.
+- The displaced-frame regressions prove that pickup/drop and RCD validation use
+  world Z across grids with different local origins.
+- Structural integration covers core propagation, vertical support, delayed
+  collapse cancellation, support removal, local-Z reindexing, wall destruction,
+  and turf collapse end to end.
+- The solution still reports existing package-audit warnings in the legacy
+  `Pow3r` projects for obsolete .NET Core 1.0 packages; this roadmap introduced
+  no new build errors or package dependencies.
 
 ## Reference Architecture Comparison
 
 Crystal Edge and Monolith remain valuable reference implementations, but their
 core world model differs from this prototype.
+
+GitHub marked Crystal Edge read-only and archived when this audit was performed,
+so it should be treated as a strong frozen reference rather than an upstream to
+follow mechanically.
 
 - [Crystal Edge's viewport integration](https://github.com/crystallpunk-14/crystall-edge/blob/master/Content.Client/_CE/ZLevels/Core/ScalingViewport.CEZLevels.cs)
   renders a network of separate maps through repeated viewport passes and
@@ -324,6 +332,24 @@ Monolith's transit and frame concepts are the main reference for the moving
 ship/planet stage. Clouds, painter-style depth cues, and cutaways remain useful
 visual references after core lighting behavior is floor-aware.
 
+### Final Audit Verdict
+
+| Capability | DragonStation | Crystal Edge | Monolith | Verdict |
+| --- | --- | --- | --- | --- |
+| World model | Sparse native layers per grid | Linked maps per floor | Linked maps plus transit maps | DragonStation has the smaller, more native state model. |
+| Replication and PVS | Sparse chunks and per-session normal-PVS exclusions | Linked-map overrides | Global linked-map override | DragonStation has the clearest isolation and lifecycle contract. |
+| Moving ships and planets | Explicit world/local Z frame origins and frame-aware docking | Map-network controllers | Mature transit, planet, pilot, and gravity product layer | DragonStation has the stronger coordinate primitive; Monolith has broader product behavior. |
+| Atmosphere and construction | Native sparse cells, boundaries, tools, cables, and power isolation | Broad gameplay integration on linked maps | Partial CE port | DragonStation is ahead in engine-level integration. |
+| Structural collapse | Sparse `(x, y, z)` solver, revisions, stale-job rejection, delayed collapse | Mature time-sliced solver and richer presentation | Not present at the inspected commit | DragonStation is stronger in concurrency safety; Crystal Edge is stronger in presentation. |
+| Vertical gameplay | Basic traversal, falling, placement, and construction | Mature flight, climbing, roofs, throwing, and weather | CE-derived plus space-oriented systems | Crystal Edge remains the strongest gameplay reference. |
+| Rendering | One native viewport with floor filtering | Repeated viewport passes | Repeated passes, depth scaling, and clouds | DragonStation is cheaper architecturally; Monolith is visually richer today. |
+
+The project is no longer just a prototype patch. Its engine, replication,
+coordinate-frame, atmosphere, construction, PVS, and structural contracts form
+a coherent foundation. The next quality gains should come from closing the
+remaining interaction and presentation contracts, not replacing the world
+model.
+
 ## Known Gaps
 
 Major unfinished areas:
@@ -347,6 +373,10 @@ Major unfinished areas:
 - Projectiles, hitscan, explosions, fire, heat, and area effects are not
   consistently Z-aware.
 - Click priority and interaction semantics need more coverage.
+- Grid lookup still begins from a 2D `MapCoordinates` selection in several
+  engine APIs. Once a destination grid is known, callers now convert world Z to
+  that grid's local frame correctly, but physically overlapping grids at the
+  same XY need an explicit world-Z-aware grid-selection contract.
 - Wall/cutaway rendering is prototype quality.
 - Special vertical structures are missing: holes, shafts, open floor tiles,
   catwalks, grates, ramps, elevators, and climbable structures beyond simple
@@ -388,7 +418,7 @@ feature phases below remain the backlog and acceptance criteria for each area.
    integrate it with FTL docking, physics, renderer, PVS, and map coordinates.
 9. [Done] Add structural support and collapse as a late-stage consumer of the
    mature vertical model.
-10. [In progress] Run the final cross-stage audit, full affected test matrix, and
+10. [Done] Run the final cross-stage audit, full affected test matrix, and
     produce the implementation/comparison handoff.
 
 Each completed stage should leave a focused commit, regression tests, and an
@@ -615,8 +645,9 @@ Tasks:
   when an entity's effective Z changes.
 - [Done] Preserve independent tile replacement history for sparse upper floors,
   including network and map-data serialization of three-dimensional indices.
-- Add Z-aware checks to storage dumps, placeable surfaces, and thrown/landed
-  items.
+- [Done for generic storage, entity storage, and placeable surfaces] Preserve
+  world Z while converting drops into the destination grid's local frame.
+  Specialized ejectors and thrown/landed entities still need dedicated audits.
 - Decide how multi-floor machines or tall entities should be represented.
 
 Exit criteria:
@@ -637,6 +668,13 @@ Verification (2026-08-10):
 - `RCDConstructionDeconstructionTest`: passed for legacy `z = 0` behavior.
 - `RCDConstructionUsesTheUsersZLevel`: passed for upper-floor wall and floor
   construction without changing the base tile.
+- `RCDValidationUsesWorldZLevelAcrossGridFrames`: passed for equal world floors
+  represented by different grid-local indices and rejects a later frame
+  mismatch.
+- `TestPickupDropPreservesUpperFloorZLevelOnDisplacedFrame`: passed for hand
+  pickup/drop on a grid whose local floor one maps to world floor six.
+- `TestEntityStorageEjectionPreservesWorldZLevelOnDisplacedFrame`: passed for
+  materializing an inherited world floor in the destination grid's local frame.
 - `ZLevelTileIndicesSerializerTest`: 2 passed for round-trip and malformed-data
   validation.
 - Content shared, server, client, and integration-test projects build with zero

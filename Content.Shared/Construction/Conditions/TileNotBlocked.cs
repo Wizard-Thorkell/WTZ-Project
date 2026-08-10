@@ -21,7 +21,7 @@ public sealed partial class TileNotBlocked : IConstructionCondition
             !entityManager.TrySystem<SharedZLevelSystem>(out var zLevelSystem))
             return false;
 
-        if (!turfSystem.TryGetZLevelTileRef(location, zLevelSystem.GetZLevel(user), out var tileRef))
+        if (!turfSystem.TryGetZLevelTileRefAtWorldZ(location, zLevelSystem.GetWorldZLevel(user), out var tileRef))
         {
             return false;
         }

@@ -286,9 +286,7 @@ namespace Content.Client.Construction
                 return false;
 
             ghost = Spawn("constructionghost", loc);
-            var zLevel = _zLevel.GetZLevel(user);
-            if (zLevel != 0)
-                _zLevel.SetZLevelPosition(ghost.Value, zLevel);
+            _zLevel.StampWorldZLevelPosition(ghost.Value, _zLevel.GetWorldZLevel(user));
 
             var comp = Comp<ConstructionGhostComponent>(ghost.Value);
             comp.Prototype = prototype;

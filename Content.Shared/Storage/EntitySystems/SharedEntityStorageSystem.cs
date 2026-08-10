@@ -14,6 +14,7 @@ using Content.Shared.Tools.Systems;
 using Content.Shared.Verbs;
 using Content.Shared.Wall;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Content.Shared.ActionBlocker;
 using Content.Shared.Mobs.Components;
 using Robust.Shared.Audio.Systems;
@@ -43,6 +44,7 @@ public abstract class SharedEntityStorageSystem : EntitySystem
     [Dependency] private   readonly WeldableSystem _weldable = default!;
     [Dependency] private readonly EntityWhitelistSystem _whitelistSystem = default!;
     [Dependency] private readonly ActionBlockerSystem _actionBlocker = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public const string ContainerName = "entity_storage";
 
@@ -326,6 +328,7 @@ public abstract class SharedEntityStorageSystem : EntitySystem
         if (!Resolve(container, ref component))
             return false;
 
+        var worldZLevel = _zLevel.GetWorldZLevel(container);
         _container.Remove(toRemove, component.Contents);
 
         if (_container.IsEntityInContainer(container)
@@ -345,6 +348,7 @@ public abstract class SharedEntityStorageSystem : EntitySystem
 
         var pos = TransformSystem.GetWorldPosition(xform) + TransformSystem.GetWorldRotation(xform).RotateVec(component.EnteringOffset);
         TransformSystem.SetWorldPosition(toRemove, pos);
+        _zLevel.StampWorldZLevelPosition(toRemove, worldZLevel);
         return true;
     }
 

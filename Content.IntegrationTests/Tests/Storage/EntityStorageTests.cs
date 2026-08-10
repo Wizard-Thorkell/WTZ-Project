@@ -2,6 +2,9 @@ using Content.IntegrationTests.Fixtures;
 using Content.Server.Storage.EntitySystems;
 using Content.Shared.Damage;
 using Content.Shared.Damage.Systems;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
+using Robust.Server.GameObjects;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 
@@ -77,5 +80,34 @@ public sealed class EntityStorageTests : GameTest
         await server.WaitRunTicks(5);
         Assert.That(server.EntMan.Deleted(box));
         Assert.That(server.EntMan.Deleted(crowbar), Is.False);
+    }
+
+    [Test]
+    public async Task TestEntityStorageEjectionPreservesWorldZLevelOnDisplacedFrame()
+    {
+        var pair = Pair;
+        var server = pair.Server;
+        var map = await pair.CreateTestMap();
+        var storage = server.System<EntityStorageSystem>();
+        var zLevel = server.System<SharedZLevelSystem>();
+        var transform = server.System<TransformSystem>();
+
+        EntityUid box = default;
+        EntityUid crowbar = default;
+        await server.WaitPost(() =>
+        {
+            box = server.EntMan.SpawnEntity("EntityStorageTest", map.GridCoords);
+            crowbar = server.EntMan.SpawnEntity("Crowbar", map.GridCoords);
+
+            Assert.That(transform.SetZLevelFrameOrigin(map.Grid, 5), Is.True);
+            Assert.That(zLevel.SetZLevelPosition(box, 1), Is.True);
+            Assert.That(storage.Insert(crowbar, box), Is.True);
+            Assert.That(zLevel.GetWorldZLevel(crowbar), Is.EqualTo(6));
+
+            Assert.That(storage.Remove(crowbar, box), Is.True);
+            Assert.That(server.EntMan.TryGetComponent<ZLevelPositionComponent>(crowbar, out var crowbarZ), Is.True);
+            Assert.That(crowbarZ!.ZLevel, Is.EqualTo(1));
+            Assert.That(zLevel.GetWorldZLevel(crowbar), Is.EqualTo(6));
+        });
     }
 }

@@ -273,9 +273,7 @@ namespace Content.Server.Construction
 
             var newEntityProto = graph.Nodes[edge.Target].Entity.GetId(null, user, new(EntityManager));
             var newEntity = SpawnAttachedTo(newEntityProto, coords, rotation: angle);
-            var zLevel = _zLevel.GetZLevel(user);
-            if (zLevel != 0)
-                _zLevel.SetZLevelPosition(newEntity, zLevel);
+            _zLevel.StampWorldZLevelPosition(newEntity, _zLevel.GetWorldZLevel(user));
 
             if (!TryComp(newEntity, out ConstructionComponent? construction))
             {

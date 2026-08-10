@@ -102,10 +102,11 @@ public sealed class AlignRCDConstruction : PlacementMode
         if (!_entityManager.TryGetComponent<MapGridComponent>(gridUid, out var mapGrid))
             return false;
         var posVector = _mapSystem.TileIndicesFor(gridUid.Value, mapGrid, position);
-        var zLevel = _transformSystem.GetZLevel((
+        var worldZLevel = _transformSystem.GetWorldZLevel((
             player.Value,
             xform,
             _entityManager.GetComponentOrNull<ZLevelPositionComponent>(player.Value)));
+        var zLevel = _transformSystem.WorldToLocalZLevel(gridUid.Value, worldZLevel);
         var tile = _mapSystem.GetZLevelTileRef(
             gridUid.Value,
             mapGrid,

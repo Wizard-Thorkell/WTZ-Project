@@ -67,7 +67,7 @@ public sealed class FloorTileSystem : EntitySystem
             return;
 
         var userTransform = Transform(args.User);
-        var zLevel = _transform.GetZLevel((args.User, userTransform, CompOrNull<ZLevelPositionComponent>(args.User)));
+        var worldZLevel = _transform.GetWorldZLevel((args.User, userTransform, CompOrNull<ZLevelPositionComponent>(args.User)));
 
         // this looks a bit sussy but it might be because it needs to be able to place off of grids and expand them
         var location = args.ClickLocation.AlignWithClosestGridTile();
@@ -110,15 +110,15 @@ public sealed class FloorTileSystem : EntitySystem
             var results = _physics.IntersectRay(locationMap.MapId, ray, dir.Length(), returnOnFirstHit: false);
             canAccessCenter = !results.Any(result =>
                 TryComp(result.HitEntity, out TransformComponent? hitTransform) &&
-                _transform.GetZLevel((
+                _transform.GetWorldZLevel((
                     result.HitEntity,
                     hitTransform,
-                    CompOrNull<ZLevelPositionComponent>(result.HitEntity))) == zLevel);
+                    CompOrNull<ZLevelPositionComponent>(result.HitEntity))) == worldZLevel);
         }
 
         // if user can access tile center then they can place floor
         // otherwise check it isn't blocked by a wall
-        if (!canAccessCenter && _turf.TryGetZLevelTileRef(location, zLevel, out var tileRef))
+        if (!canAccessCenter && _turf.TryGetZLevelTileRefAtWorldZ(location, worldZLevel, out var tileRef))
         {
             _turfCheck.Clear();
             var baseTile = _map.GetTileRef(
@@ -129,7 +129,7 @@ public sealed class FloorTileSystem : EntitySystem
             foreach (var ent in _turfCheck)
             {
                 if (!TryComp(ent, out TransformComponent? entTransform) ||
-                    _transform.GetZLevel((ent, entTransform, CompOrNull<ZLevelPositionComponent>(ent))) != zLevel)
+                    _transform.GetWorldZLevel((ent, entTransform, CompOrNull<ZLevelPositionComponent>(ent))) != worldZLevel)
                 {
                     continue;
                 }
@@ -152,6 +152,7 @@ public sealed class FloorTileSystem : EntitySystem
             if (mapGrid != null)
             {
                 var gridUid = location.EntityId;
+                var zLevel = _transform.WorldToLocalZLevel(gridUid, worldZLevel);
                 var xy = _map.TileIndicesFor(gridUid, mapGrid, location);
                 var tile = _map.GetZLevelTileRef(gridUid, mapGrid, new ZLevelTileIndices(xy.X, xy.Y, zLevel));
 
@@ -190,7 +191,12 @@ public sealed class FloorTileSystem : EntitySystem
                 var grid = _mapManager.CreateGridEntity(locationMap.MapId);
                 var gridXform = Transform(grid);
                 _transform.SetWorldPosition((grid, gridXform), locationMap.Position);
+                var frameOrigin = _transform.GetZLevelFrameOrigin((args.User, userTransform));
+                if (frameOrigin != 0)
+                    _transform.SetZLevelFrameOrigin(grid, frameOrigin);
+
                 location = new EntityCoordinates(grid, Vector2.Zero);
+                var zLevel = _transform.WorldToLocalZLevel(grid, worldZLevel);
                 PlaceAt(
                     args.User,
                     grid,
