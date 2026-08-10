@@ -63,6 +63,12 @@ Implemented foundation:
 - Dedicated `ZLevelTileChangedEvent`.
 - Non-zero ZLevel tile replication to clients.
 - Map chunk serialization support through `zTiles`.
+- Z-only chunks survive full-state and delta-state replication.
+- Empty non-zero writes do not allocate chunks.
+- Removing the final non-zero tile uses the normal chunk lifecycle, including
+  deletion history and PVS replication.
+- Repeated delete/recreate/delete cycles in one delta window are coalesced into
+  one final chunk state.
 
 Implemented movement and gameplay basics:
 
@@ -123,10 +129,11 @@ Partially implemented mapping and placement:
 
 Verified recently:
 
-- Focused integration tests for ZLevel and placement compile and pass.
-- Result from the latest focused Content run: 10 passed, 1 skipped, 0 failed.
-- Result from the latest focused Robust serialization/authoring run: 3 passed,
+- Full `SpaceStation14.slnx` build: 0 errors.
+- Focused Robust lifecycle/PVS run: 12 passed, 0 skipped, 0 failed.
+- Broader Robust chunk, map, serialization, and physics runs: 17 passed,
   0 skipped, 0 failed.
+- Focused Content ZLevel run: 10 passed, 1 skipped, 0 failed.
 - The skipped test is an atmos containing-mixture test that needs a dedicated
   upper-floor fixture.
 
@@ -137,8 +144,8 @@ Major unfinished areas:
 - Mapping/editor workflow is better, but still not polished enough for real
   authoring.
 - Live map save/load on initialized station maps is not generally safe.
-- ZLevel tile persistence supports sparse Z-only chunks in focused tests, but
-  the normal mapper workflow still needs more validation.
+- ZLevel tile persistence and network replication support sparse Z-only chunks,
+  but the normal mapper workflow still needs more validation.
 - Atmos is Z-aware adjacency on top of mostly 2D machinery, not full volumetric
   atmos.
 - Lighting and FOV are not native to floors.
@@ -155,13 +162,40 @@ Major unfinished areas:
 
 ## Roadmap Phases
 
+### Current Execution Order
+
+This is the authoritative implementation order as of 2026-08-10. The detailed
+feature phases below remain the backlog and acceptance criteria for each area.
+
+1. [Done] Preserve the prototype with branches, commits, tags, and verified Git
+   bundles.
+2. [Done] Stabilize chunk lifecycle and replication, including sparse Z-only
+   chunks, full states, delta deletion, and real client/server PVS coverage.
+3. [Next] Replace implicit ceiling behavior with explicit vertical boundaries.
+4. Add active vertical bodies and bounded caches so work scales with relevant
+   entities and known layers.
+5. Integrate renderer and PVS behavior around visible floors and openings.
+6. Stabilize atmosphere on top of the shared boundary model.
+7. Expand vertical gameplay, construction, interaction, effects, and AI.
+8. Define a frame model for moving ships, stations, and planets.
+9. Add structural support and collapse as a late-stage consumer of the mature
+   vertical model.
+
+Each completed stage should leave a focused commit, regression tests, and an
+updated verification record in this document.
+
 ### Phase 0: Preserve the Prototype
 
 Goal: make sure the current prototype is not lost and can be safely iterated.
 
 Tasks:
 
-- Commit or otherwise preserve the current ZLevel work as a coherent baseline.
+- [Done] Preserve the current ZLevel work as a coherent baseline. Baseline
+  commits are `84d4ccbfc8` in Space Station 14 and `b138a3fa3` in RobustToolbox.
+- [Done] Create `zlevel-roadmap` branches and annotated
+  `zlevel-baseline-2026-08-10` tags in both repositories.
+- [Done] Create and verify incremental bundles under
+  `C:\Users\pedel\source\repos\zlevel-backups`.
 - Keep `AI instructions on zlevel.txt` as historical handoff context, but make
   this file the canonical roadmap.
 - [Done] Add a short smoke-test command list to this document.
@@ -177,6 +211,7 @@ Exit criteria:
 Smoke-test commands:
 
 - `dotnet test RobustToolbox/Robust.Shared.IntegrationTests/Robust.Shared.IntegrationTests.csproj --filter "FullyQualifiedName~ZLevelSerializationTest" --no-restore`
+- `dotnet test RobustToolbox/Robust.Server.IntegrationTests/Robust.Server.IntegrationTests.csproj --filter "FullyQualifiedName~ZLevelMapTests|FullyQualifiedName~ZLevelChunkReplicationTest" --no-restore`
 - `dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --filter "FullyQualifiedName~ZLevel|FullyQualifiedName~PlacementZLevel" --no-restore`
 - In mapping/admin console, use `zcopytiles` to copy a bounded tile patch from
   one floor to another, then `zcleartiles` to remove it from the target floor.
@@ -185,8 +220,6 @@ Smoke-test commands:
 ### Phase 1: Mapping And Authoring Workflow
 
 Goal: make it natural to create, inspect, edit, erase, and save layered spaces.
-
-This is the next priority.
 
 Tasks:
 
