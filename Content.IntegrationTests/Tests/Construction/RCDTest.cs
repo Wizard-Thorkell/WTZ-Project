@@ -1,10 +1,13 @@
 using System.Numerics;
 using Content.IntegrationTests.Tests.Interaction;
 using Content.Shared.Charges.Systems;
+using Content.Shared.Maps;
 using Content.Shared.RCD;
 using Content.Shared.RCD.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.Construction;
@@ -19,6 +22,83 @@ public sealed class RCDTest : InteractionTest
     private static readonly ProtoId<RCDPrototype> RCDSettingDeconstruct = "Deconstruct";
     private static readonly ProtoId<RCDPrototype> RCDSettingDeconstructTile = "DeconstructTile";
     private static readonly ProtoId<RCDPrototype> RCDSettingDeconstructLattice = "DeconstructLattice";
+
+    [Test]
+    public async Task RCDConstructionUsesTheUsersZLevel()
+    {
+        var wallLocation = Transform.WithEntityId(new EntityCoordinates(SPlayer, new Vector2(0, 1)), MapData.Grid);
+        var floorLocation = Transform.WithEntityId(new EntityCoordinates(SPlayer, new Vector2(1, 0)), MapData.Grid);
+        var map = SEntMan.System<SharedMapSystem>();
+        var zLevel = SEntMan.System<SharedZLevelSystem>();
+        var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+        var plating = (ContentTileDefinition) TileMan[PlatingRCD];
+        Tile lowerFloor = default;
+
+        await Server.WaitPost(() =>
+        {
+            var playerIndices = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetComponent<TransformComponent>(SPlayer).Coordinates);
+            var wallIndices = map.TileIndicesFor(MapData.Grid, grid, wallLocation);
+            var floorIndices = map.TileIndicesFor(MapData.Grid, grid, floorLocation);
+            lowerFloor = map.GetTileRef(MapData.Grid, grid, floorIndices).Tile;
+
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(playerIndices.X, playerIndices.Y, 1),
+                new Tile(plating.TileId));
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(wallIndices.X, wallIndices.Y, 1),
+                new Tile(plating.TileId));
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(floorIndices.X, floorIndices.Y, 1),
+                new Tile(plating.TileId));
+            Assert.That(zLevel.SetZLevelPosition(SPlayer, 1), Is.True);
+        });
+        await RunTicks(3);
+
+        Assert.That(ProtoMan.TryIndex(RCDSettingWall, out var wallSetting));
+        Assert.That(ProtoMan.TryIndex(RCDSettingFloorSteel, out var floorSetting));
+        var rcd = await PlaceInHands(RCDProtoId);
+        await Server.WaitPost(() =>
+        {
+            var charges = SEntMan.System<SharedChargesSystem>();
+            charges.SetMaxCharges(ToServer(rcd), 1000);
+            charges.SetCharges(ToServer(rcd), 1000);
+        });
+
+        await SetRcdProto(rcd, RCDSettingWall);
+        await Interact(null, wallLocation);
+        await RunSeconds(wallSetting.Delay + 1);
+
+        var wall = await FindEntity(wallSetting.Prototype);
+        await Server.WaitAssertion(() => Assert.That(zLevel.GetZLevel(wall), Is.EqualTo(1)));
+
+        await SetRcdProto(rcd, RCDSettingFloorSteel);
+        await Interact(null, floorLocation);
+        await RunSeconds(floorSetting.Delay + 1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var floorIndices = map.TileIndicesFor(MapData.Grid, grid, floorLocation);
+            var upper = map.GetZLevelTileRef(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(floorIndices.X, floorIndices.Y, 1));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(((ContentTileDefinition) TileMan[upper.Tile.TypeId]).ID, Is.EqualTo(floorSetting.Prototype));
+                Assert.That(map.GetTileRef(MapData.Grid, grid, floorIndices).Tile, Is.EqualTo(lowerFloor));
+            });
+        });
+    }
 
     /// <summary>
     /// Tests RCD construction and deconstruction, as well as selecting options from the radial menu.

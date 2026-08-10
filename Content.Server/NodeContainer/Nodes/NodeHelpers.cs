@@ -24,6 +24,23 @@ namespace Content.Server.NodeContainer.Nodes
             }
         }
 
+        public static IEnumerable<Node> GetNodesInTileOnZLevel(
+            EntityQuery<NodeContainerComponent> nodeQuery,
+            EntityQuery<TransformComponent> xformQuery,
+            Entity<MapGridComponent> grid,
+            Vector2i coords,
+            int zLevel,
+            SharedMapSystem mapSystem,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan)
+        {
+            foreach (var node in GetNodesInTile(nodeQuery, grid, coords, mapSystem))
+            {
+                if (IsNodeOnZLevel(node, zLevel, xformQuery, transformSystem, entMan))
+                    yield return node;
+            }
+        }
+
         [Obsolete("Use the overload that passes in Entity<MapGridComponent> and SharedMapSystem")]
         public static IEnumerable<Node> GetNodesInTile(EntityQuery<NodeContainerComponent> nodeQuery, MapGridComponent grid, Vector2i coords)
         {
@@ -47,6 +64,45 @@ namespace Content.Server.NodeContainer.Nodes
                     yield return (dir, node);
                 }
             }
+        }
+
+        public static IEnumerable<(Direction dir, Node node)> GetCardinalNeighborNodesOnZLevel(
+            EntityQuery<NodeContainerComponent> nodeQuery,
+            EntityQuery<TransformComponent> xformQuery,
+            Entity<MapGridComponent> grid,
+            Vector2i coords,
+            int zLevel,
+            SharedMapSystem mapSystem,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan,
+            bool includeSameTile = true)
+        {
+            foreach (var (direction, node) in GetCardinalNeighborNodes(nodeQuery, grid, coords, mapSystem, includeSameTile))
+            {
+                if (IsNodeOnZLevel(node, zLevel, xformQuery, transformSystem, entMan))
+                    yield return (direction, node);
+            }
+        }
+
+        public static int GetZLevel(
+            Entity<TransformComponent> entity,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan)
+        {
+            return transformSystem.GetZLevel(
+                (entity.Owner, entity.Comp, entMan.GetComponentOrNull<ZLevelPositionComponent>(entity.Owner)));
+        }
+
+        public static bool IsNodeOnZLevel(
+            Node node,
+            int zLevel,
+            EntityQuery<TransformComponent> xformQuery,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan)
+        {
+            return xformQuery.TryGetComponent(node.Owner, out var nodeTransform) &&
+                   transformSystem.GetZLevel(
+                       (node.Owner, nodeTransform, entMan.GetComponentOrNull<ZLevelPositionComponent>(node.Owner))) == zLevel;
         }
 
         [Obsolete("Use the overload that passes in Entity<MapGridComponent> and SharedMapSystem")]

@@ -15,6 +15,7 @@ using Content.Shared.Interaction;
 using Content.Shared.Inventory;
 using Content.Shared.Storage;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
 using Robust.Shared.Player;
@@ -31,6 +32,7 @@ namespace Content.Server.Construction
         [Dependency] private readonly EntityLookupSystem _lookupSystem = default!;
         [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
         [Dependency] private readonly EntityWhitelistSystem _whitelistSystem = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
         // --- WARNING! LEGACY CODE AHEAD! ---
         // This entire file contains the legacy code for initial construction.
@@ -271,6 +273,9 @@ namespace Content.Server.Construction
 
             var newEntityProto = graph.Nodes[edge.Target].Entity.GetId(null, user, new(EntityManager));
             var newEntity = SpawnAttachedTo(newEntityProto, coords, rotation: angle);
+            var zLevel = _zLevel.GetZLevel(user);
+            if (zLevel != 0)
+                _zLevel.SetZLevelPosition(newEntity, zLevel);
 
             if (!TryComp(newEntity, out ConstructionComponent? construction))
             {
@@ -478,7 +483,7 @@ namespace Content.Server.Construction
             }
 
             var mapPos = _transformSystem.ToMapCoordinates(location);
-            var predicate = GetPredicate(constructionPrototype.CanBuildInImpassable, mapPos);
+            var predicate = GetPredicate(constructionPrototype.CanBuildInImpassable, mapPos, user);
 
             if (!_interactionSystem.InRangeUnobstructed(user, mapPos, predicate: predicate))
             {

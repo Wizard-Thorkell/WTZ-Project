@@ -12,6 +12,8 @@ using Content.Shared.Popups;
 using Content.Shared.RCD.Components;
 using Content.Shared.Tag;
 using Content.Shared.Tiles;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -44,6 +46,7 @@ public sealed class RCDSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly TagSystem _tags = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     private readonly int _instantConstructionDelay = 0;
     private readonly EntProtoId _instantConstructionFx = "EffectRCDConstruct0";
@@ -131,6 +134,7 @@ public sealed class RCDSystem : EntitySystem
         var user = args.User;
         var location = args.ClickLocation;
         var prototype = _protoManager.Index(component.ProtoId);
+        var zLevel = _zLevel.GetZLevel(user);
 
         // Initial validity checks
         if (!location.IsValid(EntityManager))
@@ -149,8 +153,11 @@ public sealed class RCDSystem : EntitySystem
             _popup.PopupClient(Loc.GetString("rcd-component-no-valid-grid"), uid, user);
             return;
         }
-        var tile = _mapSystem.GetTileRef(gridUid.Value, mapGrid, location);
         var position = _mapSystem.TileIndicesFor(gridUid.Value, mapGrid, location);
+        var tile = _mapSystem.GetZLevelTileRef(
+            gridUid.Value,
+            mapGrid,
+            new ZLevelTileIndices(position.X, position.Y, zLevel));
 
         if (!IsRCDOperationStillValid(uid, component, gridUid.Value, mapGrid, tile, position, component.ConstructionDirection, args.Target, args.User))
             return;
@@ -184,8 +191,7 @@ public sealed class RCDSystem : EntitySystem
                 // Deconstructing a tile
                 else
                 {
-                    var deconstructedTile = _mapSystem.GetTileRef(gridUid.Value, mapGrid, location);
-                    var protoName = !_turf.IsSpace(deconstructedTile) ? _deconstructTileProto : _deconstructLatticeProto;
+                    var protoName = !_turf.IsSpace(tile) ? _deconstructTileProto : _deconstructLatticeProto;
 
                     if (_protoManager.Resolve(protoName, out var deconProto))
                     {
@@ -200,9 +206,7 @@ public sealed class RCDSystem : EntitySystem
             case RcdMode.ConstructTile:
 
                 // If replacing a tile, make the construction instant
-                var contructedTile = _mapSystem.GetTileRef(gridUid.Value, mapGrid, location);
-
-                if (!contructedTile.Tile.IsEmpty)
+                if (!tile.Tile.IsEmpty)
                 {
                     delay = _instantConstructionDelay;
                     effectPrototype = _instantConstructionFx;
@@ -214,10 +218,12 @@ public sealed class RCDSystem : EntitySystem
         #endregion
 
         // Try to start the do after
-        var effect = Spawn(effectPrototype, _mapSystem.ToCenterCoordinates(tile, mapGrid));
+        var effect = Spawn(effectPrototype, _turf.GetTileCenter(tile));
+        _zLevel.SetZLevelPosition(effect, zLevel);
         var ev = new RCDDoAfterEvent(
             GetNetCoordinates(location),
             GetNetEntity(gridUid.Value),
+            zLevel,
             component.ConstructionDirection,
             component.ProtoId,
             cost,
@@ -260,8 +266,11 @@ public sealed class RCDSystem : EntitySystem
         }
 
         var location = GetCoordinates(args.Event.Location);
-        var tile = _mapSystem.GetTileRef(gridUid, mapGrid, location);
         var position = _mapSystem.TileIndicesFor(gridUid, mapGrid, location);
+        var tile = _mapSystem.GetZLevelTileRef(
+            gridUid,
+            mapGrid,
+            new ZLevelTileIndices(position.X, position.Y, args.Event.ZLevel));
 
         if (!IsRCDOperationStillValid(uid, component, gridUid, mapGrid, tile, position, args.Event.Direction, args.Event.Target, args.Event.User))
             args.Cancel();
@@ -288,8 +297,11 @@ public sealed class RCDSystem : EntitySystem
             return;
 
         var location = GetCoordinates(args.Location);
-        var tile = _mapSystem.GetTileRef(gridUid, mapGrid, location);
         var position = _mapSystem.TileIndicesFor(gridUid, mapGrid, location);
+        var tile = _mapSystem.GetZLevelTileRef(
+            gridUid,
+            mapGrid,
+            new ZLevelTileIndices(position.X, position.Y, args.ZLevel));
 
         // Ensure the RCD operation is still valid
         if (!IsRCDOperationStillValid(uid, component, gridUid, mapGrid, tile, position, args.Direction, args.Target, args.User))
@@ -328,12 +340,12 @@ public sealed class RCDSystem : EntitySystem
 
     #region Entity construction/deconstruction rule checks
 
-    public bool IsRCDOperationStillValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, TileRef tile, Vector2i position, EntityUid? target, EntityUid user, bool popMsgs = true)
+    public bool IsRCDOperationStillValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, ZLevelTileRef tile, Vector2i position, EntityUid? target, EntityUid user, bool popMsgs = true)
     {
         return IsRCDOperationStillValid(uid, component, gridUid, mapGrid, tile, position, component.ConstructionDirection, target, user, popMsgs);
     }
 
-    public bool IsRCDOperationStillValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, TileRef tile, Vector2i position, Direction direction, EntityUid? target, EntityUid user, bool popMsgs = true)
+    public bool IsRCDOperationStillValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, ZLevelTileRef tile, Vector2i position, Direction direction, EntityUid? target, EntityUid user, bool popMsgs = true)
     {
         var prototype = _protoManager.Index(component.ProtoId);
 
@@ -357,10 +369,22 @@ public sealed class RCDSystem : EntitySystem
             return false;
         }
 
-        // Exit if the target / target location is obstructed
+        var zLevel = tile.GridIndices.Z;
+        if (_zLevel.GetZLevel(user) != zLevel ||
+            target is { } targetUid && _zLevel.GetZLevel(targetUid) != zLevel)
+        {
+            return false;
+        }
+
+        // Exit if the target / target location is obstructed.
+        SharedInteractionSystem.Ignored otherFloor = entity => _zLevel.GetZLevel(entity) != zLevel;
         var unobstructed = (target == null)
-            ? _interaction.InRangeUnobstructed(user, _mapSystem.GridTileToWorld(gridUid, mapGrid, position), popup: popMsgs)
-            : _interaction.InRangeUnobstructed(user, target.Value, popup: popMsgs);
+            ? _interaction.InRangeUnobstructed(
+                user,
+                _mapSystem.GridTileToWorld(gridUid, mapGrid, position),
+                predicate: otherFloor,
+                popup: popMsgs)
+            : _interaction.InRangeUnobstructed(user, target.Value, predicate: otherFloor, popup: popMsgs);
 
         if (!unobstructed)
             return false;
@@ -378,7 +402,7 @@ public sealed class RCDSystem : EntitySystem
         return false;
     }
 
-    private bool IsConstructionLocationValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, TileRef tile, Vector2i position, Direction direction, EntityUid user, bool popMsgs = true)
+    private bool IsConstructionLocationValid(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, ZLevelTileRef tile, Vector2i position, Direction direction, EntityUid user, bool popMsgs = true)
     {
         var prototype = _protoManager.Index(component.ProtoId);
 
@@ -413,7 +437,7 @@ public sealed class RCDSystem : EntitySystem
         if (prototype.Mode == RcdMode.ConstructTile)
         {
             // Check rule: Tile placement is valid
-            if (!_floors.CanPlaceTile(gridUid, mapGrid, tile.GridIndices, out var reason))
+            if (!_floors.CanPlaceTile(gridUid, mapGrid, position, tile.GridIndices.Z, out var reason))
             {
                 if (popMsgs)
                     _popup.PopupClient(reason, uid, user);
@@ -461,6 +485,9 @@ public sealed class RCDSystem : EntitySystem
 
         foreach (var ent in _intersectingEntities)
         {
+            if (_zLevel.GetZLevel(ent) != tile.GridIndices.Z)
+                continue;
+
             // If the entity is the exact same prototype as what we are trying to build, then block it.
             // This is to prevent spamming objects on the same tile (e.g. lights)
             if (prototype.Prototype != null && MetaData(ent).EntityPrototype?.ID == prototype.Prototype)
@@ -519,7 +546,7 @@ public sealed class RCDSystem : EntitySystem
         return true;
     }
 
-    private bool IsDeconstructionStillValid(EntityUid uid, TileRef tile, EntityUid? target, EntityUid user, bool popMsgs = true)
+    private bool IsDeconstructionStillValid(EntityUid uid, ZLevelTileRef tile, EntityUid? target, EntityUid user, bool popMsgs = true)
     {
         // Attempt to deconstruct a floor tile
         if (target == null)
@@ -574,7 +601,7 @@ public sealed class RCDSystem : EntitySystem
 
     #region Entity construction/deconstruction
 
-    private void FinalizeRCDOperation(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, TileRef tile, Vector2i position, Direction direction, EntityUid? target, EntityUid user)
+    private void FinalizeRCDOperation(EntityUid uid, RCDComponent component, EntityUid gridUid, MapGridComponent mapGrid, ZLevelTileRef tile, Vector2i position, Direction direction, EntityUid? target, EntityUid user)
     {
         if (!_net.IsServer)
             return;
@@ -590,12 +617,13 @@ public sealed class RCDSystem : EntitySystem
                 if (!_tileDefMan.TryGetDefinition(prototype.Prototype, out var tileDef))
                     return;
 
-                _tile.ReplaceTile(tile, (ContentTileDefinition) tileDef, gridUid, mapGrid);
+                _tile.ReplaceZLevelTile(tile, (ContentTileDefinition) tileDef, gridUid, mapGrid);
                 _adminLogger.Add(LogType.RCD, LogImpact.High, $"{ToPrettyString(user):user} used RCD to set grid: {gridUid} {position} to {prototype.Prototype}");
                 break;
 
             case RcdMode.ConstructObject:
                 var ent = Spawn(prototype.Prototype, _mapSystem.GridTileToLocal(gridUid, mapGrid, position));
+                _zLevel.SetZLevelPosition(ent, tile.GridIndices.Z);
 
                 switch (prototype.Rotation)
                 {
@@ -618,7 +646,7 @@ public sealed class RCDSystem : EntitySystem
                 if (target == null)
                 {
                     // Deconstruct tile, don't drop tile as item
-                    if (_tile.DeconstructTile(tile, spawnItem: false))
+                    if (_tile.DeconstructZLevelTile(tile, spawnItem: false))
                         _adminLogger.Add(LogType.RCD, LogImpact.High, $"{ToPrettyString(user):user} used RCD to set grid: {gridUid} tile: {position} open to space");
                 }
                 else
@@ -657,6 +685,9 @@ public sealed partial class RCDDoAfterEvent : DoAfterEvent
     public NetEntity TargetGridId {get ; private set; }
 
     [DataField]
+    public int ZLevel { get; private set; }
+
+    [DataField]
     public Direction Direction { get; private set; }
 
     [DataField]
@@ -673,6 +704,7 @@ public sealed partial class RCDDoAfterEvent : DoAfterEvent
     public RCDDoAfterEvent(
         NetCoordinates location,
         NetEntity targetGridId,
+        int zLevel,
         Direction direction,
         ProtoId<RCDPrototype>
         startingProtoId,
@@ -681,6 +713,7 @@ public sealed partial class RCDDoAfterEvent : DoAfterEvent
     {
         Location = location;
         TargetGridId = targetGridId;
+        ZLevel = zLevel;
         Direction = direction;
         StartingProtoId = startingProtoId;
         Cost = cost;

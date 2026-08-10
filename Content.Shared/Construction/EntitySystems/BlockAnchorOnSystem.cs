@@ -1,6 +1,7 @@
 using Content.Shared.Construction.Components;
 using Content.Shared.Popups;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map.Components;
 
 namespace Content.Shared.Construction.EntitySystems;
@@ -15,6 +16,9 @@ public sealed class BlockAnchorOnSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedPopupSystem _popup = default!;
     [Dependency] private readonly SharedTransformSystem _xform = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
+
+    private readonly List<EntityUid> _anchored = new();
 
     /// <inheritdoc/>
     public override void Initialize()
@@ -65,12 +69,13 @@ public sealed class BlockAnchorOnSystem : EntitySystem
             return false;
 
         var indices = _map.TileIndicesFor(grid, gridComp, ent.Comp2.Coordinates);
-        var enumerator = _map.GetAnchoredEntitiesEnumerator(grid, gridComp, indices);
+        var zLevel = _xform.GetZLevel((ent.Owner, ent.Comp2, CompOrNull<ZLevelPositionComponent>(ent.Owner)));
+        _zLevel.GetAnchoredEntitiesOnZLevel(grid, gridComp, indices, zLevel, _anchored);
 
-        while (enumerator.MoveNext(out var otherEnt))
+        foreach (var otherEnt in _anchored)
         {
             // Don't match yourself.
-            if (otherEnt == ent)
+            if (otherEnt == ent.Owner)
                 continue;
 
             if (!_whitelist.CheckBoth(otherEnt, ent.Comp1.Blacklist, ent.Comp1.Whitelist))

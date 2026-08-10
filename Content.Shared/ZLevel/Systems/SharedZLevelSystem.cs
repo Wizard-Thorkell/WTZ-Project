@@ -145,9 +145,14 @@ public sealed class SharedZLevelSystem : VirtualController
 
     public int GetZLevel(EntityUid uid, ZLevelPositionComponent? position = null)
     {
-        return _positionQuery.Resolve(uid, ref position, false)
-            ? position.ZLevel
-            : 0;
+        TransformComponent? transform = null;
+        if (!_transformQuery.Resolve(uid, ref transform, false))
+            return 0;
+
+        if (position == null)
+            _positionQuery.TryComp(uid, out position);
+
+        return _transform.GetZLevel((uid, transform, position));
     }
 
     public bool IsOnZLevel(EntityUid uid, int zLevel, ZLevelPositionComponent? position = null)

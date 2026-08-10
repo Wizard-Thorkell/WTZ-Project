@@ -1,6 +1,7 @@
 using Content.Shared.Construction;
 using Content.Shared.Examine;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel.Components;
 using JetBrains.Annotations;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -48,6 +49,7 @@ namespace Content.Server.Construction.Conditions
                 return false;
 
             var transformSys = entityManager.System<SharedTransformSystem>();
+            var zLevel = transformSys.GetZLevel((uid, transform, entityManager.GetComponentOrNull<ZLevelPositionComponent>(uid)));
             var indices = transform.Coordinates.ToVector2i(entityManager, IoCManager.Resolve<IMapManager>(), transformSys);
             var lookup = entityManager.EntitySysManager.GetEntitySystem<EntityLookupSystem>();
 
@@ -60,6 +62,12 @@ namespace Content.Server.Construction.Conditions
 
             foreach (var ent in lookup.GetEntitiesInTile(tile, flags: LookupFlags.Approximate | LookupFlags.Static))
             {
+                if (!entityManager.TryGetComponent<TransformComponent>(ent, out var entTransform) ||
+                    transformSys.GetZLevel((ent, entTransform, entityManager.GetComponentOrNull<ZLevelPositionComponent>(ent))) != zLevel)
+                {
+                    continue;
+                }
+
                 if (entityManager.HasComponent(ent, type))
                     return HasEntity;
             }

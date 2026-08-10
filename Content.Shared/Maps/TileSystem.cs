@@ -4,6 +4,7 @@ using Content.Shared.CCVar;
 using Content.Shared.Coordinates.Helpers;
 using Content.Shared.Decals;
 using Content.Shared.Tiles;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Configuration;
 using Robust.Shared.GameStates;
 using Robust.Shared.Map;
@@ -28,6 +29,7 @@ public sealed class TileSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _maps = default!;
     [Dependency] private readonly TurfSystem _turf = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public const int ChunkSize = 16;
 
@@ -57,6 +59,12 @@ public sealed class TileSystem : EntitySystem
                 component.ChunkHistory[key] = new TileHistoryChunk(value);
             }
 
+            component.ZLevelHistory.Clear();
+            foreach (var (key, value) in fullState.ZLevelHistory)
+            {
+                component.ZLevelHistory[key] = new ZLevelTileHistory(value);
+            }
+
             return;
         }
 
@@ -75,7 +83,14 @@ public sealed class TileSystem : EntitySystem
             {
                 fullHistory[key] = new TileHistoryChunk(value);
             }
-            args.State = new TileHistoryState(fullHistory);
+
+            var fullZLevelHistory = new Dictionary<ZLevelTileIndices, ZLevelTileHistory>(component.ZLevelHistory.Count);
+            foreach (var (key, value) in component.ZLevelHistory)
+            {
+                fullZLevelHistory[key] = new ZLevelTileHistory(value);
+            }
+
+            args.State = new TileHistoryState(fullHistory, fullZLevelHistory);
             return;
         }
 
@@ -86,7 +101,18 @@ public sealed class TileSystem : EntitySystem
                 data[index] = new TileHistoryChunk(chunk);
         }
 
-        args.State = new TileHistoryDeltaState(data, new(component.ChunkHistory.Keys));
+        var zLevelData = new Dictionary<ZLevelTileIndices, ZLevelTileHistory>();
+        foreach (var (indices, history) in component.ZLevelHistory)
+        {
+            if (history.LastModified >= args.FromTick)
+                zLevelData[indices] = new ZLevelTileHistory(history);
+        }
+
+        args.State = new TileHistoryDeltaState(
+            data,
+            new(component.ChunkHistory.Keys),
+            zLevelData,
+            new(component.ZLevelHistory.Keys));
     }
 
     /// <summary>
@@ -248,6 +274,58 @@ public sealed class TileSystem : EntitySystem
         return true;
     }
 
+    /// <summary>
+    /// Replaces a tile on an explicit vertical layer while preserving its independent history.
+    /// </summary>
+    public bool ReplaceZLevelTile(
+        ZLevelTileRef tileRef,
+        ContentTileDefinition replacementTile,
+        EntityUid grid,
+        MapGridComponent? component = null,
+        byte? variant = null)
+    {
+        DebugTools.Assert(tileRef.GridUid == grid);
+
+        if (!Resolve(grid, ref component))
+            return false;
+
+        if (tileRef.GridIndices.Z == 0)
+        {
+            var baseRef = _maps.GetTileRef(
+                grid,
+                component,
+                new Vector2i(tileRef.GridIndices.X, tileRef.GridIndices.Y));
+            return ReplaceTile(baseRef, replacementTile, grid, component, variant);
+        }
+
+        var currentTileDef = (ContentTileDefinition) _tileDefinitionManager[tileRef.Tile.TypeId];
+        var historyComponent = EnsureComp<TileHistoryComponent>(grid);
+        historyComponent.ZLevelHistory.TryGetValue(tileRef.GridIndices, out var history);
+
+        if (replacementTile.BaseTurf != currentTileDef.ID || history != null)
+        {
+            history ??= new ZLevelTileHistory();
+
+            if (history.History.Count >= _tileStackLimit && _tileStackLimit != 0)
+                return false;
+
+            history.LastModified = _timing.CurTick;
+            historyComponent.ZLevelHistory[tileRef.GridIndices] = history;
+            Dirty(grid, historyComponent);
+
+            if (!tileRef.Tile.IsEmpty)
+                history.History.Add(currentTileDef.ID);
+        }
+
+        variant ??= PickVariant(replacementTile);
+        _maps.SetZLevelTile(
+            grid,
+            component,
+            tileRef.GridIndices,
+            new Tile(replacementTile.TileId, 0, variant.Value));
+        return true;
+    }
+
 
     public bool DeconstructTile(TileRef tileRef, bool spawnItem = true)
     {
@@ -325,10 +403,83 @@ public sealed class TileSystem : EntitySystem
         return true;
     }
 
+    /// <summary>
+    /// Deconstructs a tile on an explicit vertical layer and restores that layer's prior turf.
+    /// </summary>
+    public bool DeconstructZLevelTile(ZLevelTileRef tileRef, bool spawnItem = true)
+    {
+        if (tileRef.GridIndices.Z == 0)
+        {
+            var baseGrid = Comp<MapGridComponent>(tileRef.GridUid);
+            return DeconstructTile(
+                _maps.GetTileRef(
+                    tileRef.GridUid,
+                    baseGrid,
+                    new Vector2i(tileRef.GridIndices.X, tileRef.GridIndices.Y)),
+                spawnItem);
+        }
+
+        if (tileRef.Tile.IsEmpty)
+            return false;
+
+        var tileDef = (ContentTileDefinition) _tileDefinitionManager[tileRef.Tile.TypeId];
+        if (tileDef.BaseTurf == null)
+            return false;
+
+        var gridUid = tileRef.GridUid;
+        var mapGrid = Comp<MapGridComponent>(gridUid);
+        var indices = new Vector2i(tileRef.GridIndices.X, tileRef.GridIndices.Y);
+        const float margin = 0.1f;
+        var bounds = mapGrid.TileSize - margin * 2;
+        var coordinates = _maps.GridTileToLocal(gridUid, mapGrid, indices)
+            .Offset(new Vector2(
+                (_robustRandom.NextFloat() - 0.5f) * bounds,
+                (_robustRandom.NextFloat() - 0.5f) * bounds));
+
+        var historyComponent = EnsureComp<TileHistoryComponent>(gridUid);
+        ProtoId<ContentTileDefinition> previousTileId;
+        if (historyComponent.ZLevelHistory.TryGetValue(tileRef.GridIndices, out var history) &&
+            history.History.Count > 0)
+        {
+            history.LastModified = _timing.CurTick;
+            previousTileId = history.History[^1];
+            history.History.RemoveAt(history.History.Count - 1);
+
+            if (history.History.Count == 0)
+                historyComponent.ZLevelHistory.Remove(tileRef.GridIndices);
+
+            Dirty(gridUid, historyComponent);
+        }
+        else
+        {
+            previousTileId = tileDef.BaseTurf.Value;
+        }
+
+        if (spawnItem)
+        {
+            var tileItem = Spawn(tileDef.ItemDropPrototypeName, coordinates);
+            Transform(tileItem).LocalRotation = _robustRandom.NextDouble() * Math.Tau;
+            _zLevel.SetZLevelPosition(tileItem, tileRef.GridIndices.Z);
+        }
+
+        var previousDef = (ContentTileDefinition) _tileDefinitionManager[previousTileId];
+        _maps.SetZLevelTile(gridUid, mapGrid, tileRef.GridIndices, new Tile(previousDef.TileId));
+        return true;
+    }
+
     private void OnFloorTileAttempt(Entity<TileHistoryComponent> ent, ref FloorTileAttemptEvent args)
     {
         if (_tileStackLimit == 0)
             return;
+
+        if (args.ZLevel != 0)
+        {
+            var indices = new ZLevelTileIndices(args.GridIndices.X, args.GridIndices.Y, args.ZLevel);
+            if (ent.Comp.ZLevelHistory.TryGetValue(indices, out var history))
+                args.Cancelled = history.History.Count >= _tileStackLimit;
+            return;
+        }
+
         var chunkIndices = SharedMapSystem.GetChunkIndices(args.GridIndices, ChunkSize);
         if (!ent.Comp.ChunkHistory.TryGetValue(chunkIndices, out var chunk) ||
             !chunk.History.TryGetValue(args.GridIndices, out var stack))

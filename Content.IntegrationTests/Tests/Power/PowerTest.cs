@@ -7,6 +7,7 @@ using Content.Server.Power.Nodes;
 using Content.Shared.Coordinates;
 using Content.Shared.NodeContainer;
 using Content.Shared.Power.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
@@ -1205,6 +1206,64 @@ namespace Content.IntegrationTests.Tests.Power
                     Assert.That(batteryOutput.NodeGroup, Is.EqualTo(rightNode.NodeGroup));
 
                     Assert.That(leftNode.NodeGroup, Is.Not.EqualTo(rightNode.NodeGroup));
+                });
+            });
+        }
+
+        [Test]
+        public async Task TestCableNodeGroupsAreIsolatedByZLevel()
+        {
+            var server = Pair.Server;
+            var mapManager = server.ResolveDependency<IMapManager>();
+            var entityManager = server.ResolveDependency<IEntityManager>();
+            var nodeContainer = entityManager.System<NodeContainerSystem>();
+            var mapSystem = entityManager.System<SharedMapSystem>();
+            var zLevel = entityManager.System<SharedZLevelSystem>();
+            CableNode lowerLeft = default!;
+            CableNode lowerRight = default!;
+            CableNode upper = default!;
+
+            await server.WaitAssertion(() =>
+            {
+                var map = mapSystem.CreateMap(out var mapId);
+                var grid = mapManager.CreateGridEntity(mapId);
+                mapSystem.SetTile(grid, new Vector2i(0, 0), new Tile(1));
+                mapSystem.SetTile(grid, new Vector2i(1, 0), new Tile(1));
+                mapSystem.SetZLevelTile(grid.Owner, grid.Comp, new ZLevelTileIndices(1, 0, 1), new Tile(1));
+
+                var lowerLeftEntity = entityManager.SpawnEntity("CableHV", grid.Owner.ToCoordinates(0, 0));
+                var lowerRightEntity = entityManager.SpawnEntity("CableHV", grid.Owner.ToCoordinates(1, 0));
+                var upperEntity = entityManager.SpawnEntity("CableHV", grid.Owner.ToCoordinates(1, 0));
+                Assert.That(zLevel.SetZLevelPosition(upperEntity, 1), Is.True);
+
+                Assert.That(nodeContainer.TryGetNode<CableNode>(
+                    entityManager.GetComponent<NodeContainerComponent>(lowerLeftEntity),
+                    "power",
+                    out var lowerLeftNode), Is.True);
+                Assert.That(nodeContainer.TryGetNode<CableNode>(
+                    entityManager.GetComponent<NodeContainerComponent>(lowerRightEntity),
+                    "power",
+                    out var lowerRightNode), Is.True);
+                Assert.That(nodeContainer.TryGetNode<CableNode>(
+                    entityManager.GetComponent<NodeContainerComponent>(upperEntity),
+                    "power",
+                    out var upperNode), Is.True);
+
+                lowerLeft = lowerLeftNode!;
+                lowerRight = lowerRightNode!;
+                upper = upperNode!;
+            });
+
+            server.RunTicks(3);
+
+            await server.WaitAssertion(() =>
+            {
+                Assert.Multiple(() =>
+                {
+                    Assert.That(lowerLeft.NodeGroup, Is.Not.Null);
+                    Assert.That(lowerLeft.NodeGroup, Is.SameAs(lowerRight.NodeGroup));
+                    Assert.That(upper.NodeGroup, Is.Not.Null);
+                    Assert.That(upper.NodeGroup, Is.Not.SameAs(lowerLeft.NodeGroup));
                 });
             });
         }

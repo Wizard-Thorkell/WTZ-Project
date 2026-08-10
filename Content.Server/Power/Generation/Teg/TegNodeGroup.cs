@@ -137,7 +137,9 @@ public sealed partial class TegNodeGenerator : Node
             yield break;
 
         var mapSystem = entMan.System<SharedMapSystem>();
+        var transformSystem = entMan.System<SharedTransformSystem>();
         var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+        var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
         var dir = xform.Comp.LocalRotation.GetDir();
         var a = FindCirculator(dir);
@@ -153,7 +155,15 @@ public sealed partial class TegNodeGenerator : Node
         {
             var targetIdx = gridIndex.Offset(searchDir);
 
-            foreach (var node in NodeHelpers.GetNodesInTile(nodeQuery, gridEnt, targetIdx, mapSystem))
+            foreach (var node in NodeHelpers.GetNodesInTileOnZLevel(
+                         nodeQuery,
+                         xformQuery,
+                         gridEnt,
+                         targetIdx,
+                         zLevel,
+                         mapSystem,
+                         transformSystem,
+                         entMan))
             {
                 if (node is not TegNodeCirculator circulator)
                     continue;
@@ -190,13 +200,23 @@ public sealed partial class TegNodeCirculator : Node
             yield break;
 
         var mapSystem = entMan.System<SharedMapSystem>();
+        var transformSystem = entMan.System<SharedTransformSystem>();
         var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+        var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
         var dir = xform.Comp.LocalRotation.GetDir();
         var searchDir = dir.GetClockwise90Degrees();
         var targetIdx = gridIndex.Offset(searchDir);
 
-        foreach (var node in NodeHelpers.GetNodesInTile(nodeQuery, gridEnt, targetIdx, mapSystem))
+        foreach (var node in NodeHelpers.GetNodesInTileOnZLevel(
+                     nodeQuery,
+                     xformQuery,
+                     gridEnt,
+                     targetIdx,
+                     zLevel,
+                     mapSystem,
+                     transformSystem,
+                     entMan))
         {
             if (node is not TegNodeGenerator generator)
                 continue;

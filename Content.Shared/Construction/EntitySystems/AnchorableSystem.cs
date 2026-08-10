@@ -15,6 +15,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
 using Content.Shared.Tag;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Serialization;
 using Robust.Shared.Utility;
@@ -33,6 +34,7 @@ public sealed partial class AnchorableSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
     [Dependency] private readonly TagSystem _tagSystem = default!;
     [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     [Dependency] private readonly EntityQuery<PhysicsComponent> _physicsQuery = default!;
 
@@ -139,7 +141,7 @@ public sealed partial class AnchorableSystem : EntitySystem
 
         var xform = Transform(uid);
         if (TryComp<PhysicsComponent>(uid, out var anchorBody) &&
-            !TileFree(xform.Coordinates, anchorBody))
+            !TileFree(uid, xform.Coordinates, anchorBody))
         {
             _popup.PopupClient(Loc.GetString("anchorable-occupied"), uid, args.User);
             return;
@@ -289,7 +291,7 @@ public sealed partial class AnchorableSystem : EntitySystem
         if (!Resolve(entity, ref entity.Comp))
             return true;
 
-        if (TileFree(coordinates, entity.Comp))
+        if (TileFree(entity.Owner, coordinates, entity.Comp))
             return true;
 
         _popup.PopupClient(Loc.GetString("anchorable-occupied"), entity, user);
@@ -301,6 +303,11 @@ public sealed partial class AnchorableSystem : EntitySystem
     /// </summary>
     public bool TileFree(EntityCoordinates coordinates, PhysicsComponent anchorBody)
     {
+        return TileFree(EntityUid.Invalid, coordinates, anchorBody);
+    }
+
+    public bool TileFree(EntityUid entity, EntityCoordinates coordinates, PhysicsComponent anchorBody)
+    {
         // Probably ignore CanCollide on the anchoring body?
         var gridUid = _transformSystem.GetGrid(coordinates);
 
@@ -308,18 +315,22 @@ public sealed partial class AnchorableSystem : EntitySystem
             return false;
 
         var tileIndices = _map.TileIndicesFor((gridUid.Value, grid), coordinates);
-        return TileFree((gridUid.Value, grid), tileIndices, anchorBody.CollisionLayer, anchorBody.CollisionMask);
+        var zLevel = entity.IsValid() ? _zLevel.GetZLevel(entity) : 0;
+        return TileFree((gridUid.Value, grid), tileIndices, anchorBody.CollisionLayer, anchorBody.CollisionMask, zLevel);
     }
 
     /// <summary>
     /// Returns true if no hard anchored entities match the collision layer or mask specified.
     /// </summary>
     /// <param name="grid"></param>
-    public bool TileFree(Entity<MapGridComponent> grid, Vector2i gridIndices, int collisionLayer = 0, int collisionMask = 0)
+    public bool TileFree(
+        Entity<MapGridComponent> grid,
+        Vector2i gridIndices,
+        int collisionLayer = 0,
+        int collisionMask = 0,
+        int zLevel = 0)
     {
-        var enumerator = _map.GetAnchoredEntitiesEnumerator(grid, grid.Comp, gridIndices);
-
-        while (enumerator.MoveNext(out var ent))
+        foreach (var ent in _zLevel.GetAnchoredEntitiesOnZLevel(grid.Owner, grid.Comp, gridIndices, zLevel))
         {
             if (!_physicsQuery.TryGetComponent(ent, out var body) ||
                 !body.CanCollide ||
@@ -339,9 +350,14 @@ public sealed partial class AnchorableSystem : EntitySystem
     }
 
     [Obsolete("Use the Entity<MapGridComponent> version")]
-    public bool TileFree(MapGridComponent grid, Vector2i gridIndices, int collisionLayer = 0, int collisionMask = 0)
+    public bool TileFree(
+        MapGridComponent grid,
+        Vector2i gridIndices,
+        int collisionLayer = 0,
+        int collisionMask = 0,
+        int zLevel = 0)
     {
-        return TileFree((grid.Owner, grid), gridIndices, collisionLayer, collisionMask);
+        return TileFree((grid.Owner, grid), gridIndices, collisionLayer, collisionMask, zLevel);
     }
 
     /// <summary>
@@ -352,22 +368,22 @@ public sealed partial class AnchorableSystem : EntitySystem
         DebugTools.Assert(!Transform(uid).Anchored);
 
         // If we are unstackable, iterate through any other entities anchored on the current square
-        return _tagSystem.HasTag(uid, Unstackable) && AnyUnstackablesAnchoredAt(location);
+        return _tagSystem.HasTag(uid, Unstackable) && AnyUnstackablesAnchoredAt(location, uid);
     }
 
-    public bool AnyUnstackablesAnchoredAt(EntityCoordinates location)
+    public bool AnyUnstackablesAnchoredAt(EntityCoordinates location, EntityUid? source = null)
     {
         var gridUid = _transformSystem.GetGrid(location);
 
         if (!TryComp<MapGridComponent>(gridUid, out var grid))
             return false;
 
-        var enumerator = _map.GetAnchoredEntitiesEnumerator(gridUid.Value, grid, _map.LocalToTile(gridUid.Value, grid, location));
-
-        while (enumerator.MoveNext(out var entity))
+        var tile = _map.LocalToTile(gridUid.Value, grid, location);
+        var zLevel = source is { } uid ? _zLevel.GetZLevel(uid) : 0;
+        foreach (var entity in _zLevel.GetAnchoredEntitiesOnZLevel(gridUid.Value, grid, tile, zLevel))
         {
             // If we find another unstackable here, return true.
-            if (_tagSystem.HasTag(entity.Value, Unstackable))
+            if (_tagSystem.HasTag(entity, Unstackable))
                 return true;
         }
 

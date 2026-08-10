@@ -5,6 +5,8 @@ using Content.Shared.Interaction;
 using Content.Shared.Maps;
 using Content.Shared.Stacks;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Power.EntitySystems;
@@ -15,6 +17,9 @@ public sealed partial class CableSystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly EntityWhitelistSystem _whitelistSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
+
+    private readonly List<EntityUid> _zLevelAnchored = new();
 
     private void InitializeCablePlacer()
     {
@@ -35,12 +40,15 @@ public sealed partial class CableSystem
 
         var gridUid = _transform.GetGrid(args.ClickLocation)!.Value;
         var snapPos = _map.TileIndicesFor((gridUid, grid), args.ClickLocation);
-        var tileDef = (ContentTileDefinition)_tileManager[_map.GetTileRef(gridUid, grid, snapPos).Tile.TypeId];
+        var zLevel = _zLevel.GetZLevel(args.User);
+        var zTile = _map.GetZLevelTileRef(gridUid, grid, new ZLevelTileIndices(snapPos.X, snapPos.Y, zLevel));
+        var tileDef = (ContentTileDefinition)_tileManager[zTile.Tile.TypeId];
 
         if ((!component.OverTile && !tileDef.IsSubFloor) || !tileDef.Sturdy)
             return;
 
-        foreach (var anchored in _map.GetAnchoredEntities((gridUid, grid), snapPos))
+        _zLevel.GetAnchoredEntitiesOnZLevel(gridUid, grid, snapPos, zLevel, _zLevelAnchored);
+        foreach (var anchored in _zLevelAnchored)
         {
             if (_whitelistSystem.IsWhitelistPass(component.Blacklist, anchored))
                 return;
@@ -53,6 +61,9 @@ public sealed partial class CableSystem
             return;
 
         var newCable = Spawn(component.CablePrototypeId, _map.GridTileToLocal(gridUid, grid, snapPos));
+        if (zLevel != 0)
+            _zLevel.SetZLevelPosition(newCable, zLevel);
+
         _adminLogger.Add(LogType.Construction, LogImpact.Low,
             $"{ToPrettyString(args.User):player} placed {ToPrettyString(newCable):cable} at {Transform(newCable).Coordinates}");
         args.Handled = true;

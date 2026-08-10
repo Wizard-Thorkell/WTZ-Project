@@ -18,9 +18,20 @@ namespace Content.Server.Power.Nodes
                 yield break;
 
             var mapSystem = entMan.System<SharedMapSystem>();
+            var transformSystem = entMan.System<SharedTransformSystem>();
             var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+            var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
-            var nodes = NodeHelpers.GetCardinalNeighborNodes(nodeQuery, gridEnt, gridIndex, mapSystem, includeSameTile: false);
+            var nodes = NodeHelpers.GetCardinalNeighborNodesOnZLevel(
+                nodeQuery,
+                xformQuery,
+                gridEnt,
+                gridIndex,
+                zLevel,
+                mapSystem,
+                transformSystem,
+                entMan,
+                includeSameTile: false);
             foreach (var (dir, node) in nodes)
             {
                 if (node is CableTerminalNode

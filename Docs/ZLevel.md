@@ -285,8 +285,9 @@ feature phases below remain the backlog and acceptance criteria for each area.
 5. [Done] Integrate renderer and PVS behavior around visible floors and
    openings.
 6. [Done] Stabilize atmosphere on top of the shared boundary model.
-7. [Next] Expand vertical gameplay, construction, interaction, effects, and AI.
-8. Define a frame model for moving ships, stations, and planets.
+7. [Done] Make core construction, RCD, floor tools, anchoring, and power topology
+   respect vertical layers.
+8. [Next] Define a frame model for moving ships, stations, and planets.
 9. Add structural support and collapse as a late-stage consumer of the mature
    vertical model.
 
@@ -500,22 +501,46 @@ Goal: adapt common station gameplay so ZLevel becomes useful outside debug maps.
 
 Tasks:
 
-- Audit construction, RCD, tile replacement, wall building, windows, grilles,
-  disposal, wires, pipes, cables, and machine anchoring.
-- Ensure surface validation is active-Z-aware.
-- Ensure deconstruction does not affect another floor.
-- Ensure anchored entity queries are filtered by Z where gameplay expects one
+- [Partial] Audit construction, RCD, tile replacement, wall building, windows,
+  grilles, disposal, wires, pipes, cables, and machine anchoring. Construction,
+  RCD, floor tiles, anchoring, and cable/power node topology are covered;
+  disposals and remaining specialized machines still need focused audits.
+- [Done for common construction paths] Ensure surface validation is
+  active-Z-aware.
+- [Done for floor tiles and RCD] Ensure deconstruction does not affect another
   floor.
+- [Done for common construction and anchoring paths] Ensure anchored entity
+  queries are filtered by Z where gameplay expects one floor.
+- [Done] Keep cable and power node groups isolated per floor and reflood them
+  when an entity's effective Z changes.
+- [Done] Preserve independent tile replacement history for sparse upper floors,
+  including network and map-data serialization of three-dimensional indices.
 - Add Z-aware checks to storage dumps, placeable surfaces, and thrown/landed
   items.
 - Decide how multi-floor machines or tall entities should be represented.
 
 Exit criteria:
 
-- A mapper/player can build and modify upper floors with normal tools.
-- Construction actions do not leak across floors.
-- Common anchored components behave as if each floor has its own surface unless
-  a system explicitly opts into cross-floor behavior.
+- [Covered for construction graphs, floor stacks, and RCD] A mapper/player can
+  build and modify upper floors with normal tools.
+- [Covered for the implemented common paths] Construction actions do not leak
+  across floors.
+- [Covered for common anchoring blockers] Common anchored components behave as
+  if each floor has its own surface unless a system explicitly opts into
+  cross-floor behavior.
+
+Verification (2026-08-10):
+
+- `ZLevelMovementTest`: 10 passed, including inherited entity Z and independent
+  upper-floor tile history.
+- `TestCableNodeGroupsAreIsolatedByZLevel`: passed.
+- `RCDConstructionDeconstructionTest`: passed for legacy `z = 0` behavior.
+- `RCDConstructionUsesTheUsersZLevel`: passed for upper-floor wall and floor
+  construction without changing the base tile.
+- `ZLevelTileIndicesSerializerTest`: 2 passed for round-trip and malformed-data
+  validation.
+- Content shared, server, client, and integration-test projects build with zero
+  errors.
 
 ### Phase 7: Navigation And AI
 

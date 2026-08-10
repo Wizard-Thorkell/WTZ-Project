@@ -67,7 +67,7 @@ public sealed class DeployFoldableSystem : EntitySystem
             return;
 
         if (!TryComp(ent.Owner, out PhysicsComponent? anchorBody)
-            || !_anchorable.TileFree(args.ClickLocation, anchorBody))
+            || !_anchorable.TileFree(ent.Owner, args.ClickLocation, anchorBody))
         {
             _popup.PopupPredicted(Loc.GetString("foldable-deploy-fail", ("object", ent)), ent, args.User);
             return;

@@ -8,6 +8,7 @@ using Content.Shared.Maps;
 using Content.Shared.Physics;
 using Content.Shared.Popups;
 using Content.Shared.Stacks;
+using Content.Shared.ZLevel.Components;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Map;
@@ -65,6 +66,9 @@ public sealed class FloorTileSystem : EntitySystem
         if (component.Outputs == null)
             return;
 
+        var userTransform = Transform(args.User);
+        var zLevel = _transform.GetZLevel((args.User, userTransform, CompOrNull<ZLevelPositionComponent>(args.User)));
+
         // this looks a bit sussy but it might be because it needs to be able to place off of grids and expand them
         var location = args.ClickLocation.AlignWithClosestGridTile();
         var locationMap = _transform.ToMapCoordinates(location);
@@ -97,24 +101,39 @@ public sealed class FloorTileSystem : EntitySystem
             return;
         }
 
-        var userPos = _transform.ToMapCoordinates(Transform(args.User).Coordinates).Position;
+        var userPos = _transform.ToMapCoordinates(userTransform.Coordinates).Position;
         var dir = userPos - map.Position;
         var canAccessCenter = false;
         if (dir.LengthSquared() > 0.01)
         {
             var ray = new CollisionRay(map.Position, dir.Normalized(), (int) CollisionGroup.Impassable);
-            var results = _physics.IntersectRay(locationMap.MapId, ray, dir.Length(), returnOnFirstHit: true);
-            canAccessCenter = !results.Any();
+            var results = _physics.IntersectRay(locationMap.MapId, ray, dir.Length(), returnOnFirstHit: false);
+            canAccessCenter = !results.Any(result =>
+                TryComp(result.HitEntity, out TransformComponent? hitTransform) &&
+                _transform.GetZLevel((
+                    result.HitEntity,
+                    hitTransform,
+                    CompOrNull<ZLevelPositionComponent>(result.HitEntity))) == zLevel);
         }
 
         // if user can access tile center then they can place floor
         // otherwise check it isn't blocked by a wall
-        if (!canAccessCenter && _turf.TryGetTileRef(location, out var tileRef))
+        if (!canAccessCenter && _turf.TryGetZLevelTileRef(location, zLevel, out var tileRef))
         {
             _turfCheck.Clear();
-            _lookup.GetEntitiesInTile(tileRef.Value, _turfCheck);
+            var baseTile = _map.GetTileRef(
+                tileRef.GridUid,
+                Comp<MapGridComponent>(tileRef.GridUid),
+                new Vector2i(tileRef.GridIndices.X, tileRef.GridIndices.Y));
+            _lookup.GetEntitiesInTile(baseTile, _turfCheck);
             foreach (var ent in _turfCheck)
             {
+                if (!TryComp(ent, out TransformComponent? entTransform) ||
+                    _transform.GetZLevel((ent, entTransform, CompOrNull<ZLevelPositionComponent>(ent))) != zLevel)
+                {
+                    continue;
+                }
+
                 if (_physicsQuery.TryGetComponent(ent, out var phys) &&
                     phys.BodyType == BodyType.Static &&
                     phys.Hard &&
@@ -133,9 +152,15 @@ public sealed class FloorTileSystem : EntitySystem
             if (mapGrid != null)
             {
                 var gridUid = location.EntityId;
-                var tile = _map.GetTileRef(gridUid, mapGrid, location);
+                var xy = _map.TileIndicesFor(gridUid, mapGrid, location);
+                var tile = _map.GetZLevelTileRef(gridUid, mapGrid, new ZLevelTileIndices(xy.X, xy.Y, zLevel));
 
-                if (!CanPlaceTile(gridUid, mapGrid, tile.GridIndices, out var reason))
+                if (!CanPlaceTile(
+                        gridUid,
+                        mapGrid,
+                        new Vector2i(tile.GridIndices.X, tile.GridIndices.Y),
+                        zLevel,
+                        out var reason))
                 {
                     _popup.PopupClient(reason, args.User, args.User);
                     return;
@@ -148,7 +173,7 @@ public sealed class FloorTileSystem : EntitySystem
                     if (!_stackSystem.TryUse((uid, stack), 1))
                         continue;
 
-                    PlaceAt(args.User, gridUid, mapGrid, location, currentTileDefinition.TileId, component.PlaceTileSound);
+                    PlaceAt(args.User, gridUid, mapGrid, location, currentTileDefinition.TileId, component.PlaceTileSound, zLevel);
                     args.Handled = true;
                     return;
                 }
@@ -166,7 +191,15 @@ public sealed class FloorTileSystem : EntitySystem
                 var gridXform = Transform(grid);
                 _transform.SetWorldPosition((grid, gridXform), locationMap.Position);
                 location = new EntityCoordinates(grid, Vector2.Zero);
-                PlaceAt(args.User, grid, grid.Comp, location, _tileDefinitionManager[component.Outputs[0]].TileId, component.PlaceTileSound, grid.Comp.TileSize / 2f);
+                PlaceAt(
+                    args.User,
+                    grid,
+                    grid.Comp,
+                    location,
+                    _tileDefinitionManager[component.Outputs[0]].TileId,
+                    component.PlaceTileSound,
+                    zLevel,
+                    grid.Comp.TileSize / 2f);
                 return;
             }
         }
@@ -191,7 +224,7 @@ public sealed class FloorTileSystem : EntitySystem
     }
 
     private void PlaceAt(EntityUid user, EntityUid gridUid, MapGridComponent mapGrid, EntityCoordinates location,
-        ushort tileId, SoundSpecifier placeSound, float offset = 0)
+        ushort tileId, SoundSpecifier placeSound, int zLevel, float offset = 0)
     {
         _adminLogger.Add(LogType.Tile, LogImpact.Low, $"{ToPrettyString(user):actor} placed tile {_tileDefinitionManager[tileId].Name} at {ToPrettyString(gridUid)} {location}");
 
@@ -199,15 +232,31 @@ public sealed class FloorTileSystem : EntitySystem
         var random = new System.Random((int)_timing.CurTick.Value);
         var variant = _tile.PickVariant(tileDef, random);
 
-        var tileRef = _map.GetTileRef(gridUid, mapGrid, location.Offset(new Vector2(offset, offset)));
-        _tile.ReplaceTile(tileRef, tileDef, gridUid, mapGrid, variant: variant);
+        var coordinates = location.Offset(new Vector2(offset, offset));
+        var xy = _map.TileIndicesFor(gridUid, mapGrid, coordinates);
+        var tileRef = _map.GetZLevelTileRef(gridUid, mapGrid, new ZLevelTileIndices(xy.X, xy.Y, zLevel));
+        _tile.ReplaceZLevelTile(tileRef, tileDef, gridUid, mapGrid, variant: variant);
 
         _audio.PlayPredicted(placeSound, location, user);
     }
 
-    public bool CanPlaceTile(EntityUid gridUid, MapGridComponent component, Vector2i gridIndices, [NotNullWhen(false)] out string? reason)
+    public bool CanPlaceTile(
+        EntityUid gridUid,
+        MapGridComponent component,
+        Vector2i gridIndices,
+        [NotNullWhen(false)] out string? reason)
     {
-        var ev = new FloorTileAttemptEvent(gridIndices);
+        return CanPlaceTile(gridUid, component, gridIndices, 0, out reason);
+    }
+
+    public bool CanPlaceTile(
+        EntityUid gridUid,
+        MapGridComponent component,
+        Vector2i gridIndices,
+        int zLevel,
+        [NotNullWhen(false)] out string? reason)
+    {
+        var ev = new FloorTileAttemptEvent(gridIndices, zLevel);
         RaiseLocalEvent(gridUid, ref ev);
 
         if (ev.Cancelled)

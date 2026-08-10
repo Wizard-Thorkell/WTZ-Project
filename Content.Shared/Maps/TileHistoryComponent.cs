@@ -1,4 +1,6 @@
+using System.Linq;
 using Robust.Shared.GameStates;
+using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Serialization;
 using Robust.Shared.Timing;
@@ -12,6 +14,10 @@ public sealed partial class TileHistoryComponent : Component
     [DataField]
     public Dictionary<Vector2i, TileHistoryChunk> ChunkHistory = new();
 
+    // Sparse history for non-zero Z-level tiles.
+    [DataField]
+    public Dictionary<ZLevelTileIndices, ZLevelTileHistory> ZLevelHistory = new();
+
     /// <summary>
     ///     Tick at which PVS was last toggled. Ensures that all players receive a full update when toggling PVS.
     /// </summary>
@@ -22,10 +28,14 @@ public sealed partial class TileHistoryComponent : Component
 public sealed class TileHistoryState : ComponentState
 {
     public Dictionary<Vector2i, TileHistoryChunk> ChunkHistory;
+    public Dictionary<ZLevelTileIndices, ZLevelTileHistory> ZLevelHistory;
 
-    public TileHistoryState(Dictionary<Vector2i, TileHistoryChunk> chunkHistory)
+    public TileHistoryState(
+        Dictionary<Vector2i, TileHistoryChunk> chunkHistory,
+        Dictionary<ZLevelTileIndices, ZLevelTileHistory> zLevelHistory)
     {
         ChunkHistory = chunkHistory;
+        ZLevelHistory = zLevelHistory;
     }
 }
 
@@ -34,11 +44,19 @@ public sealed class TileHistoryDeltaState : ComponentState, IComponentDeltaState
 {
     public Dictionary<Vector2i, TileHistoryChunk> ChunkHistory;
     public HashSet<Vector2i> AllHistoryChunks;
+    public Dictionary<ZLevelTileIndices, ZLevelTileHistory> ZLevelHistory;
+    public HashSet<ZLevelTileIndices> AllZLevelHistory;
 
-    public TileHistoryDeltaState(Dictionary<Vector2i, TileHistoryChunk> chunkHistory, HashSet<Vector2i> allHistoryChunks)
+    public TileHistoryDeltaState(
+        Dictionary<Vector2i, TileHistoryChunk> chunkHistory,
+        HashSet<Vector2i> allHistoryChunks,
+        Dictionary<ZLevelTileIndices, ZLevelTileHistory> zLevelHistory,
+        HashSet<ZLevelTileIndices> allZLevelHistory)
     {
         ChunkHistory = chunkHistory;
         AllHistoryChunks = allHistoryChunks;
+        ZLevelHistory = zLevelHistory;
+        AllZLevelHistory = allZLevelHistory;
     }
 
     public void ApplyToFullState(TileHistoryState state)
@@ -59,6 +77,8 @@ public sealed class TileHistoryDeltaState : ComponentState, IComponentDeltaState
         {
             state.ChunkHistory[indices] = new TileHistoryChunk(chunk);
         }
+
+        ApplyZLevelHistory(state.ZLevelHistory);
     }
 
     public void ApplyToComponent(TileHistoryComponent component)
@@ -79,6 +99,8 @@ public sealed class TileHistoryDeltaState : ComponentState, IComponentDeltaState
         {
             component.ChunkHistory[indices] = new TileHistoryChunk(chunk);
         }
+
+        ApplyZLevelHistory(component.ZLevelHistory);
     }
 
     public TileHistoryState CreateNewFullState(TileHistoryState state)
@@ -96,7 +118,45 @@ public sealed class TileHistoryDeltaState : ComponentState, IComponentDeltaState
                 chunks.TryAdd(indices, new TileHistoryChunk(chunk));
         }
 
-        return new TileHistoryState(chunks);
+        var zLevelHistory = CloneZLevelHistory(state.ZLevelHistory);
+        foreach (var (indices, history) in ZLevelHistory)
+        {
+            zLevelHistory[indices] = new ZLevelTileHistory(history);
+        }
+
+        foreach (var indices in zLevelHistory.Keys.ToArray())
+        {
+            if (!AllZLevelHistory.Contains(indices))
+                zLevelHistory.Remove(indices);
+        }
+
+        return new TileHistoryState(chunks, zLevelHistory);
+    }
+
+    private void ApplyZLevelHistory(Dictionary<ZLevelTileIndices, ZLevelTileHistory> target)
+    {
+        foreach (var indices in target.Keys.ToArray())
+        {
+            if (!AllZLevelHistory.Contains(indices))
+                target.Remove(indices);
+        }
+
+        foreach (var (indices, history) in ZLevelHistory)
+        {
+            target[indices] = new ZLevelTileHistory(history);
+        }
+    }
+
+    private static Dictionary<ZLevelTileIndices, ZLevelTileHistory> CloneZLevelHistory(
+        Dictionary<ZLevelTileIndices, ZLevelTileHistory> source)
+    {
+        var clone = new Dictionary<ZLevelTileIndices, ZLevelTileHistory>(source.Count);
+        foreach (var (indices, history) in source)
+        {
+            clone[indices] = new ZLevelTileHistory(history);
+        }
+
+        return clone;
     }
 }
 
@@ -120,6 +180,26 @@ public sealed partial class TileHistoryChunk
         {
             History[key] = new List<ProtoId<ContentTileDefinition>>(value);
         }
+        LastModified = other.LastModified;
+    }
+}
+
+[DataDefinition, Serializable, NetSerializable]
+public sealed partial class ZLevelTileHistory
+{
+    [DataField]
+    public List<ProtoId<ContentTileDefinition>> History = new();
+
+    [ViewVariables]
+    public GameTick LastModified;
+
+    public ZLevelTileHistory()
+    {
+    }
+
+    public ZLevelTileHistory(ZLevelTileHistory other)
+    {
+        History = new List<ProtoId<ContentTileDefinition>>(other.History);
         LastModified = other.LastModified;
     }
 }

@@ -5,6 +5,7 @@ using Content.Shared.Hands.Components;
 using Content.Shared.Interaction;
 using Content.Shared.RCD.Components;
 using Content.Shared.RCD.Systems;
+using Content.Shared.ZLevel.Components;
 using Robust.Client.Placement;
 using Robust.Client.Player;
 using Robust.Client.State;
@@ -100,8 +101,15 @@ public sealed class AlignRCDConstruction : PlacementMode
         var gridUid = _transformSystem.GetGrid(position);
         if (!_entityManager.TryGetComponent<MapGridComponent>(gridUid, out var mapGrid))
             return false;
-        var tile = _mapSystem.GetTileRef(gridUid.Value, mapGrid, position);
         var posVector = _mapSystem.TileIndicesFor(gridUid.Value, mapGrid, position);
+        var zLevel = _transformSystem.GetZLevel((
+            player.Value,
+            xform,
+            _entityManager.GetComponentOrNull<ZLevelPositionComponent>(player.Value)));
+        var tile = _mapSystem.GetZLevelTileRef(
+            gridUid.Value,
+            mapGrid,
+            new ZLevelTileIndices(posVector.X, posVector.Y, zLevel));
 
         // Determine if the user is hovering over a target
         var currentState = _stateManager.CurrentState;

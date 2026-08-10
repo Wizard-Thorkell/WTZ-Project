@@ -20,9 +20,19 @@ namespace Content.Server.NodeContainer.Nodes
                 yield break;
 
             var mapSystem = entMan.System<SharedMapSystem>();
+            var transformSystem = entMan.System<SharedTransformSystem>();
             var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+            var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
-            foreach (var (_, node) in NodeHelpers.GetCardinalNeighborNodes(nodeQuery, gridEnt, gridIndex, mapSystem))
+            foreach (var (_, node) in NodeHelpers.GetCardinalNeighborNodesOnZLevel(
+                         nodeQuery,
+                         xformQuery,
+                         gridEnt,
+                         gridIndex,
+                         zLevel,
+                         mapSystem,
+                         transformSystem,
+                         entMan))
             {
                 if (node != this)
                     yield return node;

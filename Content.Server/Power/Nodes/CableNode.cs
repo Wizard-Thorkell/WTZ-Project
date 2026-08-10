@@ -18,14 +18,24 @@ namespace Content.Server.Power.Nodes
                 yield break;
 
             var mapSystem = entMan.System<SharedMapSystem>();
+            var transformSystem = entMan.System<SharedTransformSystem>();
             var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+            var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
             // While we go over adjacent nodes, we build a list of blocked directions due to
             // incoming or outgoing wire terminals.
             var terminalDirs = 0;
             List<(Direction, Node)> nodeDirs = new();
 
-            foreach (var (dir, node) in NodeHelpers.GetCardinalNeighborNodes(nodeQuery, gridEnt, gridIndex, mapSystem))
+            foreach (var (dir, node) in NodeHelpers.GetCardinalNeighborNodesOnZLevel(
+                         nodeQuery,
+                         xformQuery,
+                         gridEnt,
+                         gridIndex,
+                         zLevel,
+                         mapSystem,
+                         transformSystem,
+                         entMan))
             {
                 if (node is CableNode && node != this)
                 {

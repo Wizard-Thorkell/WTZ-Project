@@ -1,5 +1,6 @@
 ﻿using Content.Shared.Maps;
 using JetBrains.Annotations;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Utility;
 
@@ -20,13 +21,15 @@ namespace Content.Shared.Construction.Conditions
 
         public bool Condition(EntityUid user, EntityCoordinates location, Direction direction)
         {
-            if (!IoCManager.Resolve<IEntityManager>().TrySystem<TurfSystem>(out var turfSystem))
+            var entityManager = IoCManager.Resolve<IEntityManager>();
+            if (!entityManager.TrySystem<TurfSystem>(out var turfSystem) ||
+                !entityManager.TrySystem<SharedZLevelSystem>(out var zLevelSystem))
                 return false;
 
-            if (!turfSystem.TryGetTileRef(location, out var tileFound))
+            if (!turfSystem.TryGetZLevelTileRef(location, zLevelSystem.GetZLevel(user), out var tileFound))
                 return false;
 
-            var tile = turfSystem.GetContentTileDefinition(tileFound.Value);
+            var tile = turfSystem.GetContentTileDefinition(tileFound);
             foreach (var targetTile in TargetTiles)
             {
                 if (tile.ID == targetTile)

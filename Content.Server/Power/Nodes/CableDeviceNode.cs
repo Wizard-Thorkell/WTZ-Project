@@ -41,9 +41,19 @@ namespace Content.Server.Power.Nodes
                 yield break;
 
             var mapSystem = entMan.System<SharedMapSystem>();
+            var transformSystem = entMan.System<SharedTransformSystem>();
             var gridIndex = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+            var zLevel = NodeHelpers.GetZLevel(xform, transformSystem, entMan);
 
-            foreach (var node in NodeHelpers.GetNodesInTile(nodeQuery, gridEnt, gridIndex, mapSystem))
+            foreach (var node in NodeHelpers.GetNodesInTileOnZLevel(
+                         nodeQuery,
+                         xformQuery,
+                         gridEnt,
+                         gridIndex,
+                         zLevel,
+                         mapSystem,
+                         transformSystem,
+                         entMan))
             {
                 if (node is CableNode)
                     yield return node;

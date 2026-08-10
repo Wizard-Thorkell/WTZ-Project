@@ -1,5 +1,6 @@
 using Content.Shared.Maps;
 using Content.Shared.Physics;
+using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
 using Robust.Shared.Map;
 
@@ -15,25 +16,27 @@ public sealed partial class TileNotBlocked : IConstructionCondition
 
     public bool Condition(EntityUid user, EntityCoordinates location, Direction direction)
     {
-        if (!IoCManager.Resolve<IEntityManager>().TrySystem<TurfSystem>(out var turfSystem))
+        var entityManager = IoCManager.Resolve<IEntityManager>();
+        if (!entityManager.TrySystem<TurfSystem>(out var turfSystem) ||
+            !entityManager.TrySystem<SharedZLevelSystem>(out var zLevelSystem))
             return false;
 
-        if (!turfSystem.TryGetTileRef(location, out var tileRef))
+        if (!turfSystem.TryGetZLevelTileRef(location, zLevelSystem.GetZLevel(user), out var tileRef))
         {
             return false;
         }
 
-        if (turfSystem.IsSpace(tileRef.Value) && _failIfSpace)
+        if (turfSystem.IsSpace(tileRef) && _failIfSpace)
         {
             return false;
         }
 
-        if (!turfSystem.GetContentTileDefinition(tileRef.Value).Sturdy && _failIfNotSturdy)
+        if (!turfSystem.GetContentTileDefinition(tileRef).Sturdy && _failIfNotSturdy)
         {
             return false;
         }
 
-        return !turfSystem.IsTileBlocked(tileRef.Value, _filterMobs ? CollisionGroup.MobMask : CollisionGroup.Impassable);
+        return !turfSystem.IsTileBlocked(tileRef, _filterMobs ? CollisionGroup.MobMask : CollisionGroup.Impassable);
     }
 
     public ConstructionGuideEntry GenerateGuideEntry()

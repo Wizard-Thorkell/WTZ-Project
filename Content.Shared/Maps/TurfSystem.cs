@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Numerics;
 using Content.Shared.Physics;
+using Content.Shared.ZLevel.Components;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics;
@@ -21,6 +22,7 @@ public sealed class TurfSystem : EntitySystem
     [Dependency] private readonly ITileDefinitionManager _tileDefinitions = default!;
 
     [Dependency] private readonly EntityQuery<FixturesComponent> _fixtureQuery = default!;
+    [Dependency] private readonly EntityQuery<TransformComponent> _transformQuery = default!;
 
     /// <summary>
     /// Attempts to get the turf at or under some given coordinates or null if no such turf exists.
@@ -54,10 +56,47 @@ public sealed class TurfSystem : EntitySystem
     }
 
     /// <summary>
+    /// Attempts to get the tile on a specific vertical layer at the given coordinates.
+    /// </summary>
+    public ZLevelTileRef? GetZLevelTileRef(EntityCoordinates coordinates, int zLevel)
+    {
+        if (!coordinates.IsValid(EntityManager))
+            return null;
+
+        var pos = _transform.ToMapCoordinates(coordinates);
+        if (!_mapManager.TryFindGridAt(pos, out var gridUid, out var grid))
+            return null;
+
+        var indices = _mapSystem.TileIndicesFor(gridUid, grid, coordinates);
+        return _mapSystem.GetZLevelTileRef(gridUid, grid, new ZLevelTileIndices(indices.X, indices.Y, zLevel));
+    }
+
+    /// <summary>
+    /// Attempts to get the tile on a specific vertical layer at the given coordinates.
+    /// </summary>
+    public bool TryGetZLevelTileRef(EntityCoordinates coordinates, int zLevel, out ZLevelTileRef tile)
+    {
+        var found = GetZLevelTileRef(coordinates, zLevel);
+        tile = found ?? ZLevelTileRef.Zero;
+        return found != null;
+    }
+
+    /// <summary>
     ///     Returns true if a given tile is blocked by physics-enabled entities.
     /// </summary>
     public bool IsTileBlocked(TileRef turf, CollisionGroup mask, float minIntersectionArea = 0.1f)
         => IsTileBlocked(turf.GridUid, turf.GridIndices, mask, minIntersectionArea: minIntersectionArea);
+
+    /// <summary>
+    /// Returns true if a tile on a specific vertical layer is blocked by physics-enabled entities.
+    /// </summary>
+    public bool IsTileBlocked(ZLevelTileRef turf, CollisionGroup mask, float minIntersectionArea = 0.1f)
+        => IsTileBlocked(
+            turf.GridUid,
+            new Vector2i(turf.GridIndices.X, turf.GridIndices.Y),
+            mask,
+            zLevel: turf.GridIndices.Z,
+            minIntersectionArea: minIntersectionArea);
 
     /// <summary>
     ///     Returns true if a given tile is blocked by physics-enabled entities.
@@ -73,6 +112,7 @@ public sealed class TurfSystem : EntitySystem
         CollisionGroup mask,
         MapGridComponent? grid = null,
         TransformComponent? gridXform = null,
+        int zLevel = 0,
         float minIntersectionArea = 0.1f)
     {
         if (!Resolve(gridUid, ref grid, ref gridXform))
@@ -92,6 +132,12 @@ public sealed class TurfSystem : EntitySystem
         var intersectionArea = 0f;
         foreach (var ent in _entityLookup.GetEntitiesIntersecting(gridUid, worldBox, LookupFlags.Dynamic | LookupFlags.Static))
         {
+            if (!_transformQuery.TryComp(ent, out var entXform) ||
+                _transform.GetZLevel((ent, entXform, CompOrNull<ZLevelPositionComponent>(ent))) != zLevel)
+            {
+                continue;
+            }
+
             if (!_fixtureQuery.TryGetComponent(ent, out var fixtures))
                 continue;
 
@@ -144,12 +190,31 @@ public sealed class TurfSystem : EntitySystem
     }
 
     /// <summary>
+    /// Returns whether a Z-level tile is considered to be space or directly exposed to space.
+    /// </summary>
+    public bool IsSpace(ZLevelTileRef tile)
+    {
+        return IsSpace(tile.Tile);
+    }
+
+    /// <summary>
     /// Returns the location of the centre of the tile in grid coordinates.
     /// </summary>
     public EntityCoordinates GetTileCenter(TileRef turf)
     {
         var grid = Comp<MapGridComponent>(turf.GridUid);
         var center = (turf.GridIndices + new Vector2(0.5f, 0.5f)) * grid.TileSize;
+        return new EntityCoordinates(turf.GridUid, center);
+    }
+
+    /// <summary>
+    /// Returns the two-dimensional grid location of the centre of a Z-level tile.
+    /// </summary>
+    public EntityCoordinates GetTileCenter(ZLevelTileRef turf)
+    {
+        var grid = Comp<MapGridComponent>(turf.GridUid);
+        var indices = new Vector2(turf.GridIndices.X, turf.GridIndices.Y);
+        var center = (indices + new Vector2(0.5f, 0.5f)) * grid.TileSize;
         return new EntityCoordinates(turf.GridUid, center);
     }
 
@@ -165,6 +230,14 @@ public sealed class TurfSystem : EntitySystem
     ///     Returns the content tile definition for a tile ref.
     /// </summary>
     public ContentTileDefinition GetContentTileDefinition(TileRef tile)
+    {
+        return GetContentTileDefinition(tile.Tile);
+    }
+
+    /// <summary>
+    /// Returns the content tile definition for a Z-level tile ref.
+    /// </summary>
+    public ContentTileDefinition GetContentTileDefinition(ZLevelTileRef tile)
     {
         return GetContentTileDefinition(tile.Tile);
     }

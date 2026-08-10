@@ -5,6 +5,7 @@
 using Content.IntegrationTests.Tests.Helpers;
 using Content.IntegrationTests.Tests.Movement;
 using Content.Server.ZLevel.Systems;
+using Content.Shared.Maps;
 using Content.Shared.StepTrigger.Systems;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
@@ -17,12 +18,74 @@ using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
 [TestFixture]
 public sealed class ZLevelMovementTest : MovementTest
 {
+    [Test]
+    public async Task ZLevelSystemResolvesInheritedPosition()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            var coordinates = SEntMan.GetCoordinates(PlayerCoords);
+            var parent = SEntMan.SpawnEntity(null, coordinates);
+            var child = SEntMan.SpawnEntity(null, coordinates);
+
+            Assert.That(zLevel.SetZLevelPosition(parent, 3), Is.True);
+            transform.SetParent(child, parent);
+
+            Assert.That(zLevel.GetZLevel(child), Is.EqualTo(3));
+            Assert.That(zLevel.IsOnZLevel(child, 3), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task ZLevelTileHistoryIsIndependentFromBaseLayer()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var tiles = SEntMan.System<TileSystem>();
+            var definitions = Server.ResolveDependency<ITileDefinitionManager>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var coordinates = SEntMan.GetCoordinates(PlayerCoords);
+            var xy = map.TileIndicesFor(MapData.Grid, grid, coordinates);
+            var upperIndices = new ZLevelTileIndices(xy.X, xy.Y, 1);
+            var plating = (ContentTileDefinition) definitions["Plating"];
+            var steel = (ContentTileDefinition) definitions["FloorSteel"];
+
+            map.SetTile(MapData.Grid, grid, xy, new Tile(plating.TileId));
+            map.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(plating.TileId));
+
+            var upper = map.GetZLevelTileRef(MapData.Grid, grid, upperIndices);
+            Assert.That(tiles.ReplaceZLevelTile(upper, steel, MapData.Grid, grid), Is.True);
+
+            upper = map.GetZLevelTileRef(MapData.Grid, grid, upperIndices);
+            Assert.That(tiles.ReplaceZLevelTile(upper, plating, MapData.Grid, grid), Is.True);
+
+            var history = SEntMan.GetComponent<TileHistoryComponent>(MapData.Grid);
+            Assert.Multiple(() =>
+            {
+                Assert.That(history.ZLevelHistory[upperIndices].History, Has.Count.EqualTo(1));
+                Assert.That(history.ChunkHistory, Is.Empty);
+            });
+
+            upper = map.GetZLevelTileRef(MapData.Grid, grid, upperIndices);
+            Assert.That(tiles.DeconstructZLevelTile(upper, spawnItem: false), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(map.GetZLevelTileRef(MapData.Grid, grid, upperIndices).Tile.TypeId, Is.EqualTo(steel.TileId));
+                Assert.That(map.GetTileRef(MapData.Grid, grid, xy).Tile.TypeId, Is.EqualTo(plating.TileId));
+                Assert.That(history.ZLevelHistory, Is.Empty);
+            });
+        });
+    }
+
     [Test]
     public async Task ZLevelUpperFloorFallAndTileEventTest()
     {
