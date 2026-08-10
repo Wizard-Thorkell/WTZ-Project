@@ -291,8 +291,7 @@ public sealed class CloningPodSystem : EntitySystem
         clonePod.CloningProgress = 0f;
         UpdateStatus(uid, CloningPodStatus.Idle, clonePod);
         var transform = Transform(uid);
-        var indices = _transformSystem.GetGridTilePositionOrDefault((uid, transform));
-        var tileMix = _atmosphereSystem.GetTileMixture(transform.GridUid, null, indices, true);
+        var tileMix = _atmosphereSystem.GetTileMixture((uid, transform), true);
 
         if (HasComp<EmaggedComponent>(uid))
         {

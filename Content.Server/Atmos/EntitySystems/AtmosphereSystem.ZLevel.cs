@@ -11,6 +11,8 @@ namespace Content.Server.Atmos.EntitySystems;
 
 public sealed partial class AtmosphereSystem
 {
+    private static readonly int[] VerticalZOffsets = [-1, 1];
+
     private void OnZLevelTileChanged(ref ZLevelTileChangedEvent ev)
     {
         foreach (var change in ev.Changes)
@@ -30,7 +32,12 @@ public sealed partial class AtmosphereSystem
 
     public void InvalidateTile(Entity<GridAtmosphereComponent?> entity, ZLevelTileIndices tile)
     {
-        if (_atmosQuery.Resolve(entity.Owner, ref entity.Comp, false))
+        if (!_atmosQuery.Resolve(entity.Owner, ref entity.Comp, false))
+            return;
+
+        if (tile.Z == 0)
+            entity.Comp.InvalidatedCoords.Add(new Vector2i(tile.X, tile.Y));
+        else
             entity.Comp.InvalidatedZLevelCoords.Add(tile);
     }
 

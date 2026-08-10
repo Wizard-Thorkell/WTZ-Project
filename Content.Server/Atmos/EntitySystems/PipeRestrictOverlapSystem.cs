@@ -79,6 +79,7 @@ public sealed class PipeRestrictOverlapSystem : EntitySystem
         var indices = _map.TileIndicesFor(grid, gridComp, ent.Comp2.Coordinates);
         _anchoredEntities.Clear();
         _map.GetAnchoredEntities((grid, gridComp), indices, _anchoredEntities);
+        var zLevel = _xform.GetZLevel((ent.Owner, ent.Comp2, CompOrNull<ZLevelPositionComponent>(ent.Owner)));
 
         foreach (var otherEnt in _anchoredEntities)
         {
@@ -89,7 +90,11 @@ public sealed class PipeRestrictOverlapSystem : EntitySystem
             if (!_nodeContainerQuery.TryComp(otherEnt, out var otherComp))
                 continue;
 
-            if (PipeNodesOverlap(ent, (otherEnt, otherComp, Transform(otherEnt))))
+            var otherTransform = Transform(otherEnt);
+            if (_xform.GetZLevel((otherEnt, otherTransform, CompOrNull<ZLevelPositionComponent>(otherEnt))) != zLevel)
+                continue;
+
+            if (PipeNodesOverlap(ent, (otherEnt, otherComp, otherTransform)))
                 return true;
         }
 

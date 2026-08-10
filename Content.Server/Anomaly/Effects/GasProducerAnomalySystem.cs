@@ -5,6 +5,7 @@ using Content.Shared.Atmos;
 using Robust.Shared.Random;
 using System.Linq;
 using System.Numerics;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Anomaly.Effects;
@@ -17,6 +18,7 @@ public sealed class GasProducerAnomalySystem : EntitySystem
     [Dependency] private readonly AtmosphereSystem _atmosphere = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
 
     public override void Initialize()
     {
@@ -56,12 +58,29 @@ public sealed class GasProducerAnomalySystem : EntitySystem
         if (!TryComp<MapGridComponent>(xform.GridUid, out var grid))
             return;
 
-        var localpos = xform.Coordinates.Position;
-        var tilerefs = _map.GetLocalTilesIntersecting(
+        var zLevel = _transform.GetZLevel((uid, xform, CompOrNull<ZLevelPositionComponent>(uid)));
+        var localPosition = xform.Coordinates.Position;
+        var min = _map.TileIndicesFor(
             xform.GridUid.Value,
             grid,
-            new Box2(localpos + new Vector2(-radius, -radius), localpos + new Vector2(radius, radius)))
-            .ToArray();
+            new EntityCoordinates(xform.GridUid.Value, localPosition - new Vector2(radius, radius)));
+        var max = _map.TileIndicesFor(
+            xform.GridUid.Value,
+            grid,
+            new EntityCoordinates(xform.GridUid.Value, localPosition + new Vector2(radius, radius)));
+        var tileBuffer = new List<ZLevelTileIndices>();
+
+        for (var x = min.X; x <= max.X; x++)
+        {
+            for (var y = min.Y; y <= max.Y; y++)
+            {
+                var indices = new ZLevelTileIndices(x, y, zLevel);
+                if (!_map.GetZLevelTileRef(xform.GridUid.Value, grid, indices).Tile.IsEmpty)
+                    tileBuffer.Add(indices);
+            }
+        }
+
+        var tilerefs = tileBuffer.ToArray();
 
         if (tilerefs.Length == 0)
             return;
@@ -80,7 +99,7 @@ public sealed class GasProducerAnomalySystem : EntitySystem
         var amountCounter = 0;
         foreach (var tileref in tilerefs)
         {
-            var mix = _atmosphere.GetTileMixture(xform.GridUid, xform.MapUid, tileref.GridIndices, true);
+            var mix = _atmosphere.GetZLevelTileMixture(xform.GridUid, xform.MapUid, tileref, true);
             amountCounter++;
             if (mix is not { })
                 continue;

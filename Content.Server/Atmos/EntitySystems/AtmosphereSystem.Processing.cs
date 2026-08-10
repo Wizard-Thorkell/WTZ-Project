@@ -4,6 +4,7 @@ using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Atmos.Piping.Components;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
@@ -139,6 +140,18 @@ namespace Content.Server.Atmos.EntitySystems
                     atmos.PossiblyDisconnectedTiles.Add(adj);
                 }
             }
+
+            foreach (var zOffset in VerticalZOffsets)
+            {
+                var adjIndices = new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel + zOffset);
+                if (TryGetTileAtmosphere(atmos, adjIndices, out var adj) &&
+                    adj.NoGridTile &&
+                    !adj.TrimQueued)
+                {
+                    adj.TrimQueued = true;
+                    atmos.PossiblyDisconnectedTiles.Add(adj);
+                }
+            }
         }
 
         /// <summary>
@@ -163,6 +176,30 @@ namespace Content.Server.Atmos.EntitySystems
                     var indices = tile.GridIndices.Offset((AtmosDirection) (1 << i));
                     if (HasBackingGridTile((ent.Owner, ent.Comp3), new ZLevelTileIndices(indices.X, indices.Y, tile.ZLevel)))
                     {
+                        connected = true;
+                        break;
+                    }
+                }
+
+                if (!connected)
+                {
+                    foreach (var zOffset in VerticalZOffsets)
+                    {
+                        var targetZ = tile.ZLevel + zOffset;
+                        if (!_zLevelBoundaries.IsOpen(
+                                ent.Owner,
+                                ent.Comp3,
+                                tile.GridIndices,
+                                tile.ZLevel,
+                                targetZ,
+                                ZLevelBoundaryChannels.Atmosphere) ||
+                            !HasBackingGridTile(
+                                (ent.Owner, ent.Comp3),
+                                new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, targetZ)))
+                        {
+                            continue;
+                        }
+
                         connected = true;
                         break;
                     }
@@ -282,7 +319,7 @@ namespace Content.Server.Atmos.EntitySystems
                 tile.ArchivedCycle = 0;
                 tile.LastShare = 0f;
                 tile.Hotspot = new Hotspot();
-                NotifyDeviceTileChanged((ent.Owner, ent.Comp1, ent.Comp3), tile.GridIndices);
+                NotifyDeviceTileChanged((ent.Owner, ent.Comp1, ent.Comp3), tile);
                 return;
             }
 
@@ -296,7 +333,7 @@ namespace Content.Server.Atmos.EntitySystems
 
             // Since we assigned the tile a new GasMixture we need to tell any devices
             // on this tile that the reference has changed.
-            NotifyDeviceTileChanged((ent.Owner, ent.Comp1, ent.Comp3), tile.GridIndices);
+            NotifyDeviceTileChanged((ent.Owner, ent.Comp1, ent.Comp3), tile);
         }
 
         private void QueueRunTiles(

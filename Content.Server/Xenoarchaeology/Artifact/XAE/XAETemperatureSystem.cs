@@ -13,7 +13,6 @@ namespace Content.Server.Xenoarchaeology.Artifact.XAE;
 public sealed class XAETemperatureSystem : BaseXAESystem<XAETemperatureComponent>
 {
     [Dependency] private readonly AtmosphereSystem _atmosphereSystem = default!;
-    [Dependency] private readonly TransformSystem _transformSystem = default!;
 
     /// <inheritdoc />
     protected override void OnActivated(Entity<XAETemperatureComponent> ent, ref XenoArtifactNodeActivatedEvent args)
@@ -29,8 +28,7 @@ public sealed class XAETemperatureSystem : BaseXAESystem<XAETemperatureComponent
 
         if (component.AffectAdjacentTiles && transform.GridUid != null)
         {
-            var position = _transformSystem.GetGridOrMapTilePosition(ent, transform);
-            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures(transform.GridUid.Value, position, excite: true);
+            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures((ent.Owner, transform), excite: true);
 
             while (enumerator.MoveNext(out var mixture))
             {

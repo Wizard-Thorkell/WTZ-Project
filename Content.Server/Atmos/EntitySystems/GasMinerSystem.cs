@@ -4,7 +4,6 @@ using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Atmos.Piping.Components;
 using JetBrains.Annotations;
-using Robust.Server.GameObjects;
 
 namespace Content.Server.Atmos.EntitySystems;
 
@@ -12,7 +11,6 @@ namespace Content.Server.Atmos.EntitySystems;
 public sealed class GasMinerSystem : SharedGasMinerSystem
 {
     [Dependency] private readonly AtmosphereSystem _atmosphereSystem = default!;
-    [Dependency] private readonly TransformSystem _transformSystem = default!;
 
     public override void Initialize()
     {
@@ -57,10 +55,8 @@ public sealed class GasMinerSystem : SharedGasMinerSystem
     {
         var (uid, miner) = ent;
         var transform = Transform(uid);
-        var position = _transformSystem.GetGridOrMapTilePosition(uid, transform);
-
         // Treat space as an invalid environment
-        if (_atmosphereSystem.IsTileSpace(transform.GridUid, transform.MapUid, position))
+        if (_atmosphereSystem.IsTileSpace((uid, transform)))
         {
             environment = null;
             return false;

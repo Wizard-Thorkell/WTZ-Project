@@ -11,7 +11,6 @@ namespace Content.Server.Atmos.EntitySystems;
 public sealed class AirFilterSystem : EntitySystem
 {
     [Dependency] private readonly AtmosphereSystem _atmosphere = default!;
-    [Dependency] private readonly SharedTransformSystem _transform = default!;
 
     public override void Initialize()
     {
@@ -62,12 +61,9 @@ public sealed class AirFilterSystem : EntitySystem
         var oxygen = air.GetMoles(filter.Oxygen) / air.TotalMoles;
         var gases = oxygen >= filter.TargetOxygen ? filter.Gases : filter.OverflowGases;
 
-        GasMixture? destination = null;
-        if (args.Grid is {} grid)
-        {
-            var position = _transform.GetGridTilePositionOrDefault(uid);
-            destination = _atmosphere.GetTileMixture(grid, args.Map, position, true);
-        }
+        var destination = args.Grid != null
+            ? _atmosphere.GetTileMixture(uid, true)
+            : null;
 
         if (destination != null)
         {

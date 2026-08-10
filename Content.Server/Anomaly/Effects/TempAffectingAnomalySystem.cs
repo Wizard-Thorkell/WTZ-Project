@@ -1,7 +1,6 @@
 using Content.Server.Atmos.EntitySystems;
 using Content.Server.Anomaly.Components;
 using Content.Shared.Anomaly.Components;
-using Robust.Server.GameObjects;
 
 namespace Content.Server.Anomaly.Effects;
 
@@ -11,7 +10,6 @@ namespace Content.Server.Anomaly.Effects;
 public sealed class TempAffectingAnomalySystem : EntitySystem
 {
     [Dependency] private readonly AtmosphereSystem _atmosphere = default!;
-    [Dependency] private readonly TransformSystem _xform = default!;
 
     public override void Update(float frameTime)
     {
@@ -20,19 +18,16 @@ public sealed class TempAffectingAnomalySystem : EntitySystem
         var query = EntityQueryEnumerator<TempAffectingAnomalyComponent, AnomalyComponent, TransformComponent>();
         while (query.MoveNext(out var ent, out var comp, out var anom, out var xform))
         {
-            var grid = xform.GridUid;
-            var map = xform.MapUid;
-            var indices = _xform.GetGridTilePositionOrDefault((ent, xform));
-            var mixture = _atmosphere.GetTileMixture(grid, map, indices, true);
+            var mixture = _atmosphere.GetTileMixture((ent, xform), true);
 
             if (mixture is { })
             {
                 mixture.Temperature += comp.TempChangePerSecond * anom.Severity * frameTime;
             }
 
-            if (grid != null && anom.Severity > comp.AnomalyHotSpotThreshold)
+            if (xform.GridUid != null && anom.Severity > comp.AnomalyHotSpotThreshold)
             {
-                _atmosphere.HotspotExpose(grid.Value, indices, comp.HotspotExposeTemperature, comp.HotspotExposeVolume, ent, true);
+                _atmosphere.HotspotExpose((ent, xform), comp.HotspotExposeTemperature, comp.HotspotExposeVolume, ent, true);
             }
         }
     }

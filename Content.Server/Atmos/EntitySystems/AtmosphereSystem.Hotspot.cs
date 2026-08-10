@@ -106,30 +106,30 @@ public sealed partial class AtmosphereSystem
             var gridUid = ent.Owner;
             var tilePos = tile.GridIndices;
 
-            // Get the existing decals on the tile
-            var tileDecals = _decalSystem.GetDecalsInRange(gridUid, tilePos);
-
-            // Count the burnt decals on the tile
-            var tileBurntDecals = 0;
-
-            foreach (var set in tileDecals)
+            // Decals are still 2D and would otherwise appear on the base floor.
+            if (tile.ZLevel == 0)
             {
-                if (Array.IndexOf(_burntDecals, set.Decal.Id) == -1)
-                    continue;
+                var tileDecals = _decalSystem.GetDecalsInRange(gridUid, tilePos);
+                var tileBurntDecals = 0;
 
-                tileBurntDecals++;
+                foreach (var set in tileDecals)
+                {
+                    if (Array.IndexOf(_burntDecals, set.Decal.Id) == -1)
+                        continue;
 
-                if (tileBurntDecals > 4)
-                    break;
-            }
+                    tileBurntDecals++;
 
-            // Add a random burned decal to the tile only if there are less than 4 of them
-            if (tileBurntDecals < 4)
-            {
-                _decalSystem.TryAddDecal(_burntDecals[_random.Next(_burntDecals.Length)],
-                    new EntityCoordinates(gridUid, tilePos),
-                    out _,
-                    cleanable: true);
+                    if (tileBurntDecals > 4)
+                        break;
+                }
+
+                if (tileBurntDecals < 4)
+                {
+                    _decalSystem.TryAddDecal(_burntDecals[_random.Next(_burntDecals.Length)],
+                        new EntityCoordinates(gridUid, tilePos),
+                        out _,
+                        cleanable: true);
+                }
             }
 
             if (tile.Air.Temperature > Atmospherics.FireMinimumTemperatureToSpread)
@@ -154,7 +154,7 @@ public sealed partial class AtmosphereSystem
         if (tile.Hotspot.Temperature > tile.MaxFireTemperatureSustained)
             tile.MaxFireTemperatureSustained = tile.Hotspot.Temperature;
 
-        if (_hotspotSoundCooldown++ == 0 && HotspotSound != null)
+        if (tile.ZLevel == 0 && _hotspotSoundCooldown++ == 0 && HotspotSound != null)
         {
             var coordinates = _mapSystem.ToCenterCoordinates(tile.GridIndex, tile.GridIndices);
 
@@ -278,6 +278,12 @@ public sealed partial class AtmosphereSystem
 
         foreach (var entity in _entSet)
         {
+            if (!TryComp(entity, out TransformComponent? transform) ||
+                XformSystem.GetZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity))) != tile.ZLevel)
+            {
+                continue;
+            }
+
             RaiseLocalEvent(entity, ref fireEvent);
         }
     }

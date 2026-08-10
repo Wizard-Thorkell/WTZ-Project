@@ -292,7 +292,7 @@ public abstract partial class SharedHandsSystem
         }
 
         // Held entities should inherit the holder's current floor instead of keeping stale world-layer data.
-        RemComp<ZLevelPositionComponent>(entity);
+        _zLevelSystem.ClearZLevelPosition(entity);
         RemComp<ZLevelKinematicsComponent>(entity);
 
         _interactionSystem.DoContactInteraction(uid, entity); //Possibly fires twice if manually picked up via interacting with the object

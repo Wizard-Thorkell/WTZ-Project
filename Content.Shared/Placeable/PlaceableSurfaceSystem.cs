@@ -3,6 +3,7 @@ using Content.Shared.Hands.EntitySystems;
 using Content.Shared.Interaction;
 using Content.Shared.Storage;
 using Content.Shared.Storage.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Random;
 
@@ -13,6 +14,7 @@ public sealed class PlaceableSurfaceSystem : EntitySystem
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly SharedHandsSystem _handsSystem = default!;
     [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
 
     public override void Initialize()
     {
@@ -122,16 +124,10 @@ public sealed class PlaceableSurfaceSystem : EntitySystem
 
         if (zLevel == 0)
         {
-            RemComp<ZLevelPositionComponent>(entity);
+            _zLevelSystem.ClearZLevelPosition(entity);
             return;
         }
 
-        var zComp = EnsureComp<ZLevelPositionComponent>(entity);
-        if (zComp.ZLevel == zLevel && zComp.LocalZOffset == 0f)
-            return;
-
-        zComp.ZLevel = zLevel;
-        zComp.LocalZOffset = 0f;
-        Dirty(entity, zComp);
+        _zLevelSystem.SetZLevelPosition(entity, zLevel);
     }
 }

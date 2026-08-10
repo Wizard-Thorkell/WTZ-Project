@@ -98,15 +98,27 @@ Implemented traversal and debug tooling:
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
 
-Implemented first-pass atmos:
+Implemented Z-aware atmos foundation:
 
 - ZLevel-aware tile atmos storage.
+- Sparse upper/lower atmosphere cells participate in full invalidation, mixture
+  enumeration, and grid lifecycle operations without scanning empty Z space.
 - Vertical atmos adjacency through shared ZLevel boundary checks.
 - Ceiling tiles above close vertical atmos adjacency.
 - ZLevel tile changes invalidate the changed tile and vertical neighbors.
-- Basic tests cover ceiling invalidation.
 - Explicit atmosphere openings override or reinforce the tile-derived default,
   and placement/removal invalidates both sides of the boundary.
+- Entity-based mixture, adjacency, space, and hotspot APIs resolve inherited Z;
+  common vents, scrubbers, devices, anomalies, storage, disposal, ignition,
+  smoking, cloning, and artifact consumers use those APIs.
+- Airtight entities track their last Z and invalidate both their old and new
+  atmosphere cells when moved between floors.
+- Fire events, hotspot targets, and high-pressure movement are filtered by
+  effective Z so entities sharing only XY do not affect one another.
+- Pipe reachability, portable ports, overlap checks, and node-group reflooding
+  keep atmos networks isolated per floor.
+- Upper-floor fire deliberately suppresses legacy 2D decals and PVS audio until
+  those presentation systems gain explicit vertical coordinates.
 
 Implemented first-pass client presentation:
 
@@ -188,13 +200,13 @@ Partially implemented mapping and placement:
 Verified recently:
 
 - Full `SpaceStation14.slnx` build: 0 errors.
-- Focused Robust PVS and ZLevel replication run: 3 passed, 0 skipped, 0 failed.
-- Broader Robust chunk, map, serialization, and physics runs: 17 passed,
-  0 skipped, 0 failed.
-- Focused Content ZLevel run after renderer/PVS integration: 9 passed, 1
-  skipped, 0 failed.
-- The skipped test is an atmos containing-mixture test that needs a dedicated
-  upper-floor fixture.
+- Robust ZLevel map suite after sparse atmosphere enumeration support: 12
+  passed, 0 skipped, 0 failed.
+- Content ZLevel atmosphere suite: 7 passed, 0 skipped, 0 failed.
+- The former containing-mixture test is enabled and covers direct and inherited
+  upper-floor positions.
+- Combined Content ZLevel and hands regression: 24 passed, 0 skipped, 0 failed.
+- Full `SpaceStation14.slnx` build after atmosphere integration: 0 errors.
 
 ## Reference Architecture Comparison
 
@@ -236,8 +248,14 @@ Major unfinished areas:
 - Live map save/load on initialized station maps is not generally safe.
 - ZLevel tile persistence and network replication support sparse Z-only chunks,
   but the normal mapper workflow still needs more validation.
-- Atmos is Z-aware adjacency on top of mostly 2D machinery, not full volumetric
-  atmos.
+- Atmos simulation and common entity-facing machinery are Z-aware, but legacy
+  `TileRef` consumers such as chemistry tile reactions, explosions, station
+  event targets, and admin tile commands still address only the base layer.
+- Atmos monitoring-console pipe visualization is still a 2D projection and can
+  visually merge different-floor networks even though their simulation groups
+  are isolated.
+- Upper-floor fire audio and burned decals are suppressed until sound/effects
+  gain a Z-aware spatial contract.
 - Lighting and FOV are not native to floors.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
@@ -266,8 +284,8 @@ feature phases below remain the backlog and acceptance criteria for each area.
    relevant entities and known layers.
 5. [Done] Integrate renderer and PVS behavior around visible floors and
    openings.
-6. [Next] Stabilize atmosphere on top of the shared boundary model.
-7. Expand vertical gameplay, construction, interaction, effects, and AI.
+6. [Done] Stabilize atmosphere on top of the shared boundary model.
+7. [Next] Expand vertical gameplay, construction, interaction, effects, and AI.
 8. Define a frame model for moving ships, stations, and planets.
 9. Add structural support and collapse as a late-stage consumer of the mature
    vertical model.
@@ -449,22 +467,32 @@ Goal: make ZLevel atmos reliable enough for gameplay scenarios.
 
 Tasks:
 
-- Create a dedicated upper-floor atmos fixture map.
-- Unskip and fix the containing-mixture test for entities on `z = 1`.
-- Confirm child entities inherit parent Z for atmos sampling.
-- Confirm gas analyzers and atmos tools read the correct floor.
-- Confirm hotspots, fire, superconduction, LINDA processing, and invalidation
-  all respect vertical adjacency.
-- Confirm ceiling/opening changes update atmos promptly.
-- Decide how pressure behaves in shafts and open multi-floor volumes.
-- Add performance checks for tall but sparse maps.
+- [Partial] Create a dedicated upper-floor atmos fixture map. The integration
+  suite currently authors sparse layers over the established atmos room at
+  runtime; a mapper-authored fixture remains useful for manual QA.
+- [Done] Unskip and fix the containing-mixture test for entities on `z = 1`.
+- [Done] Confirm child entities inherit parent Z for atmos sampling.
+- [Done] Confirm common entity-facing atmos tools and devices read the correct
+  floor.
+- [Done] Confirm hotspots, fire targeting, pressure movement, LINDA processing,
+  global mixture operations, and invalidation respect floor separation.
+- [Done] Confirm ceiling/opening changes update atmos promptly.
+- [Done] Define pressure behavior in shafts as normal tile adjacency through an
+  atmosphere-open vertical boundary.
+- [Covered] Add sparse-map checks. Enumeration and invalidation visit allocated
+  chunk/layer data rather than scanning a vertical range; broader profiling on
+  production-sized maps remains part of final performance QA.
+- [Done] Keep atmos pipe networks and overlap restrictions isolated by Z and
+  reflood node groups when their owner's effective floor changes.
 
 Exit criteria:
 
-- A sealed lower room and open upper floor maintain distinct atmos.
-- Opening a shaft allows expected gas movement.
-- Atmos tools report the floor the user is actually on.
-- No common atmos processing path silently assumes `z = 0`.
+- [Covered] A sealed lower room and open upper floor maintain distinct atmos.
+- [Covered] Opening a shaft allows expected gas movement.
+- [Covered] Entity-facing atmos tools report the floor the user is actually on.
+- [Covered for the simulation core and common entity APIs] No common atmos
+  processing path silently assumes `z = 0`; remaining 2D `TileRef` consumers
+  are listed under Known Gaps for their owning gameplay phases.
 
 ### Phase 6: Construction And Gameplay Systems
 

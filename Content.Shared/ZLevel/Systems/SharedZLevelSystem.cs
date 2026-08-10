@@ -30,6 +30,7 @@ public sealed class SharedZLevelSystem : VirtualController
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
 
     private EntityQuery<ZLevelKinematicsComponent> _kinematicsQuery;
@@ -184,14 +185,16 @@ public sealed class SharedZLevelSystem : VirtualController
 
     public bool EnsureZLevelEntity(EntityUid uid, int? zLevel = null, int maxStepDownDepth = 2)
     {
-        if (!_transformQuery.TryComp(uid, out _))
+        if (!_transformQuery.TryComp(uid, out var transform))
             return false;
 
-        var position = EnsureComp<ZLevelPositionComponent>(uid);
+        _positionQuery.TryComp(uid, out var position);
+        var oldZLevel = _transform.GetZLevel((uid, transform, position));
+        position ??= EnsureComp<ZLevelPositionComponent>(uid);
         var kinematics = EnsureComp<ZLevelKinematicsComponent>(uid);
 
         if (zLevel != null)
-            position.ZLevel = zLevel.Value;
+            SetPositionState(uid, position, zLevel.Value, position.LocalZOffset, oldZLevel);
 
         position.LocalZOffset = ClampLocalOffset(position.LocalZOffset);
         kinematics.MaxStepDownDepth = Math.Max(0, maxStepDownDepth);
@@ -206,9 +209,45 @@ public sealed class SharedZLevelSystem : VirtualController
 
     public bool DisableZLevelEntity(EntityUid uid)
     {
-        var removed = RemCompDeferred<ZLevelPositionComponent>(uid);
+        var removed = ClearZLevelPosition(uid);
         removed |= RemCompDeferred<ZLevelKinematicsComponent>(uid);
         return removed;
+    }
+
+    /// <summary>
+    /// Stamps discrete vertical state without enabling falling simulation.
+    /// </summary>
+    public bool SetZLevelPosition(EntityUid uid, int zLevel, float localOffset = 0f)
+    {
+        if (!_transformQuery.TryComp(uid, out var transform))
+            return false;
+
+        _positionQuery.TryComp(uid, out var position);
+        var oldZLevel = _transform.GetZLevel((uid, transform, position));
+        position ??= EnsureComp<ZLevelPositionComponent>(uid);
+        SetPositionState(uid, position, zLevel, localOffset, oldZLevel);
+        _boundaries.RefreshBoundary(uid);
+        RefreshEntity(uid);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes explicit vertical state and reports any resulting inherited-level change.
+    /// </summary>
+    public bool ClearZLevelPosition(EntityUid uid)
+    {
+        if (!_positionQuery.TryComp(uid, out var position) || !_transformQuery.TryComp(uid, out var transform))
+            return false;
+
+        var oldZLevel = _transform.GetZLevel((uid, transform, position));
+        if (!RemComp<ZLevelPositionComponent>(uid))
+            return false;
+
+        var newZLevel = _transform.GetZLevel((uid, transform, null));
+        RaiseZLevelChanged(uid, oldZLevel, newZLevel);
+        _boundaries.RefreshBoundary(uid);
+        RefreshEntity(uid);
+        return true;
     }
 
     public bool SetZLevel(EntityUid uid, int zLevel, float localOffset = 0f)
@@ -219,11 +258,9 @@ public sealed class SharedZLevelSystem : VirtualController
         var position = Comp<ZLevelPositionComponent>(uid);
         var kinematics = Comp<ZLevelKinematicsComponent>(uid);
 
-        position.ZLevel = zLevel;
-        position.LocalZOffset = ClampLocalOffset(localOffset);
+        SetPositionState(uid, position, zLevel, localOffset);
         kinematics.VerticalVelocity = 0f;
 
-        Dirty(uid, position);
         Dirty(uid, kinematics);
         _boundaries.RefreshBoundary(uid);
         RefreshEntity(uid);
@@ -424,6 +461,12 @@ public sealed class SharedZLevelSystem : VirtualController
 
     private void RefreshEntity(EntityUid uid)
     {
+        if (TerminatingOrDeleted(uid))
+        {
+            RemoveBody(uid);
+            return;
+        }
+
         UpdateBodyIndex(uid);
 
         if (!_positionQuery.TryComp(uid, out var dzPosition) ||
@@ -471,6 +514,8 @@ public sealed class SharedZLevelSystem : VirtualController
             Dirty(uid, dzKinematics);
             return;
         }
+
+        var oldZLevel = dzPosition.ZLevel;
 
         var currentlySupported = IsStandingOnCurrentLayer(transform.GridUid.Value, grid, xy, dzPosition);
 
@@ -536,6 +581,30 @@ public sealed class SharedZLevelSystem : VirtualController
 
         Dirty(uid, dzPosition);
         Dirty(uid, dzKinematics);
+        RaiseZLevelChanged(uid, oldZLevel, dzPosition.ZLevel);
+    }
+
+    private void SetPositionState(
+        EntityUid uid,
+        ZLevelPositionComponent position,
+        int zLevel,
+        float localOffset,
+        int? oldZLevel = null)
+    {
+        oldZLevel ??= position.ZLevel;
+        position.ZLevel = zLevel;
+        position.LocalZOffset = ClampLocalOffset(localOffset);
+        Dirty(uid, position);
+        RaiseZLevelChanged(uid, oldZLevel.Value, zLevel);
+    }
+
+    private void RaiseZLevelChanged(EntityUid uid, int oldZLevel, int newZLevel)
+    {
+        if (oldZLevel == newZLevel)
+            return;
+
+        var ev = new ZLevelPositionChangedEvent(oldZLevel, newZLevel);
+        RaiseLocalEvent(uid, ref ev, true);
     }
 
     private void UpdateBodyIndex(EntityUid uid)

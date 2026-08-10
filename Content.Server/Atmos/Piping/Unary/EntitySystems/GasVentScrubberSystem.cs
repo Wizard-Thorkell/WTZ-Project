@@ -32,7 +32,6 @@ namespace Content.Server.Atmos.Piping.Unary.EntitySystems
         [Dependency] private readonly DeviceNetworkSystem _deviceNetSystem = default!;
         [Dependency] private readonly NodeContainerSystem _nodeContainer = default!;
         [Dependency] private readonly SharedAmbientSoundSystem _ambientSoundSystem = default!;
-        [Dependency] private readonly TransformSystem _transformSystem = default!;
         [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
         [Dependency] private readonly WeldableSystem _weldable = default!;
         [Dependency] private readonly PowerReceiverSystem _powerReceiverSystem = default!;
@@ -66,8 +65,7 @@ namespace Content.Server.Atmos.Piping.Unary.EntitySystems
             if (args.Grid is not {} grid)
                 return;
 
-            var position = _transformSystem.GetGridTilePositionOrDefault(uid);
-            var environment = _atmosphereSystem.GetTileMixture(grid, args.Map, position, true);
+            var environment = _atmosphereSystem.GetTileMixture(uid, true);
 
             Scrub(timeDelta, scrubber, environment, outlet);
 
@@ -75,7 +73,7 @@ namespace Content.Server.Atmos.Piping.Unary.EntitySystems
                 return;
 
             // Scrub adjacent tiles too.
-            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures(grid, position, false, true);
+            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures(uid, false, true);
             while (enumerator.MoveNext(out var adjacent))
             {
                 Scrub(timeDelta, scrubber, adjacent, outlet);

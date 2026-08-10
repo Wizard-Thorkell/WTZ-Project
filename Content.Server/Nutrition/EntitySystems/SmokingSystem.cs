@@ -26,7 +26,6 @@ namespace Content.Server.Nutrition.EntitySystems
         [Dependency] private readonly SharedSolutionContainerSystem _solutionContainerSystem = default!;
         [Dependency] private readonly BloodstreamSystem _bloodstreamSystem = default!;
         [Dependency] private readonly AtmosphereSystem _atmos = default!;
-        [Dependency] private readonly TransformSystem _transformSystem = default!;
         [Dependency] private readonly InventorySystem _inventorySystem = default!;
         [Dependency] private readonly ClothingSystem _clothing = default!;
         [Dependency] private readonly SharedAudioSystem _audio = default!;
@@ -130,10 +129,9 @@ namespace Content.Server.Nutrition.EntitySystems
                 {
                     var transform = Transform(uid);
 
-                    if (transform.GridUid is { } gridUid)
+                    if (transform.GridUid != null)
                     {
-                        var position = _transformSystem.GetGridOrMapTilePosition(uid, transform);
-                        _atmos.HotspotExpose(gridUid, position, smokable.ExposeTemperature, smokable.ExposeVolume, uid, true);
+                        _atmos.HotspotExpose((uid, transform), smokable.ExposeTemperature, smokable.ExposeVolume, uid, true);
                     }
                 }
 

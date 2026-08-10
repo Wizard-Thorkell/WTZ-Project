@@ -535,6 +535,31 @@ public partial class AtmosphereSystem
     }
 
     /// <summary>
+    /// Checks whether the atmosphere tile at an entity's effective Z-level is space.
+    /// </summary>
+    [PublicAPI]
+    public bool IsTileSpace(Entity<TransformComponent?> entity)
+    {
+        if (!Resolve(entity.Owner, ref entity.Comp))
+            return true;
+
+        var position = XformSystem.GetGridTilePositionOrDefault(entity);
+        var zLevel = XformSystem.GetZLevel((entity.Owner, entity.Comp, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
+
+        if (entity.Comp.GridUid is { } gridUid &&
+            _atmosQuery.TryGetComponent(gridUid, out var atmosphere) &&
+            TryGetTileAtmosphere(atmosphere, new ZLevelTileIndices(position.X, position.Y, zLevel), out var tile))
+        {
+            return tile.Space;
+        }
+
+        if (entity.Comp.MapUid is { } mapUid && _mapAtmosQuery.TryGetComponent(mapUid, out var mapAtmosphere))
+            return mapAtmosphere.Space;
+
+        return true;
+    }
+
+    /// <summary>
     /// Checks if the gas mixture on a tile is "probably safe".
     /// Probably safe is defined as having at least air alarm-grade safe pressure and temperature.
     /// (more than 260K, less than 360K, and between safe low and high pressure as defined in
@@ -581,6 +606,41 @@ public partial class AtmosphereSystem
         return !grid.Comp.Tiles.TryGetValue(tile, out var atmosTile)
             ? TileMixtureEnumerator.Empty
             : new TileMixtureEnumerator(atmosTile.AdjacentTiles);
+    }
+
+    /// <summary>
+    /// Gets the horizontal neighboring mixtures on the entity's effective Z-level.
+    /// </summary>
+    [PublicAPI]
+    public TileMixtureEnumerator GetAdjacentTileMixtures(
+        Entity<TransformComponent?> entity,
+        bool includeBlocked = false,
+        bool excite = false)
+    {
+        // TODO ATMOS includeBlocked and excite parameters are unhandled currently.
+        if (!Resolve(entity.Owner, ref entity.Comp) || entity.Comp.GridUid is not { } gridUid)
+            return TileMixtureEnumerator.Empty;
+
+        if (!_atmosQuery.TryGetComponent(gridUid, out var atmosphere))
+            return TileMixtureEnumerator.Empty;
+
+        var position = XformSystem.GetGridTilePositionOrDefault(entity);
+        var zLevel = XformSystem.GetZLevel((entity.Owner, entity.Comp, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
+        var indices = new ZLevelTileIndices(position.X, position.Y, zLevel);
+
+        if (!TryGetTileAtmosphere(atmosphere, indices, out var atmosTile))
+            return TileMixtureEnumerator.Empty;
+
+        if (excite)
+        {
+            foreach (var adjacent in atmosTile.AdjacentTiles)
+            {
+                if (adjacent != null)
+                    AddActiveTile(atmosphere, adjacent);
+            }
+        }
+
+        return new TileMixtureEnumerator(atmosTile.AdjacentTiles);
     }
 
     [PublicAPI]
@@ -638,6 +698,29 @@ public partial class AtmosphereSystem
 
         if (grid.Comp.Tiles.TryGetValue(tile, out var atmosTile))
             HotspotExpose(grid.Comp, atmosTile, exposedTemperature, exposedVolume, soh, sparkSourceUid);
+    }
+
+    /// <summary>
+    /// Exposes the atmosphere tile at an entity's effective Z-level to a hotspot.
+    /// </summary>
+    [PublicAPI]
+    public void HotspotExpose(
+        Entity<TransformComponent?> entity,
+        float exposedTemperature,
+        float exposedVolume,
+        EntityUid? sparkSourceUid = null,
+        bool soh = false)
+    {
+        if (!Resolve(entity.Owner, ref entity.Comp) || entity.Comp.GridUid is not { } gridUid)
+            return;
+
+        if (!_atmosQuery.TryGetComponent(gridUid, out var atmosphere))
+            return;
+
+        var position = XformSystem.GetGridTilePositionOrDefault(entity);
+        var zLevel = XformSystem.GetZLevel((entity.Owner, entity.Comp, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
+        if (TryGetTileAtmosphere(atmosphere, new ZLevelTileIndices(position.X, position.Y, zLevel), out var atmosTile))
+            HotspotExpose(atmosphere, atmosTile, exposedTemperature, exposedVolume, soh, sparkSourceUid);
     }
 
     /// <summary>

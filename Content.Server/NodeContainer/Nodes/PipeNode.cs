@@ -186,7 +186,9 @@ namespace Content.Server.NodeContainer.Nodes
                 yield break;
 
             var mapSystem = entMan.System<SharedMapSystem>();
+            var transformSystem = entMan.System<SharedTransformSystem>();
             var pos = mapSystem.TileIndicesFor(gridEnt, xform.Comp.Coordinates);
+            var zLevel = GetZLevel(xform, entMan, transformSystem);
 
             for (var i = 0; i < PipeDirectionHelpers.PipeDirections; i++)
             {
@@ -195,7 +197,16 @@ namespace Content.Server.NodeContainer.Nodes
                 if (!CurrentPipeDirection.HasDirection(pipeDir))
                     continue;
 
-                foreach (var pipe in LinkableNodesInDirection(pos, pipeDir, gridEnt, nodeQuery, mapSystem))
+                foreach (var pipe in LinkableNodesInDirection(
+                             pos,
+                             pipeDir,
+                             zLevel,
+                             gridEnt,
+                             nodeQuery,
+                             xformQuery,
+                             mapSystem,
+                             transformSystem,
+                             entMan))
                 {
                     yield return pipe;
                 }
@@ -208,12 +219,19 @@ namespace Content.Server.NodeContainer.Nodes
         private IEnumerable<PipeNode> LinkableNodesInDirection(
             Vector2i pos,
             PipeDirection pipeDir,
+            int zLevel,
             Entity<MapGridComponent> grid,
             EntityQuery<NodeContainerComponent> nodeQuery,
-            SharedMapSystem mapSystem)
+            EntityQuery<TransformComponent> xformQuery,
+            SharedMapSystem mapSystem,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan)
         {
             foreach (var pipe in PipesInDirection(pos, pipeDir, grid, nodeQuery, mapSystem))
             {
+                if (!IsNodeOnZLevel(pipe, zLevel, xformQuery, transformSystem, entMan))
+                    continue;
+
                 if (pipe.NodeGroupID == NodeGroupID
                     && pipe.CurrentPipeLayer == CurrentPipeLayer
                     && pipe.CurrentPipeDirection.HasDirection(pipeDir.GetOpposite()))
@@ -221,6 +239,27 @@ namespace Content.Server.NodeContainer.Nodes
                     yield return pipe;
                 }
             }
+        }
+
+        protected static int GetZLevel(
+            Entity<TransformComponent> entity,
+            IEntityManager entMan,
+            SharedTransformSystem transformSystem)
+        {
+            return transformSystem.GetZLevel(
+                (entity.Owner, entity.Comp, entMan.GetComponentOrNull<ZLevelPositionComponent>(entity.Owner)));
+        }
+
+        protected static bool IsNodeOnZLevel(
+            Node node,
+            int zLevel,
+            EntityQuery<TransformComponent> xformQuery,
+            SharedTransformSystem transformSystem,
+            IEntityManager entMan)
+        {
+            return xformQuery.TryGetComponent(node.Owner, out var nodeTransform) &&
+                   transformSystem.GetZLevel(
+                       (node.Owner, nodeTransform, entMan.GetComponentOrNull<ZLevelPositionComponent>(node.Owner))) == zLevel;
         }
 
         /// <summary>

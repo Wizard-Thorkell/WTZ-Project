@@ -53,7 +53,7 @@ public sealed class EntityStorageSystem : SharedEntityStorageSystem
 
         var tile = GetOffsetTileRef(uid, component);
 
-        if (tile != null && _atmos.GetTileMixture(tile.Value.GridUid, null, tile.Value.GridIndices, true) is { } environment)
+        if (tile != null && _atmos.GetZLevelTileMixture(tile.Value.GridUid, null, tile.Value.Indices, true) is { } environment)
         {
             _atmos.Merge(component.Air, environment.RemoveVolume(component.Air.Volume));
         }
@@ -66,20 +66,22 @@ public sealed class EntityStorageSystem : SharedEntityStorageSystem
 
         var tile = GetOffsetTileRef(uid, component);
 
-        if (tile != null && _atmos.GetTileMixture(tile.Value.GridUid, null, tile.Value.GridIndices, true) is { } environment)
+        if (tile != null && _atmos.GetZLevelTileMixture(tile.Value.GridUid, null, tile.Value.Indices, true) is { } environment)
         {
             _atmos.Merge(environment, component.Air);
             component.Air.Clear();
         }
     }
 
-    private TileRef? GetOffsetTileRef(EntityUid uid, EntityStorageComponent component)
+    private (EntityUid GridUid, ZLevelTileIndices Indices)? GetOffsetTileRef(EntityUid uid, EntityStorageComponent component)
     {
         var targetCoordinates = TransformSystem.ToMapCoordinates(new EntityCoordinates(uid, component.EnteringOffset));
 
         if (_map.TryFindGridAt(targetCoordinates, out var gridId, out var grid))
         {
-            return _mapSystem.GetTileRef(gridId, grid, targetCoordinates);
+            var indices = _mapSystem.TileIndicesFor(gridId, grid, targetCoordinates);
+            var zLevel = TransformSystem.GetZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
+            return (gridId, new ZLevelTileIndices(indices.X, indices.Y, zLevel));
         }
 
         return null;

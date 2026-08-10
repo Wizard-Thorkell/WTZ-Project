@@ -22,9 +22,7 @@ public sealed class DisposalUnitSystem : SharedDisposalUnitSystem
     protected override void HandleAir(EntityUid uid, DisposalUnitComponent component, TransformComponent xform)
     {
         var air = component.Air;
-        var indices = TransformSystem.GetGridTilePositionOrDefault((uid, xform));
-
-        if (_atmosSystem.GetTileMixture(xform.GridUid, xform.MapUid, indices, true) is { Temperature: > 0f } environment)
+        if (_atmosSystem.GetTileMixture((uid, xform), true) is { Temperature: > 0f } environment)
         {
             var transferMoles = 0.1f * (0.25f * Atmospherics.OneAtmosphere * 1.01f - air.Pressure) * air.Volume / (environment.Temperature * Atmospherics.R);
 

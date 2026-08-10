@@ -5,6 +5,7 @@ using Content.Shared.Xenoarchaeology.Artifact;
 using Content.Shared.Xenoarchaeology.Artifact.XAE;
 using Robust.Server.GameObjects;
 using Robust.Shared.Collections;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Xenoarchaeology.Artifact.XAE;
@@ -26,18 +27,24 @@ public sealed class XAECreateGasSystem : BaseXAESystem<XAECreateGasComponent>
             return;
 
         var tile = _map.LocalToTile(grid.Value, gridComp, args.Coordinates);
+        var zCoordinates = _transform.ToZLevelMapCoordinates(
+            new ZLevelEntityCoordinates(args.Coordinates.EntityId, args.Coordinates.Position, 0));
+        var zTile = new ZLevelTileIndices(tile.X, tile.Y, zCoordinates.Z);
 
         var mixtures = new ValueList<GasMixture>();
-        if (_atmosphere.GetTileMixture(grid.Value, map.Value, tile, excite: true) is { } localMixture)
+        if (_atmosphere.GetZLevelTileMixture(grid.Value, map.Value, zTile, excite: true) is { } localMixture)
             mixtures.Add(localMixture);
 
-        if (_atmosphere.GetAdjacentTileMixtures(grid.Value, tile, excite: true) is var adjacentTileMixtures)
+        if (_atmosphere.GetAdjacentZLevelTileMixtures(grid.Value, zTile, excite: true) is var adjacentTileMixtures)
         {
             while (adjacentTileMixtures.MoveNext(out var adjacentMixture))
             {
                 mixtures.Add(adjacentMixture);
             }
         }
+
+        if (mixtures.Count == 0)
+            return;
 
         foreach (var (gas, moles) in ent.Comp.Gases)
         {

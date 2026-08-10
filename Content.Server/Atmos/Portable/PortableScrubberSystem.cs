@@ -23,7 +23,6 @@ namespace Content.Server.Atmos.Portable
         [Dependency] private readonly GasCanisterSystem _canisterSystem = default!;
         [Dependency] private readonly GasPortableSystem _gasPortableSystem = default!;
         [Dependency] private readonly AtmosphereSystem _atmosphereSystem = default!;
-        [Dependency] private readonly TransformSystem _transformSystem = default!;
         [Dependency] private readonly IAdminLogManager _adminLogger = default!;
         [Dependency] private readonly AmbientSoundSystem _ambientSound = default!;
         [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
@@ -70,8 +69,7 @@ namespace Content.Server.Atmos.Portable
             if (args.Grid is not {} grid)
                 return;
 
-            var position = _transformSystem.GetGridTilePositionOrDefault(uid);
-            var environment = _atmosphereSystem.GetTileMixture(grid, args.Map, position, true);
+            var environment = _atmosphereSystem.GetTileMixture(uid, true);
 
             var running = Scrub(timeDelta, component, environment);
 
@@ -81,7 +79,7 @@ namespace Content.Server.Atmos.Portable
                 return;
 
             // widenet
-            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures(grid, position, false, true);
+            var enumerator = _atmosphereSystem.GetAdjacentTileMixtures(uid, false, true);
             while (enumerator.MoveNext(out var adjacent))
             {
                 Scrub(timeDelta, component, adjacent);

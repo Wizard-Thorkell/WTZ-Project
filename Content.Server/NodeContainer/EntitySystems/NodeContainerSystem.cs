@@ -4,6 +4,7 @@ using Content.Server.NodeContainer.Nodes;
 using Content.Shared.Examine;
 using Content.Shared.NodeContainer;
 using Content.Shared.NodeContainer.NodeGroups;
+using Content.Shared.ZLevel;
 using JetBrains.Annotations;
 
 namespace Content.Server.NodeContainer.EntitySystems
@@ -28,6 +29,7 @@ namespace Content.Server.NodeContainer.EntitySystems
             SubscribeLocalEvent<NodeContainerComponent, AnchorStateChangedEvent>(OnAnchorStateChanged);
             SubscribeLocalEvent<NodeContainerComponent, ReAnchorEvent>(OnReAnchor);
             SubscribeLocalEvent<NodeContainerComponent, MoveEvent>(OnMoveEvent);
+            SubscribeLocalEvent<NodeContainerComponent, ZLevelPositionChangedEvent>(OnZLevelChanged);
             SubscribeLocalEvent<NodeContainerComponent, ExaminedEvent>(OnExamine);
 
             _query = GetEntityQuery<NodeContainerComponent>();
@@ -196,6 +198,18 @@ namespace Content.Server.NodeContainer.EntitySystems
 
                 if (rotatableNode.RotateNode(in ev))
                     _nodeGroupSystem.QueueReflood(node);
+            }
+        }
+
+        private void OnZLevelChanged(
+            EntityUid uid,
+            NodeContainerComponent container,
+            ref ZLevelPositionChangedEvent args)
+        {
+            foreach (var node in container.Nodes.Values)
+            {
+                _nodeGroupSystem.QueueNodeRemove(node);
+                _nodeGroupSystem.QueueReflood(node);
             }
         }
 

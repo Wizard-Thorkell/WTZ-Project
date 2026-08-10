@@ -50,6 +50,11 @@ public sealed partial class AtmosphereSystem
         {
             tile.GridIndex = uid;
         }
+
+        foreach (var tile in component.ZLevelTiles.Values)
+        {
+            tile.GridIndex = uid;
+        }
     }
 
     private void OnGridAtmosphereStartup(EntityUid uid, GridAtmosphereComponent component, ComponentStartup args)
@@ -136,6 +141,17 @@ public sealed partial class AtmosphereSystem
                     //GridInvalidateTile(gridUid, grid, ref ev);
                     AddActiveTile(grid, tile);
                 }
+
+                yield return tile.Air;
+            }
+
+            foreach (var tile in grid.ZLevelTiles.Values)
+            {
+                if (tile.Air == null)
+                    continue;
+
+                if (invalidate)
+                    AddActiveTile(grid, tile);
 
                 yield return tile.Air;
             }
@@ -368,10 +384,23 @@ public sealed partial class AtmosphereSystem
             atmos.InvalidatedCoords.Add(indices);
         }
 
+        foreach (var indices in atmos.ZLevelTiles.Keys)
+        {
+            atmos.InvalidatedZLevelCoords.Add(indices);
+        }
+
         var enumerator = _map.GetAllTilesEnumerator(uid, grid);
         while (enumerator.MoveNext(out var tile))
         {
             atmos.InvalidatedCoords.Add(tile.Value.GridIndices);
+        }
+
+        foreach (var tile in _mapSystem.GetAllNonEmptyZLevelTiles(uid, grid))
+        {
+            if (tile.Z == 0)
+                continue;
+
+            atmos.InvalidatedZLevelCoords.Add(tile.GridIndices);
         }
     }
 

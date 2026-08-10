@@ -1,6 +1,8 @@
 using System.Linq;
 using Content.IntegrationTests.Fixtures;
+using Content.Server.Gravity;
 using Content.Server.Storage.EntitySystems;
+using Content.Shared.Gravity;
 using Content.Shared.Hands.Components;
 using Content.Shared.Hands.EntitySystems;
 using Content.Shared.ZLevel.Components;
@@ -250,6 +252,7 @@ public sealed class HandTests : GameTest
         var entMan = server.ResolveDependency<IEntityManager>();
         var playerMan = server.ResolveDependency<IPlayerManager>();
         var mapSystem = server.System<SharedMapSystem>();
+        var gravitySystem = server.System<GravitySystem>();
         var sys = entMan.System<SharedHandsSystem>();
         var tSys = entMan.System<TransformSystem>();
 
@@ -259,11 +262,35 @@ public sealed class HandTests : GameTest
         EntityUid item = default;
         EntityUid player = default;
         HandsComponent hands = default!;
+        EntityCoordinates originalPlayerCoordinates = default;
+        var playerHadZPosition = false;
+        var originalPlayerZLevel = 0;
+        var originalPlayerZOffset = 0f;
+        var playerHadKinematics = false;
+        var originalVerticalVelocity = 0f;
+        var originalGrounded = false;
         await server.WaitPost(() =>
         {
             player = playerMan.Sessions.First().AttachedEntity!.Value;
             var grid = entMan.GetComponent<MapGridComponent>(data.Grid);
             var tile = data.Tile.GridIndices;
+            var gravity = entMan.EnsureComponent<GravityComponent>(data.Grid);
+            gravitySystem.EnableGravity(data.Grid, gravity);
+            originalPlayerCoordinates = entMan.GetComponent<TransformComponent>(player).Coordinates;
+            if (entMan.TryGetComponent<ZLevelPositionComponent>(player, out var originalPlayerZ))
+            {
+                playerHadZPosition = true;
+                originalPlayerZLevel = originalPlayerZ.ZLevel;
+                originalPlayerZOffset = originalPlayerZ.LocalZOffset;
+            }
+            if (entMan.TryGetComponent<ZLevelKinematicsComponent>(player, out var originalKinematics))
+            {
+                playerHadKinematics = true;
+                originalVerticalVelocity = originalKinematics.VerticalVelocity;
+                originalGrounded = originalKinematics.Grounded;
+            }
+
+            tSys.SetCoordinates(player, data.GridCoords);
 
             var playerZ = entMan.EnsureComponent<ZLevelPositionComponent>(player);
             playerZ.ZLevel = 1;
@@ -296,6 +323,32 @@ public sealed class HandTests : GameTest
             });
         });
 
-        await server.WaitPost(() => mapSystem.DeleteMap(data.MapId));
+        await server.WaitPost(() =>
+        {
+            tSys.SetCoordinates(player, originalPlayerCoordinates);
+            if (playerHadZPosition)
+            {
+                var playerZ = entMan.EnsureComponent<ZLevelPositionComponent>(player);
+                playerZ.ZLevel = originalPlayerZLevel;
+                playerZ.LocalZOffset = originalPlayerZOffset;
+            }
+            else
+            {
+                entMan.RemoveComponent<ZLevelPositionComponent>(player);
+            }
+
+            if (playerHadKinematics)
+            {
+                var kinematics = entMan.EnsureComponent<ZLevelKinematicsComponent>(player);
+                kinematics.VerticalVelocity = originalVerticalVelocity;
+                kinematics.Grounded = originalGrounded;
+            }
+            else
+            {
+                entMan.RemoveComponent<ZLevelKinematicsComponent>(player);
+            }
+
+            mapSystem.DeleteMap(data.MapId);
+        });
     }
 }

@@ -10,6 +10,11 @@ namespace Content.Server.Atmos.Components
         public (EntityUid Grid, Vector2i Tile) LastPosition { get; set; }
 
         /// <summary>
+        /// The discrete Z-level associated with <see cref="LastPosition"/>.
+        /// </summary>
+        public int LastZLevel { get; set; }
+
+        /// <summary>
         /// The directions in which this entity should block airflow, relative to its own reference frame.
         /// </summary>
         [DataField("airBlockedDirection", customTypeSerializer: typeof(FlagSerializer<AtmosDirectionFlags>))]

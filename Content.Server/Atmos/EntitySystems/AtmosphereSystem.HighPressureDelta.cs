@@ -105,7 +105,7 @@ namespace Content.Server.Atmos.EntitySystems
             // TODO ATMOS finish this
 
             // Don't play the space wind sound on tiles that are on fire...
-            if (tile.PressureDifference > 15 && !tile.Hotspot.Valid)
+            if (tile.ZLevel == 0 && tile.PressureDifference > 15 && !tile.Hotspot.Valid)
             {
                 if (_spaceWindSoundCooldown == 0 && SpaceWindSound != null)
                 {
@@ -154,6 +154,12 @@ namespace Content.Server.Atmos.EntitySystems
 
             foreach (var entity in _entSet)
             {
+                if (!xforms.TryGetComponent(entity, out var entityXform) ||
+                    XformSystem.GetZLevel((entity, entityXform, CompOrNull<ZLevelPositionComponent>(entity))) != tile.ZLevel)
+                {
+                    continue;
+                }
+
                 // Ideally containers would have their own EntityQuery internally or something given recursively it may need to slam GetComp<T> anyway.
                 // Also, don't care about static bodies (but also due to collisionwakestate can't query dynamic directly atm).
                 if (!bodies.TryGetComponent(entity, out var body) ||
@@ -174,7 +180,7 @@ namespace Content.Server.Atmos.EntitySystems
                         tile.PressureDirection, 0,
                         tile.PressureSpecificTarget != null ? _mapSystem.ToCenterCoordinates(tile.GridIndex, tile.PressureSpecificTarget.GridIndices) : EntityCoordinates.Invalid,
                         gridWorldRotation,
-                        xforms.GetComponent(entity),
+                        entityXform,
                         body);
                 }
             }

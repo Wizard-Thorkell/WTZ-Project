@@ -264,16 +264,10 @@ public abstract partial class SharedHandsSystem
     {
         if (zLevel == 0)
         {
-            RemComp<ZLevelPositionComponent>(uid);
+            _zLevelSystem.ClearZLevelPosition(uid);
             return;
         }
 
-        var zComp = EnsureComp<ZLevelPositionComponent>(uid);
-        if (zComp.ZLevel == zLevel && zComp.LocalZOffset == 0f)
-            return;
-
-        zComp.ZLevel = zLevel;
-        zComp.LocalZOffset = 0f;
-        Dirty(uid, zComp);
+        _zLevelSystem.SetZLevelPosition(uid, zLevel);
     }
 }

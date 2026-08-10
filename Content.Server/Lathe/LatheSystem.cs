@@ -54,7 +54,6 @@ namespace Content.Server.Lathe
         [Dependency] private readonly ReagentSpeedSystem _reagentSpeed = default!;
         [Dependency] private readonly SharedSolutionContainerSystem _solution = default!;
         [Dependency] private readonly StackSystem _stack = default!;
-        [Dependency] private readonly TransformSystem _transform = default!;
         [Dependency] private readonly RadioSystem _radio = default!;
 
         /// <summary>
@@ -103,15 +102,14 @@ namespace Content.Server.Lathe
                     continue;
                 heatComp.NextSecond += TimeSpan.FromSeconds(1);
 
-                var position = _transform.GetGridTilePositionOrDefault((uid, xform));
                 _environments.Clear();
 
-                if (_atmosphere.GetTileMixture(xform.GridUid, xform.MapUid, position, true) is { } tileMix)
+                if (_atmosphere.GetTileMixture((uid, xform), true) is { } tileMix)
                     _environments.Add(tileMix);
 
                 if (xform.GridUid != null)
                 {
-                    var enumerator = _atmosphere.GetAdjacentTileMixtures(xform.GridUid.Value, position, false, true);
+                    var enumerator = _atmosphere.GetAdjacentTileMixtures((uid, xform), false, true);
                     while (enumerator.MoveNext(out var mix))
                     {
                         _environments.Add(mix);

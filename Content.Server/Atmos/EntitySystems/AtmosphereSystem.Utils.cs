@@ -175,13 +175,22 @@ public partial class AtmosphereSystem
     /// </summary>
     /// <param name="ent">The grid atmosphere entity.</param>
     /// <param name="tile">The tile to check for devices on.</param>
-    private void NotifyDeviceTileChanged(Entity<GridAtmosphereComponent, MapGridComponent> ent, Vector2i tile)
+    private void NotifyDeviceTileChanged(Entity<GridAtmosphereComponent, MapGridComponent> ent, TileAtmosphere tile)
     {
-        var inTile = _mapSystem.GetAnchoredEntities(ent.Owner, ent.Comp2, tile);
         var ev = new AtmosDeviceTileChangedEvent();
-        foreach (var uid in inTile)
+        foreach (var uid in GetAnchoredEntitiesOnAtmosTile(ent.Owner, ent.Comp2, tile))
         {
             RaiseLocalEvent(uid, ref ev);
         }
+    }
+
+    private IEnumerable<EntityUid> GetAnchoredEntitiesOnAtmosTile(
+        EntityUid gridUid,
+        MapGridComponent grid,
+        TileAtmosphere tile)
+    {
+        return tile.ZLevel == 0
+            ? _mapSystem.GetAnchoredEntities(gridUid, grid, tile.GridIndices)
+            : _zLevelSystem.GetAnchoredEntitiesOnZLevel(gridUid, grid, tile.GridIndices, tile.ZLevel);
     }
 }

@@ -5,6 +5,7 @@ using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Damage;
+using Robust.Shared.Map;
 using Robust.Shared.Random;
 using Robust.Shared.Threading;
 
@@ -100,13 +101,19 @@ public sealed partial class AtmosphereSystem
 
                 airtightCompsArr[i] = airtightComp;
                 var currentPos = airtightComp.LastPosition.Tile;
+                var zLevel = airtightComp.LastZLevel;
                 var tileBase = i * dirs;
 
                 for (var j = 0; j < dirs; j++)
                 {
                     var direction = (AtmosDirection)(1 << j);
                     var offset = currentPos.Offset(direction);
-                    tiles[tileBase + j] = gridAtmosComp.Tiles.GetValueOrDefault(offset);
+                    tiles[tileBase + j] = TryGetTileAtmosphere(
+                        gridAtmosComp,
+                        new ZLevelTileIndices(offset.X, offset.Y, zLevel),
+                        out var adjacent)
+                            ? adjacent
+                            : null;
                 }
             }
 
@@ -124,10 +131,15 @@ public sealed partial class AtmosphereSystem
                     continue;
 
                 var currentPos = airtight.LastPosition.Tile;
+                var zLevel = airtight.LastZLevel;
                 var localPressure = 0f;
 
                 // microopting one less nullcheck lmao
-                if (gridAtmosComp.Tiles.TryGetValue(currentPos, out var tile) && tile.Air is { } mixture)
+                if (TryGetTileAtmosphere(
+                        gridAtmosComp,
+                        new ZLevelTileIndices(currentPos.X, currentPos.Y, zLevel),
+                        out var tile) &&
+                    tile.Air is { } mixture)
                     localPressure = mixture.TotalMoles * Atmospherics.R * mixture.Temperature / mixture.Volume;
 
                 var presBase = i * dirs;

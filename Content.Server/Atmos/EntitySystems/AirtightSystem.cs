@@ -1,7 +1,9 @@
 using Content.Server.Atmos.Components;
 using Content.Server.Explosion.EntitySystems;
 using Content.Shared.Atmos;
+using Content.Shared.ZLevel;
 using JetBrains.Annotations;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Atmos.EntitySystems
@@ -17,10 +19,22 @@ namespace Content.Server.Atmos.EntitySystems
         public override void Initialize()
         {
             SubscribeLocalEvent<AirtightComponent, ComponentInit>(OnAirtightInit);
+            SubscribeLocalEvent<AirtightComponent, MapInitEvent>(OnAirtightMapInit);
             SubscribeLocalEvent<AirtightComponent, ComponentShutdown>(OnAirtightShutdown);
             SubscribeLocalEvent<AirtightComponent, AnchorStateChangedEvent>(OnAirtightPositionChanged);
             SubscribeLocalEvent<AirtightComponent, ReAnchorEvent>(OnAirtightReAnchor);
             SubscribeLocalEvent<AirtightComponent, MoveEvent>(OnAirtightMoved);
+            SubscribeLocalEvent<AirtightComponent, ZLevelPositionChangedEvent>(OnZLevelChanged);
+        }
+
+        private void OnAirtightMapInit(Entity<AirtightComponent> airtight, ref MapInitEvent args)
+        {
+            UpdatePosition(airtight);
+        }
+
+        private void OnZLevelChanged(Entity<AirtightComponent> airtight, ref ZLevelPositionChangedEvent args)
+        {
+            UpdatePosition(airtight);
         }
 
         private void OnAirtightInit(Entity<AirtightComponent> airtight, ref ComponentInit args)
@@ -66,7 +80,8 @@ namespace Content.Server.Atmos.EntitySystems
 
             // Update and invalidate new position.
             airtight.LastPosition = (gridId.Value, tilePos);
-            InvalidatePosition(gridId.Value, tilePos);
+            airtight.LastZLevel = _transform.GetZLevel((uid, xform, CompOrNull<ZLevelPositionComponent>(uid)));
+            InvalidatePosition(gridId.Value, new ZLevelTileIndices(tilePos.X, tilePos.Y, airtight.LastZLevel));
 
             var airtightEv = new AirtightChanged(uid, airtight, false, (gridId.Value, tilePos));
             RaiseLocalEvent(uid, ref airtightEv, true);
@@ -78,7 +93,8 @@ namespace Content.Server.Atmos.EntitySystems
             {
                 // Update and invalidate new position.
                 airtight.LastPosition = (gridId, args.TilePos);
-                InvalidatePosition(gridId, args.TilePos);
+                airtight.LastZLevel = _transform.GetZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
+                InvalidatePosition(gridId, new ZLevelTileIndices(args.TilePos.X, args.TilePos.Y, airtight.LastZLevel));
 
                 var airtightEv = new AirtightChanged(uid, airtight, false, (gridId, args.TilePos));
                 RaiseLocalEvent(uid, ref airtightEv, true);
@@ -120,14 +136,33 @@ namespace Content.Server.Atmos.EntitySystems
                 return;
 
             var indices = _transform.GetGridTilePositionOrDefault((ent, xform), grid);
+            var zLevel = _transform.GetZLevel((owner, xform, CompOrNull<ZLevelPositionComponent>(owner)));
+            var previous = airtight.LastPosition;
+            var previousZ = airtight.LastZLevel;
+
+            if ((previous.Grid != xform.GridUid.Value || previous.Tile != indices || previousZ != zLevel) &&
+                TryComp(previous.Grid, out MapGridComponent? previousGrid))
+            {
+                InvalidatePosition(
+                    (previous.Grid, previousGrid),
+                    new ZLevelTileIndices(previous.Tile.X, previous.Tile.Y, previousZ));
+            }
+
             airtight.LastPosition = (xform.GridUid.Value, indices);
-            InvalidatePosition((xform.GridUid.Value, grid), indices);
+            airtight.LastZLevel = zLevel;
+            InvalidatePosition((xform.GridUid.Value, grid), new ZLevelTileIndices(indices.X, indices.Y, zLevel));
         }
 
         public void InvalidatePosition(Entity<MapGridComponent?> grid, Vector2i pos)
         {
-            var query = GetEntityQuery<AirtightComponent>();
-            _explosionSystem.UpdateAirtightMap(grid, pos, grid);
+            InvalidatePosition(grid, new ZLevelTileIndices(pos.X, pos.Y, 0));
+        }
+
+        public void InvalidatePosition(Entity<MapGridComponent?> grid, ZLevelTileIndices pos)
+        {
+            if (pos.Z == 0)
+                _explosionSystem.UpdateAirtightMap(grid, new Vector2i(pos.X, pos.Y), grid);
+
             _atmosphereSystem.InvalidateTile(grid.Owner, pos);
         }
 
