@@ -39,6 +39,14 @@ public sealed class SharedZLevelSystem : VirtualController
     private EntityQuery<ThrownItemComponent> _thrownQuery;
     private EntityQuery<TransformComponent> _transformQuery;
     private readonly List<EntityUid> _anchoredBuffer = new();
+    private readonly HashSet<EntityUid> _activeBodies = new();
+    private readonly List<EntityUid> _activeBodyBuffer = new();
+    private readonly HashSet<EntityUid> _refreshBodyBuffer = new();
+    private readonly Dictionary<BodyTileKey, HashSet<EntityUid>> _bodiesByTile = new();
+    private readonly Dictionary<EntityUid, BodyTileKey> _bodyTiles = new();
+
+    public int ActiveBodyCount => _activeBodies.Count;
+    public int IndexedBodyCount => _bodyTiles.Count;
 
     public override void Initialize()
     {
@@ -56,10 +64,19 @@ public sealed class SharedZLevelSystem : VirtualController
 
         SubscribeLocalEvent<ZLevelPositionComponent, ComponentStartup>(OnStartup);
         SubscribeLocalEvent<ZLevelKinematicsComponent, ComponentStartup>(OnStartup);
+        SubscribeLocalEvent<ZLevelPositionComponent, ComponentRemove>(OnBodyComponentRemove);
+        SubscribeLocalEvent<ZLevelKinematicsComponent, ComponentRemove>(OnBodyComponentRemove);
+        SubscribeLocalEvent<PhysicsComponent, ComponentAdd>(OnPhysicsAdd);
+        SubscribeLocalEvent<PhysicsComponent, ComponentRemove>(OnPhysicsRemove);
         SubscribeLocalEvent<ZLevelPositionComponent, MoveEvent>(OnMoved);
         SubscribeLocalEvent<ZLevelPositionComponent, EntParentChangedMessage>(OnParentChanged);
         SubscribeLocalEvent<ZLevelPositionComponent, MapUidChangedEvent>(OnMapChanged);
         SubscribeLocalEvent<ZLevelPositionComponent, PreventCollideEvent>(OnPreventCollide);
+        SubscribeLocalEvent<ZLevelPositionComponent, WeightlessnessChangedEvent>(OnWeightlessnessChanged);
+        SubscribeLocalEvent<ThrownItemComponent, ComponentStartup>(OnThrownStartup);
+        SubscribeLocalEvent<ThrownItemComponent, ComponentRemove>(OnThrownRemove);
+        SubscribeLocalEvent<GravityChangedEvent>(OnGravityChanged);
+        SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnDZTileChanged);
         SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnBoundaryChanged);
     }
@@ -68,11 +85,29 @@ public sealed class SharedZLevelSystem : VirtualController
     {
         base.UpdateBeforeSolve(prediction, frameTime);
 
-        var query = EntityQueryEnumerator<ZLevelPositionComponent, ZLevelKinematicsComponent, TransformComponent, PhysicsComponent>();
-        while (query.MoveNext(out var uid, out var dzPosition, out var dzKinematics, out var transform, out var physics))
+        _activeBodyBuffer.Clear();
+        _activeBodyBuffer.AddRange(_activeBodies);
+
+        foreach (var uid in _activeBodyBuffer)
         {
+            if (!_positionQuery.TryComp(uid, out var dzPosition) ||
+                !_kinematicsQuery.TryComp(uid, out var dzKinematics) ||
+                !_transformQuery.TryComp(uid, out var transform) ||
+                !_physicsQuery.TryComp(uid, out var physics))
+            {
+                RemoveBody(uid);
+                continue;
+            }
+
             ResolveVerticalState((uid, dzPosition, dzKinematics, transform, physics), frameTime);
         }
+
+        _activeBodyBuffer.Clear();
+    }
+
+    public bool IsBodyActive(EntityUid uid)
+    {
+        return _activeBodies.Contains(uid);
     }
 
     public bool TryGetSupportTile(
@@ -282,6 +317,26 @@ public sealed class SharedZLevelSystem : VirtualController
         RefreshEntity(uid);
     }
 
+    private void OnBodyComponentRemove<T>(EntityUid uid, T component, ref ComponentRemove args) where T : IComponent
+    {
+        RemoveBody(uid);
+    }
+
+    private void OnPhysicsRemove(Entity<PhysicsComponent> entity, ref ComponentRemove args)
+    {
+        if (_positionQuery.HasComp(entity.Owner))
+            RemoveBody(entity.Owner);
+    }
+
+    private void OnPhysicsAdd(Entity<PhysicsComponent> entity, ref ComponentAdd args)
+    {
+        if (!_positionQuery.HasComp(entity.Owner) || !_kinematicsQuery.HasComp(entity.Owner))
+            return;
+
+        UpdateBodyIndex(entity.Owner);
+        _activeBodies.Add(entity.Owner);
+    }
+
     private void OnMoved(Entity<ZLevelPositionComponent> entity, ref MoveEvent args)
     {
         RefreshEntity(entity.Owner);
@@ -306,51 +361,71 @@ public sealed class SharedZLevelSystem : VirtualController
             args.Cancelled = true;
     }
 
+    private void OnWeightlessnessChanged(Entity<ZLevelPositionComponent> entity, ref WeightlessnessChangedEvent args)
+    {
+        RefreshEntity(entity.Owner);
+    }
+
+    private void OnThrownStartup(Entity<ThrownItemComponent> entity, ref ComponentStartup args)
+    {
+        if (_positionQuery.HasComp(entity.Owner))
+            RefreshEntity(entity.Owner);
+    }
+
+    private void OnThrownRemove(Entity<ThrownItemComponent> entity, ref ComponentRemove args)
+    {
+        if (_positionQuery.HasComp(entity.Owner))
+            _activeBodies.Add(entity.Owner);
+    }
+
+    private void OnGravityChanged(ref GravityChangedEvent args)
+    {
+        _refreshBodyBuffer.Clear();
+        foreach (var (uid, location) in _bodyTiles)
+        {
+            if (location.GridUid == args.ChangedGridIndex)
+                _refreshBodyBuffer.Add(uid);
+        }
+
+        RefreshBufferedBodies();
+    }
+
     private void OnDZTileChanged(ref ZLevelTileChangedEvent args)
     {
+        _refreshBodyBuffer.Clear();
         foreach (var change in args.Changes)
         {
-            var query = EntityQueryEnumerator<ZLevelPositionComponent, ZLevelKinematicsComponent, TransformComponent, PhysicsComponent>();
-            while (query.MoveNext(out var uid, out var dzPosition, out var dzKinematics, out var transform, out var physics))
-            {
-                if (transform.GridUid != args.Entity.Owner)
-                    continue;
-
-                var xy = _map.TileIndicesFor(args.Entity.Owner, args.Entity.Comp, transform.Coordinates);
-                if (xy != new Vector2i(change.GridIndices.X, change.GridIndices.Y))
-                    continue;
-
-                var range = Math.Max(1, dzKinematics.MaxStepDownDepth) + 1;
-                if (Math.Abs(dzPosition.ZLevel - change.GridIndices.Z) > range)
-                    continue;
-
-                ResolveVerticalState((uid, dzPosition, dzKinematics, transform, physics), 0f);
-            }
+            var tile = new Vector2i(change.GridIndices.X, change.GridIndices.Y);
+            _boundaries.InvalidateBoundary(args.Entity.Owner, tile, change.GridIndices.Z - 1);
+            AddBodiesAt(args.Entity.Owner, tile);
         }
+
+        RefreshBufferedBodies();
+    }
+
+    private void OnTileChanged(ref TileChangedEvent args)
+    {
+        _refreshBodyBuffer.Clear();
+        foreach (var change in args.Changes)
+        {
+            _boundaries.InvalidateBoundary(args.Entity.Owner, change.GridIndices, -1);
+            AddBodiesAt(args.Entity.Owner, change.GridIndices);
+        }
+
+        RefreshBufferedBodies();
     }
 
     private void OnBoundaryChanged(ref ZLevelBoundaryChangedEvent args)
     {
-        var query = EntityQueryEnumerator<ZLevelPositionComponent, ZLevelKinematicsComponent, TransformComponent, PhysicsComponent>();
-        while (query.MoveNext(out var uid, out var position, out var kinematics, out var transform, out var physics))
-        {
-            if (transform.GridUid != args.Grid.Owner)
-                continue;
-
-            var xy = _map.TileIndicesFor(args.Grid.Owner, args.Grid.Comp, transform.Coordinates);
-            if (xy != args.Tile)
-                continue;
-
-            var range = Math.Max(1, kinematics.MaxStepDownDepth) + 1;
-            if (position.ZLevel < args.LowerZ - range || position.ZLevel > args.LowerZ + 1 + range)
-                continue;
-
-            ResolveVerticalState((uid, position, kinematics, transform, physics), 0f);
-        }
+        _refreshBodyBuffer.Clear();
+        AddBodiesAt(args.Grid.Owner, args.Tile);
+        RefreshBufferedBodies();
     }
 
     private void RefreshEntity(EntityUid uid)
     {
+        UpdateBodyIndex(uid);
+
         if (!_positionQuery.TryComp(uid, out var dzPosition) ||
             !_transformQuery.TryComp(uid, out var transform) ||
             !_physicsQuery.TryComp(uid, out var physics))
@@ -379,6 +454,7 @@ public sealed class SharedZLevelSystem : VirtualController
         if (transform.GridUid == null || !_gridQuery.TryComp(transform.GridUid, out var grid))
         {
             SetGrounded(uid, physics, dzKinematics, false);
+            _activeBodies.Remove(uid);
             return;
         }
 
@@ -391,6 +467,7 @@ public sealed class SharedZLevelSystem : VirtualController
         if (activelyThrown)
         {
             SetGrounded(uid, physics, dzKinematics, false);
+            _activeBodies.Add(uid);
             Dirty(uid, dzKinematics);
             return;
         }
@@ -447,8 +524,85 @@ public sealed class SharedZLevelSystem : VirtualController
             SetGrounded(uid, physics, dzKinematics, false);
         }
 
+        if (dzKinematics.Grounded ||
+            weightless && MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f && dzPosition.LocalZOffset < 0.001f)
+        {
+            _activeBodies.Remove(uid);
+        }
+        else
+        {
+            _activeBodies.Add(uid);
+        }
+
         Dirty(uid, dzPosition);
         Dirty(uid, dzKinematics);
+    }
+
+    private void UpdateBodyIndex(EntityUid uid)
+    {
+        if (!_positionQuery.HasComp(uid) ||
+            !_kinematicsQuery.HasComp(uid) ||
+            !_physicsQuery.HasComp(uid) ||
+            !_transformQuery.TryComp(uid, out var transform) ||
+            transform.GridUid is not { } gridUid ||
+            !_gridQuery.TryComp(gridUid, out var grid))
+        {
+            RemoveBodyIndex(uid);
+            return;
+        }
+
+        var tile = _map.TileIndicesFor(gridUid, grid, transform.Coordinates);
+        var location = new BodyTileKey(gridUid, tile);
+        if (_bodyTiles.TryGetValue(uid, out var oldLocation) && oldLocation == location)
+            return;
+
+        RemoveBodyIndex(uid);
+        _bodyTiles[uid] = location;
+
+        if (!_bodiesByTile.TryGetValue(location, out var bodies))
+        {
+            bodies = new HashSet<EntityUid>();
+            _bodiesByTile.Add(location, bodies);
+        }
+
+        bodies.Add(uid);
+    }
+
+    private void RemoveBody(EntityUid uid)
+    {
+        _activeBodies.Remove(uid);
+        RemoveBodyIndex(uid);
+    }
+
+    private void RemoveBodyIndex(EntityUid uid)
+    {
+        if (!_bodyTiles.Remove(uid, out var location) ||
+            !_bodiesByTile.TryGetValue(location, out var bodies))
+        {
+            return;
+        }
+
+        bodies.Remove(uid);
+        if (bodies.Count == 0)
+            _bodiesByTile.Remove(location);
+    }
+
+    private void AddBodiesAt(EntityUid gridUid, Vector2i tile)
+    {
+        if (!_bodiesByTile.TryGetValue(new BodyTileKey(gridUid, tile), out var bodies))
+            return;
+
+        _refreshBodyBuffer.UnionWith(bodies);
+    }
+
+    private void RefreshBufferedBodies()
+    {
+        foreach (var uid in _refreshBodyBuffer)
+        {
+            RefreshEntity(uid);
+        }
+
+        _refreshBodyBuffer.Clear();
     }
 
     private void SetGrounded(EntityUid uid, PhysicsComponent physics, ZLevelKinematicsComponent kinematics, bool grounded)
@@ -532,4 +686,6 @@ public sealed class SharedZLevelSystem : VirtualController
     {
         return Math.Clamp(localOffset, 0f, MathF.BitDecrement(1f));
     }
+
+    private readonly record struct BodyTileKey(EntityUid GridUid, Vector2i Tile);
 }

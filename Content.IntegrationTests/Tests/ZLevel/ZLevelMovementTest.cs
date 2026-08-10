@@ -50,6 +50,8 @@ public sealed class ZLevelMovementTest : MovementTest
 
             Assert.That(zLevel.TryGetSupportTile(player, out var supportTile), Is.True);
             Assert.That(supportTile.GridIndices.Z, Is.EqualTo(1));
+            Assert.That(zLevel.IsBodyActive(player), Is.False,
+                "A supported body should leave the per-tick active set.");
         });
 
         await RunTicks(5);
@@ -73,6 +75,58 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(zLevelPosition.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
                 Assert.That(zLevelKinematics.Grounded, Is.True);
                 Assert.That(physics.BodyStatus, Is.EqualTo(BodyStatus.OnGround));
+                Assert.That(SEntMan.System<SharedZLevelSystem>().IsBodyActive(player), Is.False);
+            });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelTileRemovalWakesIndexedBody()
+    {
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            var player = ToServer(Player);
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
+            var tile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
+
+            var position = SEntMan.EnsureComponent<ZLevelPositionComponent>(player);
+            position.ZLevel = 1;
+            position.LocalZOffset = 0f;
+            var kinematics = SEntMan.EnsureComponent<ZLevelKinematicsComponent>(player);
+            kinematics.MaxStepDownDepth = 2;
+            kinematics.VerticalVelocity = 0f;
+
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 0), new Tile(1));
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), new Tile(1));
+
+            Assert.That(boundaries.CanBodyPass(MapData.Grid, grid, tile, 1, 0), Is.False,
+                "The closed boundary should be cached before support changes.");
+            Assert.That(zLevel.IsBodyActive(player), Is.False);
+
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), Tile.Empty);
+
+            Assert.That(boundaries.CanBodyPass(MapData.Grid, grid, tile, 1, 0), Is.True,
+                "Removing the upper tile must invalidate the cached boundary.");
+            Assert.That(zLevel.IsBodyActive(player), Is.True,
+                "Removing support should wake the body indexed at the changed tile.");
+        });
+
+        await RunSeconds(1f);
+
+        await Server.WaitAssertion(() =>
+        {
+            var player = ToServer(Player);
+            var position = SEntMan.GetComponent<ZLevelPositionComponent>(player);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(position.ZLevel, Is.EqualTo(0));
+                Assert.That(position.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
+                Assert.That(SEntMan.System<SharedZLevelSystem>().IsBodyActive(player), Is.False);
             });
         });
     }
@@ -155,6 +209,26 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Visibility), Is.False,
                     "Forced-closed channels must win over forced-open channels.");
             });
+
+            var chunkCount = grid.ChunkCount;
+            for (var i = 0; i < SharedZLevelBoundarySystem.MaxCachedBoundaries + 32; i++)
+            {
+                Assert.That(boundaries.TryGetBoundary(
+                    MapData.Grid,
+                    grid,
+                    new Vector2i(100_000 + i, 100_000),
+                    0,
+                    1,
+                    out _), Is.True);
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(boundaries.CachedBoundaryCount,
+                    Is.LessThanOrEqualTo(SharedZLevelBoundarySystem.MaxCachedBoundaries));
+                Assert.That(grid.ChunkCount, Is.EqualTo(chunkCount),
+                    "Boundary queries over empty space must not allocate map chunks.");
+            });
         });
     }
 
@@ -196,6 +270,8 @@ public sealed class ZLevelMovementTest : MovementTest
             Assert.That(zLevel.TryGetSupportTile(player, out var support), Is.True);
             Assert.That(support.GridIndices.Z, Is.EqualTo(0),
                 "An explicit body opening must make the upper tile non-supporting.");
+            Assert.That(zLevel.IsBodyActive(player), Is.True,
+                "Changing support should wake only the indexed body at this tile.");
         });
 
         await RunSeconds(1f);
@@ -211,6 +287,7 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(position.ZLevel, Is.EqualTo(0));
                 Assert.That(position.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
                 Assert.That(kinematics.Grounded, Is.True);
+                Assert.That(SEntMan.System<SharedZLevelSystem>().IsBodyActive(player), Is.False);
             });
         });
     }

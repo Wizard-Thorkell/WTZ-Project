@@ -131,6 +131,19 @@ Implemented vertical boundary foundation:
 - Mapper-visible markers cover floor openings, shafts, grate-like boundaries,
   and explicit seals.
 
+Implemented active-body and cache scaling foundation:
+
+- `SharedZLevelSystem` maintains a per-grid, per-tile index of opt-in physics
+  bodies instead of scanning every ZLevel entity when local support changes.
+- Only unsupported, vertically moving, or actively thrown bodies run through
+  the vertical solver every physics tick; settled bodies leave the active set.
+- Tile, ZLevel tile, boundary, gravity, movement, parenting, and weightlessness
+  changes wake the relevant indexed bodies.
+- Boundary decisions use a bounded 4096-entry cache with explicit invalidation
+  for tile data, boundary providers, and grid termination.
+- Cached reads over empty space preserve sparse storage and do not allocate map
+  chunks.
+
 Partially implemented mapping and placement:
 
 - Placement network messages carry a ZLevel field.
@@ -154,7 +167,7 @@ Verified recently:
 - Focused Robust lifecycle/PVS run: 12 passed, 0 skipped, 0 failed.
 - Broader Robust chunk, map, serialization, and physics runs: 17 passed,
   0 skipped, 0 failed.
-- Focused Content ZLevel run after explicit boundaries: 12 passed, 1 skipped,
+- Focused Content ZLevel run after active-body indexing: 13 passed, 1 skipped,
   0 failed.
 - The skipped test is an atmos containing-mixture test that needs a dedicated
   upper-floor fixture.
@@ -194,9 +207,9 @@ feature phases below remain the backlog and acceptance criteria for each area.
 2. [Done] Stabilize chunk lifecycle and replication, including sparse Z-only
    chunks, full states, delta deletion, and real client/server PVS coverage.
 3. [Done] Replace implicit ceiling behavior with explicit vertical boundaries.
-4. [Next] Add active vertical bodies and bounded caches so work scales with relevant
-   entities and known layers.
-5. Integrate renderer and PVS behavior around visible floors and openings.
+4. [Done] Add active vertical bodies and bounded caches so work scales with
+   relevant entities and known layers.
+5. [Next] Integrate renderer and PVS behavior around visible floors and openings.
 6. Stabilize atmosphere on top of the shared boundary model.
 7. Expand vertical gameplay, construction, interaction, effects, and AI.
 8. Define a frame model for moving ships, stations, and planets.
