@@ -35,7 +35,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
     public bool IsEntityVisibleFrom(
         EntityUid entity,
         MapId viewerMap,
-        int viewerZ,
+        int viewerWorldZ,
         bool allowAbove = false)
     {
         if (!_transformQuery.TryComp(entity, out var transform) ||
@@ -43,12 +43,13 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
             transform.MapID != viewerMap)
             return false;
 
-        var entityZ = _transform.GetZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity)));
-        if (entityZ == viewerZ)
+        var entityLocalZ = _transform.GetZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity)));
+        var entityWorldZ = _transform.GetWorldZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity)));
+        if (entityWorldZ == viewerWorldZ)
             return true;
 
-        if ((entityZ > viewerZ && !allowAbove) ||
-            Math.Abs(entityZ - viewerZ) > MaxVisibleLevelDistance)
+        if ((entityWorldZ > viewerWorldZ && !allowAbove) ||
+            Math.Abs(entityWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
             return false;
 
         var mapCoordinates = _transform.GetMapCoordinates((entity, transform));
@@ -69,30 +70,32 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         }
 
         var tile = _map.TileIndicesFor(gridUid, grid, mapCoordinates);
-        return IsTileVisibleFrom(gridUid, grid, tile, viewerZ, entityZ, allowAbove);
+        return IsTileVisibleFrom(gridUid, grid, tile, viewerWorldZ, entityLocalZ, allowAbove);
     }
 
     public bool IsTileVisibleFrom(
         EntityUid gridUid,
         MapGridComponent grid,
         Vector2i tile,
-        int viewerZ,
-        int targetZ,
+        int viewerWorldZ,
+        int targetLocalZ,
         bool allowAbove = false)
     {
-        if (targetZ == viewerZ)
+        var viewerLocalZ = _transform.WorldToLocalZLevel(gridUid, viewerWorldZ);
+        var targetWorldZ = _transform.LocalToWorldZLevel(gridUid, targetLocalZ);
+        if (targetWorldZ == viewerWorldZ)
             return true;
 
-        if ((targetZ > viewerZ && !allowAbove) ||
-            Math.Abs(targetZ - viewerZ) > MaxVisibleLevelDistance)
+        if ((targetWorldZ > viewerWorldZ && !allowAbove) ||
+            Math.Abs(targetWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
             return false;
 
         return _boundaries.IsStackOpen(
             gridUid,
             grid,
             tile,
-            viewerZ,
-            targetZ,
+            viewerLocalZ,
+            targetLocalZ,
             ZLevelBoundaryChannels.Visibility);
     }
 }

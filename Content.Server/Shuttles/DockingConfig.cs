@@ -29,4 +29,9 @@ public sealed class DockingConfig
     /// Local angle of the docking grid relative to the target grid.
     /// </summary>
     public Angle Angle;
+
+    /// <summary>
+    /// World-space Z origin the moving grid must use for all paired docking ports to align.
+    /// </summary>
+    public int ZLevelFrameOrigin;
 }

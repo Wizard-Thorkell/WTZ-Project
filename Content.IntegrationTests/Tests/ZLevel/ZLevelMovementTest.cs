@@ -367,19 +367,21 @@ public sealed class ZLevelMovementTest : MovementTest
         await Server.WaitPost(() =>
         {
             var map = SEntMan.System<SharedMapSystem>();
+            var xform = SEntMan.System<SharedTransformSystem>();
             var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
             var targetCoords = SEntMan.GetCoordinates(TargetCoords);
             var targetTile = map.TileIndicesFor(MapData.Grid, grid, targetCoords);
             var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
             var playerTile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
 
+            Assert.That(xform.SetZLevelFrameOrigin(MapData.Grid, 5), Is.True);
             SEntMan.EnsureComponent<ZLevelPositionComponent>(SPlayer).ZLevel = 1;
             map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(playerTile.X, playerTile.Y, 1), new Tile(1));
             map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(targetTile.X, targetTile.Y, 1), new Tile(1));
 
             var targetUid = SEntMan.GetEntity(target);
             Assert.That(SEntMan.System<SharedZLevelVisibilitySystem>()
-                .IsEntityVisibleFrom(targetUid, MapId, 1), Is.False);
+                .IsEntityVisibleFrom(targetUid, MapId, 6), Is.False);
             Assert.That(SEntMan.System<EntityLookupSystem>()
                 .GetEntitiesInRange(Transform.GetMapCoordinates(targetUid), 1f), Does.Contain(targetUid));
             SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);

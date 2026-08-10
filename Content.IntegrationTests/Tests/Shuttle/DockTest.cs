@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Content.IntegrationTests.Fixtures;
+using Content.Server.Shuttles.Components;
 using Content.Server.Shuttles.Systems;
 using Content.Tests;
 using Robust.Server.GameObjects;
@@ -124,6 +125,79 @@ public sealed class DockTest : GameTest
 
             var dockingConfig = dockingSystem.GetDockingConfig(shuttle, map.MapUid);
             Assert.That(dockingConfig, Is.Not.EqualTo(null));
+        });
+    }
+
+    [Test]
+    public async Task TestDockingAlignsWorldZFrames()
+    {
+        var pair = Pair;
+        var server = pair.Server;
+        var map = await pair.CreateTestMap();
+
+        var entManager = server.ResolveDependency<IEntityManager>();
+        var mapManager = server.ResolveDependency<IMapManager>();
+        var dockingSystem = entManager.System<DockingSystem>();
+        var shuttleSystem = entManager.System<ShuttleSystem>();
+        var mapSystem = entManager.System<SharedMapSystem>();
+        var xformSystem = entManager.System<SharedTransformSystem>();
+
+        await server.WaitAssertion(() =>
+        {
+            entManager.DeleteEntity(map.Grid);
+            var movingGrid = mapManager.CreateGridEntity(map.MapId);
+            var targetGrid = mapManager.CreateGridEntity(map.MapId);
+            xformSystem.SetLocalPosition(targetGrid.Owner, new Vector2(50f, 50f));
+
+            mapSystem.SetTiles(movingGrid.Owner, movingGrid.Comp, new List<(Vector2i, Tile)>
+            {
+                new(new Vector2i(0, 0), new Tile(1)),
+                new(new Vector2i(0, 1), new Tile(1)),
+                new(new Vector2i(0, 2), new Tile(1)),
+            });
+            mapSystem.SetTiles(targetGrid.Owner, targetGrid.Comp, new List<(Vector2i, Tile)>
+            {
+                new(new Vector2i(0, 0), new Tile(1)),
+                new(new Vector2i(0, 1), new Tile(1)),
+                new(new Vector2i(0, 2), new Tile(1)),
+                new(new Vector2i(-1, 2), new Tile(1)),
+                new(new Vector2i(1, 2), new Tile(1)),
+            });
+
+            var movingDock = entManager.SpawnEntity(
+                "AirlockShuttle",
+                new EntityCoordinates(movingGrid.Owner, new Vector2(0.5f, 0.5f)));
+            var targetDock = entManager.SpawnEntity(
+                "AirlockShuttle",
+                new EntityCoordinates(targetGrid.Owner, new Vector2(0.5f, 0.5f)));
+            entManager.AddComponent<ZLevelPositionComponent>(movingDock).ZLevel = 2;
+            entManager.AddComponent<ZLevelPositionComponent>(targetDock).ZLevel = 1;
+
+            Assert.That(xformSystem.SetZLevelFrameOrigin(movingGrid.Owner, -8), Is.True);
+            Assert.That(xformSystem.SetZLevelFrameOrigin(targetGrid.Owner, 4), Is.True);
+
+            var config = dockingSystem.GetDockingConfig(movingGrid.Owner, targetGrid.Owner);
+            Assert.That(config, Is.Not.Null);
+            Assert.That(config!.ZLevelFrameOrigin, Is.EqualTo(3));
+
+            shuttleSystem.FTLDock(
+                (movingGrid.Owner, entManager.GetComponent<TransformComponent>(movingGrid.Owner)),
+                config);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(entManager.GetComponent<ZLevelFrameComponent>(movingGrid.Owner).Origin, Is.EqualTo(3));
+                Assert.That(xformSystem.GetWorldZLevel((
+                    movingDock,
+                    entManager.GetComponent<TransformComponent>(movingDock),
+                    entManager.GetComponentOrNull<ZLevelPositionComponent>(movingDock))), Is.EqualTo(5));
+                Assert.That(xformSystem.GetWorldZLevel((
+                    targetDock,
+                    entManager.GetComponent<TransformComponent>(targetDock),
+                    entManager.GetComponentOrNull<ZLevelPositionComponent>(targetDock))), Is.EqualTo(5));
+                Assert.That(entManager.GetComponent<DockingComponent>(movingDock).Docked, Is.True);
+                Assert.That(entManager.GetComponent<DockingComponent>(targetDock).Docked, Is.True);
+            });
         });
     }
 }

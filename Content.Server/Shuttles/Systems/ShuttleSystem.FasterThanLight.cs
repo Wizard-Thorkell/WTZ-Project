@@ -742,6 +742,8 @@ public sealed partial class ShuttleSystem
     /// </summary>
     public void FTLDock(Entity<TransformComponent> shuttle, DockingConfig config)
     {
+        _transform.SetZLevelFrameOrigin(shuttle.Owner, config.ZLevelFrameOrigin);
+
         // Set position
         var mapCoordinates = _transform.ToMapCoordinates(config.Coordinates);
         var mapUid = _mapSystem.GetMap(mapCoordinates.MapId);

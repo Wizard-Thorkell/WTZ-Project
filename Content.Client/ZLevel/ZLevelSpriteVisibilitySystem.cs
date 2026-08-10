@@ -40,8 +40,8 @@ public sealed class ZLevelSpriteVisibilitySystem : EntitySystem
             return;
         }
 
-        var entityZ = _transform.GetZLevel((entity.Owner, entityTransform, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
-        var alpha = GetRelativeAlpha(view.MapId, view.ZLevel, entityZ, entity.Owner);
+        var entityZ = _transform.GetWorldZLevel((entity.Owner, entityTransform, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
+        var alpha = GetRelativeAlpha(view.MapId, view.WorldZLevel, entityZ, entity.Owner);
         if (alpha <= 0f)
         {
             args.Cancelled = true;

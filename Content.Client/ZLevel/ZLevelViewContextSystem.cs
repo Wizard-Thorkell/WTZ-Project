@@ -52,7 +52,7 @@ public sealed class ZLevelViewContextSystem : EntitySystem
         if (fallback is { } fallbackUid && TryResolve(fallbackUid, eye.Position.MapId, out context))
             return true;
 
-        context = new ZLevelViewContext(null, eye.Position.MapId, 0);
+        context = new ZLevelViewContext(null, eye.Position.MapId, 0, 0);
         return eye.Position.MapId != MapId.Nullspace;
     }
 
@@ -96,11 +96,12 @@ public sealed class ZLevelViewContextSystem : EntitySystem
             return false;
         }
 
-        var zLevel = _transform.GetZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
-        context = new ZLevelViewContext(viewer, transform.MapID, zLevel);
+        var localZ = _transform.GetZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
+        var worldZ = _transform.GetWorldZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
+        context = new ZLevelViewContext(viewer, transform.MapID, localZ, worldZ);
         return true;
     }
 
 }
 
-public readonly record struct ZLevelViewContext(EntityUid? Viewer, MapId MapId, int ZLevel);
+public readonly record struct ZLevelViewContext(EntityUid? Viewer, MapId MapId, int LocalZLevel, int WorldZLevel);

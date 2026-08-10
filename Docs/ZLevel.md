@@ -40,6 +40,9 @@ These rules are the spine of the prototype. Do not casually break them.
 - `TransformComponent` remains authoritative for XY.
 - `ZLevelPositionComponent` is authoritative for discrete floor index and local
   vertical offset.
+- `ZLevelTileIndices` and entity Z positions are local to their owning grid.
+- `ZLevelMapCoordinates` and cross-grid comparisons use world Z. A grid's
+  `ZLevelFrameComponent.Origin` maps local layer zero into that shared space.
 - `ZLevelKinematicsComponent` stores vertical motion state.
 - Legacy 2D map, movement, and tile systems continue to operate on `z = 0`
   unless a ZLevel path explicitly opts in.
@@ -180,6 +183,25 @@ Implemented active-body and cache scaling foundation:
 - Cached reads over empty space preserve sparse storage and do not allocate map
   chunks.
 
+Implemented moving-grid frame foundation:
+
+- Networked and serialized `ZLevelFrameComponent` gives each grid an integer
+  world-Z origin while preserving sparse deck indices as grid-local data.
+- Transform and map helpers explicitly convert between local tile/entity Z and
+  world map Z; moving or rotating a grid between maps does not rewrite its
+  decks, passengers, or chunks.
+- Physics contacts, sprite filtering, targeting, shared visibility, and
+  per-session PVS compare world Z, so separate grids interact only when their
+  vertical frames align.
+- FTL docking derives the moving grid's required origin from the paired ports:
+  `target port world Z - moving port local Z`. Multi-port configurations retain
+  only ports that agree on that origin.
+- Direct docking refuses ports on different world layers. FTL applies the frame
+  before moving the shuttle and creating dock joints.
+- Changing a frame regenerates physics contacts and replicates to clients.
+- Mapping and placement keep their active floor local to the selected grid,
+  converting only at the map-coordinate boundary.
+
 Partially implemented mapping and placement:
 
 - Placement network messages carry a ZLevel field.
@@ -207,6 +229,12 @@ Verified recently:
   upper-floor positions.
 - Combined Content ZLevel and hands regression: 24 passed, 0 skipped, 0 failed.
 - Full `SpaceStation14.slnx` build after atmosphere integration: 0 errors.
+- Moving-grid frame and coordinate suite: 5 shared integration tests passed.
+- Robust map lifecycle, coordinate, and replication suite: 13 tests passed.
+- Frame-aware FTL docking and displaced-origin PVS integration: 2 tests
+  passed.
+- `Content.Shared`, `Content.Server`, and `Content.Client` builds after frame
+  integration: 0 errors.
 
 ## Reference Architecture Comparison
 
@@ -227,10 +255,11 @@ core world model differs from this prototype.
   [transit implementation](https://github.com/Monolith-Station/Monolith/blob/main/Content.Server/_CE/ZLevels/Core/CEZLevelsSystem.Transit.cs)
   and [core components](https://github.com/Monolith-Station/Monolith/tree/main/Content.Shared/_CE/ZLevels/Core/Components)
   explore ships, planets, pilots, gravity, and transit maps.
-- DragonStation instead keeps sparse layers inside one native map/grid, one
-  viewport, one spatial frame, and per-session exclusions in normal PVS. It
-  avoids repeated full-map renders and global recursive map overrides while
-  preserving native hierarchy, chunk lifecycle, and sparse replication.
+- DragonStation instead keeps sparse layers inside each native grid, one map
+  viewport, explicit per-grid vertical origins, and per-session exclusions in
+  normal PVS. It avoids repeated full-map renders, linked-map controller
+  networks, and global recursive map overrides while preserving native
+  hierarchy, chunk lifecycle, and sparse replication.
 
 Decision: do not port either renderer/PVS architecture wholesale. Reuse their
 strong gameplay and presentation ideas through DragonStation's native sparse
@@ -267,6 +296,9 @@ Major unfinished areas:
   catwalks, grates, ramps, elevators, and climbable structures beyond simple
   stairs/ladders.
 - Many anchored entities and construction systems still assume one tile stack.
+- FTL docking aligns grid frames, but arbitrary transit-map entry, planet
+  landing, frame-authoring UI, and conflict policy for already-docked grid
+  assemblies still need dedicated product rules.
 
 ## Roadmap Phases
 
@@ -287,8 +319,9 @@ feature phases below remain the backlog and acceptance criteria for each area.
 6. [Done] Stabilize atmosphere on top of the shared boundary model.
 7. [Done] Make core construction, RCD, floor tools, anchoring, and power topology
    respect vertical layers.
-8. [Next] Define a frame model for moving ships, stations, and planets.
-9. Add structural support and collapse as a late-stage consumer of the mature
+8. [Done] Define a frame model for moving ships, stations, and planets, and
+   integrate it with FTL docking, physics, renderer, PVS, and map coordinates.
+9. [Next] Add structural support and collapse as a late-stage consumer of the mature
    vertical model.
 
 Each completed stage should leave a focused commit, regression tests, and an

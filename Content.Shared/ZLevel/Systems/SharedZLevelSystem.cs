@@ -160,6 +160,23 @@ public sealed class SharedZLevelSystem : VirtualController
         return GetZLevel(uid, position) == zLevel;
     }
 
+    public int GetWorldZLevel(EntityUid uid, ZLevelPositionComponent? position = null)
+    {
+        TransformComponent? transform = null;
+        if (!_transformQuery.Resolve(uid, ref transform, false))
+            return 0;
+
+        if (position == null)
+            _positionQuery.TryComp(uid, out position);
+
+        return _transform.GetWorldZLevel((uid, transform, position));
+    }
+
+    public bool IsOnWorldZLevel(EntityUid uid, int worldZ, ZLevelPositionComponent? position = null)
+    {
+        return GetWorldZLevel(uid, position) == worldZ;
+    }
+
     public void GetAnchoredEntitiesOnZLevel(
         EntityUid gridUid,
         MapGridComponent grid,
@@ -396,8 +413,8 @@ public sealed class SharedZLevelSystem : VirtualController
 
     private void OnPreventCollide(Entity<ZLevelPositionComponent> entity, ref PreventCollideEvent args)
     {
-        var ourZ = entity.Comp.ZLevel;
-        var otherZ = GetZLevel(args.OtherEntity);
+        var ourZ = GetWorldZLevel(entity.Owner, entity.Comp);
+        var otherZ = GetWorldZLevel(args.OtherEntity);
 
         if (ourZ != otherZ)
             args.Cancelled = true;

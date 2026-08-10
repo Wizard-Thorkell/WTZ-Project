@@ -29,7 +29,8 @@ public sealed class XAECreateGasSystem : BaseXAESystem<XAECreateGasComponent>
         var tile = _map.LocalToTile(grid.Value, gridComp, args.Coordinates);
         var zCoordinates = _transform.ToZLevelMapCoordinates(
             new ZLevelEntityCoordinates(args.Coordinates.EntityId, args.Coordinates.Position, 0));
-        var zTile = new ZLevelTileIndices(tile.X, tile.Y, zCoordinates.Z);
+        var localZ = _transform.WorldToLocalZLevel(grid.Value, zCoordinates.Z);
+        var zTile = new ZLevelTileIndices(tile.X, tile.Y, localZ);
 
         var mixtures = new ValueList<GasMixture>();
         if (_atmosphere.GetZLevelTileMixture(grid.Value, map.Value, zTile, excite: true) is { } localMixture)

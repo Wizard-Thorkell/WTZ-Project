@@ -885,7 +885,7 @@ public sealed class MappingState : GameplayStateBase
         {
             var indices = mapSystem.ZLevelTileIndicesFor(gridUid, grid, new ZLevelMapCoordinates(
                 _transform.ToMapCoordinates(coords).Position,
-                currentZ,
+                _transform.LocalToWorldZLevel(gridUid, currentZ),
                 _transform.GetMapId(coords)));
 
             if (mapSystem.TryGetZLevelTileRef(gridUid, grid, indices, out var tileRef))

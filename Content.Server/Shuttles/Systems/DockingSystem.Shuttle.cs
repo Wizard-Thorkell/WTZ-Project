@@ -198,6 +198,8 @@ public sealed partial class DockingSystem
                         continue;
                     }
 
+                    var zLevelFrameOrigin = GetDockingFrameOrigin(dockUid, gridDockUid);
+
                     // Can't just use the AABB as we want to get bounds as tight as possible.
                     var gridPosition = new EntityCoordinates(targetGrid, Vector2.Transform(Vector2.Zero, matty));
                     var spawnPosition = new EntityCoordinates(targetGridXform.MapUid!.Value, _transform.ToMapCoordinates(gridPosition).Position);
@@ -252,6 +254,9 @@ public sealed partial class DockingSystem
                                 continue;
                             }
 
+                            if (GetDockingFrameOrigin(otherUid, otherGridUid) != zLevelFrameOrigin)
+                                continue;
+
                             otherdockedAABB = otherdockedAABB.Rounded(DockRoundingDigits);
 
                             // Different setup.
@@ -271,12 +276,28 @@ public sealed partial class DockingSystem
                         Coordinates = gridPosition,
                         Area = dockedAABB,
                         Angle = targetAngle,
+                        ZLevelFrameOrigin = zLevelFrameOrigin,
                     });
                 }
             }
         }
 
         return validDockConfigs;
+    }
+
+    private int GetDockingFrameOrigin(EntityUid movingDock, EntityUid targetDock)
+    {
+        var movingTransform = _xformQuery.GetComponent(movingDock);
+        var targetTransform = _xformQuery.GetComponent(targetDock);
+        var movingLocalZ = _transform.GetZLevel((
+            movingDock,
+            movingTransform,
+            CompOrNull<ZLevelPositionComponent>(movingDock)));
+        var targetWorldZ = _transform.GetWorldZLevel((
+            targetDock,
+            targetTransform,
+            CompOrNull<ZLevelPositionComponent>(targetDock)));
+        return targetWorldZ - movingLocalZ;
     }
 
     private DockingConfig? GetDockingConfigPrivate(

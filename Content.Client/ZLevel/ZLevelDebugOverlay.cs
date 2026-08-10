@@ -71,18 +71,20 @@ public sealed class ZLevelDebugOverlay : Overlay
         switch (args.Space)
         {
             case OverlaySpace.WorldSpaceBelowEntities:
-                DrawWorld(args, view.ZLevel, view.MapId);
+                DrawWorld(args, view.WorldZLevel, view.MapId);
                 break;
             case OverlaySpace.ScreenSpace:
                 if (ShowDebugInfo)
-                    DrawScreen(args, view.Viewer ?? player, view.ZLevel);
+                    DrawScreen(args, view.Viewer ?? player, view.LocalZLevel, view.WorldZLevel);
                 break;
         }
     }
 
-    private void DrawScreen(in OverlayDrawArgs args, EntityUid player, int playerZ)
+    private void DrawScreen(in OverlayDrawArgs args, EntityUid player, int localZ, int worldZ)
     {
-        var text = $"Z-Level: {playerZ}";
+        var text = localZ == worldZ
+            ? $"Z-Level: {localZ}"
+            : $"Z-Level: {localZ} (world {worldZ})";
         var position = new Vector2(args.ViewportBounds.Center.X - 42f, args.ViewportBounds.Top + 18f);
         args.ScreenHandle.DrawString(_font, position, text, Color.White);
 
@@ -93,28 +95,29 @@ public sealed class ZLevelDebugOverlay : Overlay
         }
     }
 
-    private void DrawWorld(in OverlayDrawArgs args, int playerZ, MapId mapId)
+    private void DrawWorld(in OverlayDrawArgs args, int playerWorldZ, MapId mapId)
     {
         _grids.Clear();
         _mapManager.FindGridsIntersecting(mapId, args.WorldBounds, ref _grids);
 
         foreach (var grid in _grids)
         {
-            DrawGridTiles(args, grid, playerZ);
+            DrawGridTiles(args, grid, playerWorldZ);
         }
 
         _grids.Clear();
     }
 
-    private void DrawGridTiles(in OverlayDrawArgs args, Entity<MapGridComponent> grid, int playerZ)
+    private void DrawGridTiles(in OverlayDrawArgs args, Entity<MapGridComponent> grid, int playerWorldZ)
     {
         var handle = args.WorldHandle;
         var (_, _, matrix, invMatrix) = _transformSystem.GetWorldPositionRotationMatrixWithInv(grid.Owner);
         var gridBounds = invMatrix.TransformBox(args.WorldBounds).Enlarged(grid.Comp.TileSize * 2);
         handle.SetTransform(matrix);
 
-        var lowestZ = playerZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
-        for (var z = lowestZ; z <= playerZ; z++)
+        var playerLocalZ = _transformSystem.WorldToLocalZLevel(grid.Owner, playerWorldZ);
+        var lowestZ = playerLocalZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
+        for (var z = lowestZ; z <= playerLocalZ; z++)
         {
             if (z == 0)
                 continue;
@@ -132,12 +135,12 @@ public sealed class ZLevelDebugOverlay : Overlay
                     if (tile.Tile.IsEmpty)
                         continue;
 
-                    if (z < playerZ &&
+                    if (z < playerLocalZ &&
                         !_visibilitySystem.IsTileVisibleFrom(
                             grid.Owner,
                             grid.Comp,
                             new Vector2i(x, y),
-                            playerZ,
+                            playerWorldZ,
                             z))
                     {
                         continue;
@@ -148,7 +151,8 @@ public sealed class ZLevelDebugOverlay : Overlay
                     if (!gridBounds.Intersects(localTile))
                         continue;
 
-                    DrawTileTexture(handle, localTile, tile.Tile, GetTileColor(playerZ, z));
+                    var tileWorldZ = _transformSystem.LocalToWorldZLevel(grid.Owner, z);
+                    DrawTileTexture(handle, localTile, tile.Tile, GetTileColor(playerWorldZ, tileWorldZ));
                 }
             }
         }

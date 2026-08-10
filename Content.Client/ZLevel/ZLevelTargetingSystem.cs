@@ -146,19 +146,19 @@ public sealed class ZLevelTargetingSystem : EntitySystem
             return false;
         }
 
-        var entityZ = _transform.GetZLevel((entity, xform, CompOrNull<ZLevelPositionComponent>(entity)));
-        if (entityZ == viewer.ZLevel)
+        var entityZ = _transform.GetWorldZLevel((entity, xform, CompOrNull<ZLevelPositionComponent>(entity)));
+        if (entityZ == viewer.WorldZLevel)
             return true;
 
         return mode switch
         {
             ZLevelTargetingMode.SameFloorOnly => false,
-            ZLevelTargetingMode.VisibleCrossFloorExamine => entityZ < viewer.ZLevel &&
-                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel),
-            ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.ZLevel &&
-                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel),
+            ZLevelTargetingMode.VisibleCrossFloorExamine => entityZ < viewer.WorldZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
+            ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.WorldZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
             ZLevelTargetingMode.VisibleTopmostAny =>
-                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel, allowAbove: true),
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel, allowAbove: true),
             _ => false
         };
     }
@@ -169,7 +169,7 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         if (_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var context))
             return context;
 
-        return new ZLevelViewContext(null, MapId.Nullspace, 0);
+        return new ZLevelViewContext(null, MapId.Nullspace, 0, 0);
     }
 
     private sealed class ClickableComparer : IComparer<(EntityUid Entity, int Depth, uint RenderOrder, float Bottom)>

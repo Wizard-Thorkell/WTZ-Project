@@ -154,7 +154,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
 
         var eye = _eyeQuery.CompOrNull(viewer);
         var worldPosition = _transform.GetWorldPosition(transform) + (eye?.Offset ?? Vector2.Zero);
-        var zLevel = _transform.GetZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
+        var zLevel = _transform.GetWorldZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
         _viewers.Add(new ViewerContext(transform.MapID, worldPosition, zLevel, eye?.PvsScale ?? 1f));
     }
 

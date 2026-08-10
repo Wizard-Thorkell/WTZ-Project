@@ -223,6 +223,13 @@ namespace Content.Server.Shuttles.Systems
             var dockAXform = Comp<TransformComponent>(dockAUid);
             var dockBXform = Comp<TransformComponent>(dockBUid);
 
+            if (_transform.GetWorldZLevel((dockAUid, dockAXform, CompOrNull<ZLevelPositionComponent>(dockAUid))) !=
+                _transform.GetWorldZLevel((dockBUid, dockBXform, CompOrNull<ZLevelPositionComponent>(dockBUid))))
+            {
+                Log.Warning($"Refusing to dock {ToPrettyString(dockAUid)} and {ToPrettyString(dockBUid)} on different world Z levels.");
+                return;
+            }
+
             DebugTools.Assert(dockAXform.GridUid != null);
             DebugTools.Assert(dockBXform.GridUid != null);
             var gridA = dockAXform.GridUid!.Value;
@@ -449,6 +456,12 @@ namespace Content.Server.Shuttles.Systems
 
             if (!xformA.Anchored || !xformB.Anchored)
                 return false;
+
+            if (_transform.GetWorldZLevel((dockA.Owner, xformA, CompOrNull<ZLevelPositionComponent>(dockA.Owner))) !=
+                _transform.GetWorldZLevel((dockB.Owner, xformB, CompOrNull<ZLevelPositionComponent>(dockB.Owner))))
+            {
+                return false;
+            }
 
             var (worldPosA, worldRotA) = XformSystem.GetWorldPositionRotation(xformA);
             var (worldPosB, worldRotB) = XformSystem.GetWorldPositionRotation(xformB);
