@@ -65,6 +65,46 @@
     event: !type:ScreamActionEvent
 
 - type: entity
+  parent: BaseAction
+  id: ActionZLevelMoveUp
+  name: Up Z
+  description: Move up one Z-Level.
+  components:
+  - type: Action
+    icon:
+      sprite: Interface/Actions/jump.rsi
+      state: icon
+    checkCanInteract: false
+  - type: InstantAction
+    event: !type:ZLevelMoveUpActionEvent
+
+- type: entity
+  parent: BaseAction
+  id: ActionZLevelMoveDown
+  name: Down Z
+  description: Move down one Z-Level.
+  components:
+  - type: Action
+    icon: Interface/Actions/rooting.png
+    checkCanInteract: false
+  - type: InstantAction
+    event: !type:ZLevelMoveDownActionEvent
+
+- type: entity
+  parent: BaseAction
+  id: ActionZLevelMoveTarget
+  name: To Z...
+  description: Move directly to a target Z-Level.
+  components:
+  - type: Action
+    icon:
+      sprite: Interface/Actions/voice-mask.rsi
+      state: icon
+    checkCanInteract: false
+  - type: InstantAction
+    event: !type:ZLevelMoveToTargetActionEvent
+
+- type: entity
   parent: BaseMentalAction
   id: ActionTurnUndead
   name: Turn Undead

@@ -1,0 +1,89 @@
+- type: entity
+  id: ZLevelStairsUp
+  parent: Stairs
+  name: z-level stairs up
+  description: A staircase that leads to the floor above.
+  components:
+  - type: Sprite
+    sprite: Structures/stairs.rsi
+    state: stairs_steel
+  - type: StepTrigger
+    requiredTriggeredSpeed: 0
+    intersectRatio: 0.15
+    ignoreWeightless: true
+  - type: Physics
+    bodyType: Static
+  - type: Fixtures
+    fixtures:
+      fix1:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.5,-0.5,0.5,0.5"
+        layer:
+        - WallLayer
+        mask:
+        - ItemMask
+        density: 1000
+        hard: false
+  - type: ZLevelTraversal
+    zOffset: 1
+
+- type: entity
+  id: ZLevelStairsDown
+  parent: Stairs
+  name: z-level stairs down
+  description: A staircase that leads to the floor below.
+  components:
+  - type: Sprite
+    sprite: Structures/stairs.rsi
+    state: stairs_stage_steel
+  - type: StepTrigger
+    requiredTriggeredSpeed: 0
+    intersectRatio: 0.15
+    ignoreWeightless: true
+  - type: Physics
+    bodyType: Static
+  - type: Fixtures
+    fixtures:
+      fix1:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.5,-0.5,0.5,0.5"
+        layer:
+        - WallLayer
+        mask:
+        - ItemMask
+        density: 1000
+        hard: false
+  - type: ZLevelTraversal
+    zOffset: -1
+
+- type: entity
+  id: ZLevelLadder
+  parent: Stairs
+  name: z-level ladder
+  description: A simple ladder connecting adjacent floors.
+  components:
+  - type: Sprite
+    sprite: Structures/stairs.rsi
+    state: stairs_stage_white
+  - type: StepTrigger
+    requiredTriggeredSpeed: 0
+    intersectRatio: 0.15
+    ignoreWeightless: true
+  - type: Physics
+    bodyType: Static
+  - type: Fixtures
+    fixtures:
+      fix1:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.5,-0.5,0.5,0.5"
+        layer:
+        - WallLayer
+        mask:
+        - ItemMask
+        density: 1000
+        hard: false
+  - type: ZLevelTraversal
+    zOffset: 1

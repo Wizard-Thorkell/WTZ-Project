@@ -171,18 +171,23 @@ public sealed partial class AtmosphereSystem
         if (activate)
             AddActiveTile(atmos, tile);
 
+        tile.AdjacentTileAbove = null;
+        tile.AdjacentTileBelow = null;
+        tile.AdjacentToAbove = false;
+        tile.AdjacentToBelow = false;
         tile.AdjacentBits = AtmosDirection.Invalid;
         for (var i = 0; i < Atmospherics.Directions; i++)
         {
             var direction = (AtmosDirection)(1 << i);
             var adjacentIndices = tile.GridIndices.Offset(direction);
+            var adjacentZIndices = new ZLevelTileIndices(adjacentIndices.X, adjacentIndices.Y, tile.ZLevel);
 
             TileAtmosphere? adjacent;
             if (!tile.NoGridTile)
             {
-                adjacent = GetOrNewTile(uid, atmos, adjacentIndices);
+                adjacent = GetOrNewTile(uid, atmos, adjacentZIndices);
             }
-            else if (!atmos.Tiles.TryGetValue(adjacentIndices, out adjacent))
+            else if (!TryGetTileAtmosphere(atmos, adjacentZIndices, out adjacent))
             {
                 tile.AdjacentBits &= ~direction;
                 tile.AdjacentTiles[i] = null;
@@ -222,6 +227,38 @@ public sealed partial class AtmosphereSystem
 
         if (!tile.AdjacentBits.IsFlagSet(tile.MonstermosInfo.CurrentTransferDirection))
             tile.MonstermosInfo.CurrentTransferDirection = AtmosDirection.Invalid;
+
+        if (tile.NoGridTile)
+            return;
+
+        var tileIndices = new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel);
+        foreach (var adjacency in _mapSystem.GetZLevelAdjacencies(uid, ent.Comp3, tileIndices))
+        {
+            if (!adjacency.IsOpen)
+                continue;
+
+            if (adjacency.Direction is not (ZLevelAdjacencyDirection.Up or ZLevelAdjacencyDirection.Down))
+                continue;
+
+            var adjacent = GetOrNewTile(uid, atmos, adjacency.Target);
+            if (activate)
+                AddActiveTile(atmos, adjacent);
+
+            if (adjacency.Direction == ZLevelAdjacencyDirection.Up)
+            {
+                tile.AdjacentToAbove = true;
+                tile.AdjacentTileAbove = adjacent;
+                adjacent.AdjacentToBelow = true;
+                adjacent.AdjacentTileBelow = tile;
+            }
+            else
+            {
+                tile.AdjacentToBelow = true;
+                tile.AdjacentTileBelow = adjacent;
+                adjacent.AdjacentToAbove = true;
+                adjacent.AdjacentTileAbove = tile;
+            }
+        }
     }
 
     private (GasMixture Air, bool IsSpace) GetDefaultMapAtmosphere(MapAtmosphereComponent? map)
@@ -272,7 +309,7 @@ public sealed partial class AtmosphereSystem
         tile.ArchivedCycle = 0;
 
         var count = 0;
-        foreach (var adj in tile.AdjacentTiles)
+        foreach (var adj in EnumerateConnectedTiles(tile))
         {
             if (adj?.Air != null)
                 count++;
@@ -284,7 +321,7 @@ public sealed partial class AtmosphereSystem
         var ratio = 1f / count;
         var totalTemperature = 0f;
 
-        foreach (var adj in tile.AdjacentTiles)
+        foreach (var adj in EnumerateConnectedTiles(tile))
         {
             if (adj?.Air == null)
                 continue;

@@ -47,6 +47,12 @@ admin-verbs-pause-map = Pause Map
 admin-verbs-snap-joints = Snap Joints
 admin-verbs-make-minigun = Make Minigun
 admin-verbs-set-bullet-amount = Set Bullet Amount
+admin-verbs-enable-z-level = Enable Z-Level
+admin-verbs-disable-z-level = Disable Z-Level
+admin-verbs-z-level-up = Move Up One Z-Level
+admin-verbs-z-level-down = Move Down One Z-Level
+admin-verbs-stamp-z-level-above = Stamp Floor Above
+admin-verbs-stamp-z-level-below = Stamp Floor Below
 
 # Toggles verbs
 admin-verbs-bolt = Bolt
@@ -63,3 +69,8 @@ admin-verbs-dialog-redescribe-description = Description
 admin-verbs-dialog-rename-and-redescribe-title = Rename & Redescribe
 admin-verbs-dialog-set-bullet-amount-title = Set Bullet Amount
 admin-verbs-dialog-set-bullet-amount-amount = Amount (standard {$cap})
+
+admin-popup-z-level-enabled = Z-Level debug enabled.
+admin-popup-z-level-disabled = Z-Level debug disabled.
+admin-popup-z-level-moved = Moved target to Z-Level {$z}.
+admin-popup-z-level-floor-stamped = Stamped a support floor on Z-Level {$z}.

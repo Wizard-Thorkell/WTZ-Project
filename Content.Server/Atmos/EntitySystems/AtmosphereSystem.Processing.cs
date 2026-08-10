@@ -42,6 +42,7 @@ namespace Content.Server.Atmos.EntitySystems
 
             tile.GridIndex = owner;
             tile.GridIndices = index;
+            tile.ZLevel = 0;
             return tile;
         }
 
@@ -68,7 +69,7 @@ namespace Content.Server.Atmos.EntitySystems
             if (!atmosphere.ProcessingPaused)
             {
                 atmosphere.CurrentRunInvalidatedTiles.Clear();
-                atmosphere.CurrentRunInvalidatedTiles.EnsureCapacity(atmosphere.InvalidatedCoords.Count);
+                atmosphere.CurrentRunInvalidatedTiles.EnsureCapacity(atmosphere.InvalidatedCoords.Count + atmosphere.InvalidatedZLevelCoords.Count);
                 foreach (var indices in atmosphere.InvalidatedCoords)
                 {
                     var tile = GetOrNewTile(uid, atmosphere, indices, invalidateNew: false);
@@ -79,6 +80,14 @@ namespace Content.Server.Atmos.EntitySystems
                 }
                 atmosphere.InvalidatedCoords.Clear();
 
+                foreach (var indices in atmosphere.InvalidatedZLevelCoords)
+                {
+                    var tile = GetOrNewTile(uid, atmosphere, indices, invalidateNew: false);
+                    atmosphere.CurrentRunInvalidatedTiles.Enqueue(tile);
+                    UpdateTileData(ent, mapAtmos, tile);
+                }
+                atmosphere.InvalidatedZLevelCoords.Clear();
+
                 if (_simulationStopwatch.Elapsed.TotalMilliseconds >= AtmosMaxProcessTime)
                     return false;
             }
@@ -86,7 +95,9 @@ namespace Content.Server.Atmos.EntitySystems
             var number = 0;
             while (atmosphere.CurrentRunInvalidatedTiles.TryDequeue(out var tile))
             {
-                DebugTools.Assert(atmosphere.Tiles.GetValueOrDefault(tile.GridIndices) == tile);
+                DebugTools.Assert(tile.ZLevel == 0
+                    ? atmosphere.Tiles.GetValueOrDefault(tile.GridIndices) == tile
+                    : atmosphere.ZLevelTiles.GetValueOrDefault(new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel)) == tile);
                 UpdateAdjacentTiles(ent, tile, activate: true);
                 UpdateTileAir(ent, tile, volume);
                 InvalidateVisuals(ent, tile);
@@ -119,7 +130,8 @@ namespace Content.Server.Atmos.EntitySystems
             {
                 var direction = (AtmosDirection) (1 << i);
                 var indices = tile.GridIndices.Offset(direction);
-                if (atmos.Tiles.TryGetValue(indices, out var adj)
+                var adjIndices = new ZLevelTileIndices(indices.X, indices.Y, tile.ZLevel);
+                if (TryGetTileAtmosphere(atmos, adjIndices, out var adj)
                     && adj.NoGridTile
                     && !adj.TrimQueued)
                 {
@@ -149,7 +161,7 @@ namespace Content.Server.Atmos.EntitySystems
                 for (var i = 0; i < Atmospherics.Directions; i++)
                 {
                     var indices = tile.GridIndices.Offset((AtmosDirection) (1 << i));
-                    if (_map.TryGetTile(ent.Comp3, indices, out var gridTile) && !gridTile.IsEmpty)
+                    if (HasBackingGridTile((ent.Owner, ent.Comp3), new ZLevelTileIndices(indices.X, indices.Y, tile.ZLevel)))
                     {
                         connected = true;
                         break;
@@ -159,7 +171,7 @@ namespace Content.Server.Atmos.EntitySystems
                 if (!connected)
                 {
                     RemoveActiveTile(atmos, tile);
-                    atmos.Tiles.Remove(tile.GridIndices);
+                    RemoveTileAtmosphere(atmos, tile);
                 }
             }
 
@@ -177,9 +189,13 @@ namespace Content.Server.Atmos.EntitySystems
         {
             var idx = tile.GridIndices;
             bool mapAtmosphere;
-            if (_map.TryGetTile(ent.Comp3, idx, out var gTile) && !gTile.IsEmpty)
+            var contentTile = tile.ZLevel == 0
+                ? (_map.TryGetTile(ent.Comp3, idx, out var gTile) ? gTile : Tile.Empty)
+                : _mapSystem.GetZLevelTileRef(ent.Owner, ent.Comp3, new ZLevelTileIndices(idx.X, idx.Y, tile.ZLevel)).Tile;
+
+            if (!contentTile.IsEmpty)
             {
-                var contentDef = (ContentTileDefinition) _tileDefinitionManager[gTile.TypeId];
+                var contentDef = (ContentTileDefinition) _tileDefinitionManager[contentTile.TypeId];
                 mapAtmosphere = contentDef.MapAtmosphere;
                 tile.ThermalConductivity = contentDef.ThermalConductivity;
                 tile.HeatCapacity = contentDef.HeatCapacity;

@@ -1,0 +1,497 @@
+AI instructions on ZLevel
+
+Purpose
+
+This document is a technical continuity handoff for the custom ZLevel work implemented in this Space Station 14 fork. The goal is that a new AI assistant, even in a fresh chat with no prior context, can read this file and immediately understand:
+
+- what architectural direction was chosen,
+- what has already been implemented,
+- what behavior is currently working in-game,
+- what is still missing,
+- which files and systems own the current behavior,
+- and what the most sensible next steps are.
+
+This is not a design wishlist. It is a state-of-the-project technical briefing.
+
+Project Direction
+
+The chosen direction in this repository is:
+
+- work in a fresh `space-station-14` fork,
+- keep one map/grid world and extend it with real vertical layers,
+- treat Z as a real gameplay dimension rather than separate isolated worlds,
+- progressively adapt engine and gameplay systems to become Z-aware.
+
+The core design goal is not "multiple disconnected maps on top of each other". The goal is "one world with real vertical layers".
+
+Naming
+
+The system is named `ZLevel`, not `DragonZ`.
+
+Important type and namespace conventions:
+
+- `ZLevelPositionComponent`
+- `ZLevelKinematicsComponent`
+- `ZLevelTraversalComponent`
+- `SharedZLevelSystem`
+- `ZLevelTileChangedEvent`
+- `ZLevelMapCoordinates`
+- `ZLevelTileIndices`
+
+Conceptual Model
+
+Authoritative state split:
+
+- `TransformComponent` remains authoritative for XY.
+- `ZLevelPositionComponent` is authoritative for discrete floor index and local vertical offset.
+- `ZLevelKinematicsComponent` stores vertical motion state.
+
+Current vertical coordinate contract:
+
+- `ZLevel` is the anchored floor index.
+- `LocalZOffset` is the local height within the anchored floor.
+- Valid steady-state range is approximately `0 <= LocalZOffset < 1`.
+- Crossing below 0 moves to `ZLevel - 1`.
+- Crossing above or equal to 1 moves to `ZLevel + 1`.
+
+Sparse layer invariant:
+
+- missing non-zero layer data is canonical empty space,
+- vertical queries must be bounded,
+- the system should not allocate empty layers while reading/scanning.
+
+Current ceiling rule:
+
+- a non-empty tile on `z + 1` acts as a ceiling for the tile below,
+- this rule is shared by movement, atmos adjacency, and floor presentation,
+- this is a first-pass default rule and is expected to gain exceptions later for holes, stairs, catwalks, grates, shafts, etc.
+
+What Is Implemented
+
+1. Z-level tile storage and bounded queries
+
+Implemented in the RobustToolbox/shared map layer.
+
+Current capabilities include:
+
+- storing non-zero tile layers,
+- sparse reads of non-zero layers,
+- bounded support and nearest-solid queries,
+- shared vertical adjacency / boundary logic,
+- dedicated non-zero layer tile change events.
+
+Relevant areas:
+
+- `RobustToolbox/Robust.Shared/GameObjects/Systems/SharedMapSystem.ZLevel.cs`
+- `RobustToolbox/Robust.Shared/Map/ZLevelMapCoordinates.cs`
+- `RobustToolbox/Robust.Shared/Map/ZLevelAdjacency.cs`
+- `RobustToolbox/Robust.Shared/GameStates/GameStateMapData.cs`
+- `RobustToolbox/Robust.Shared/Map/MapChunk.cs`
+
+2. Z-level movement and support resolution
+
+Implemented as an opt-in vertical resolver.
+
+Current gameplay behavior:
+
+- entities with `ZLevelPositionComponent` and `ZLevelKinematicsComponent` can stand on upper floors,
+- they can lose support and fall,
+- they stop on the first valid support layer below,
+- `PhysicsComponent.BodyStatus` is updated to `OnGround` / `InAir`,
+- mover friction and support tile lookup can use the current support floor.
+
+Relevant areas:
+
+- `Content.Shared/ZLevel/Systems/SharedZLevelSystem.cs`
+- `Content.Shared/ZLevel/Components/ZLevelKinematicsComponent.cs`
+- `Content.Shared/Movement/Systems/SharedMoverController.cs`
+- `Content.Shared/Friction/TileFrictionController.cs`
+
+3. Z-level event and replication support
+
+Implemented sufficiently for runtime play testing.
+
+Important behavior:
+
+- non-zero layer tile changes raise a dedicated `ZLevelTileChangedEvent`,
+- non-zero layers replicate to clients,
+- client-side floor presentation now has the data it needs.
+
+Relevant areas:
+
+- `RobustToolbox/Robust.Shared/GameObjects/Systems/SharedMapSystem.ZLevel.cs`
+- `RobustToolbox/Robust.Shared/GameStates/GameStateMapData.cs`
+- `RobustToolbox/Robust.Shared/Map/MapChunk.cs`
+
+4. Z-level atmos adjacency
+
+Implemented as first-pass vertical adjacency, not full volumetric 3D atmos.
+
+Current behavior:
+
+- vertical atmos adjacency uses the shared Z-level boundary logic,
+- upper floor tiles can act as ceilings and prevent upward leakage,
+- changing Z-level tiles invalidates local atmos state above and below,
+- gas on one floor can be isolated from another by mapped ceiling tiles.
+
+Important limitation:
+
+- this is still "3D-aware adjacency feeding largely 2D-era atmos machinery",
+- not a complete volumetric atmos redesign.
+
+Relevant areas:
+
+- `Content.Server/Atmos/EntitySystems/AtmosphereSystem.ZLevel.cs`
+- `Content.Server/Atmos/EntitySystems/AtmosphereSystem.*`
+- `Content.Shared/Atmos/TileAtmosphere.cs`
+- `Content.Shared/Atmos/Components/GridAtmosphereComponent.cs`
+
+5. Z-level client floor presentation
+
+Implemented as a first-pass floor view, not a final renderer.
+
+Current behavior:
+
+- current floor is shown,
+- floors above are hidden,
+- lower floors can remain visible through openings,
+- lower content is faded by depth,
+- same-floor tiles act as occluders hiding lower-floor content beneath them,
+- the camera/view follows the player’s active Z-level automatically.
+
+Current debug tooling:
+
+- a lightweight debug overlay still exists for diagnostics,
+- but the old giant square-based debug display is no longer the main presentation.
+
+Relevant areas:
+
+- `Content.Client/ZLevel/ZLevelDebugOverlay.cs`
+- `Content.Client/ZLevel/ZLevelSpriteVisibilitySystem.cs`
+- possibly related client Z-level systems under `Content.Client/ZLevel/`
+
+6. Z-level traversal content
+
+Implemented in-world traversal prototypes exist.
+
+Current traversal prototypes:
+
+- `ZLevelStairsUp`
+- `ZLevelStairsDown`
+- `ZLevelLadder`
+
+Important behavior:
+
+- originally they were click/use only,
+- they were later fixed so stepping on them triggers traversal automatically,
+- the real bug was that `StepTrigger` existed but was never allowed to proceed,
+- this was fixed by handling `StepTriggerAttemptEvent` in `ZLevelTraversalSystem` and setting `args.Continue = true`.
+
+Relevant areas:
+
+- `Resources/Prototypes/Entities/Structures/zlevel_traversal.yml`
+- `Content.Server/ZLevel/Systems/ZLevelTraversalSystem.cs`
+- `Content.Shared/ZLevel/Components/ZLevelTraversalComponent.cs`
+
+7. Z-level debug/admin workflow
+
+Debug/admin helpers exist and are still useful fallback tooling.
+
+Implemented pieces include:
+
+- enabling/disabling Z-level mode on entities,
+- hotbar debug actions for moving up/down/directly to target Z,
+- floor stamping helpers used during prototyping,
+- admin verbs retained for setup tasks.
+
+Relevant areas:
+
+- `Content.Server/Administration/Systems/AdminVerbSystem.Tools.cs`
+- `Content.Server/ZLevel/Systems/...`
+- `Content.Shared/ZLevel/...`
+- `Resources/Prototypes/Actions/types.yml`
+- `Resources/Locale/en-US/actions/actions/zlevel.ftl`
+
+8. Z-level-aware mapping / placement work
+
+Partially implemented.
+
+Current placement-side changes:
+
+- placement requests now carry the current Z-level,
+- client placement duplicate checks can read from the active Z-level,
+- eraser/delete requests include active Z-level,
+- server placement/removal filters by requested Z-level,
+- mapping pick mode prefers the player’s current Z-level,
+- cross-floor erase/pick accidents were targeted by this work.
+
+Relevant areas:
+
+- `RobustToolbox/Robust.Shared/Network/Messages/MsgPlacement.cs`
+- `RobustToolbox/Robust.Client/Placement/PlacementManager.cs`
+- `RobustToolbox/Robust.Server/Placement/PlacementManager.cs`
+- `Content.Client/Mapping/MappingState.cs`
+
+What Has Been Verified In-Game
+
+The following has already been observed working during live manual tests:
+
+- assigning Z-level components to a player/mob,
+- copying/stamping floor tiles onto higher layers,
+- moving to upper floors,
+- smooth movement on upper floors after client replication fixes,
+- falling through unsupported vertical space,
+- landing on lower support layers,
+- infinite falling through empty space when no support exists,
+- atmos being contained on a lower floor by ceiling tiles above,
+- current-floor air/pressure changing correctly when moving between floors,
+- stepping on `z-level stairs` automatically changing floors after the trigger fix.
+
+Known Important Decisions
+
+1. The current system should remain opt-in where possible during transition.
+
+2. Missing non-zero tile layers still mean empty space.
+
+3. The present ceiling rule is intentionally simple:
+   tile above = ceiling below.
+
+4. The system should avoid broad invasive engine rewrites unless necessary.
+   The user explicitly prefers changing only what is needed.
+
+Known Problems / Gaps
+
+1. Map save/load for live maps is not generally safe yet
+
+This is important.
+
+Attempting to run `savemap` on the fully initialized `dev` map caused serialization failure due to existing runtime station state, not because of Z-level tiles specifically.
+
+Observed failure:
+
+- `StationRecordsComponent` serialization crashes because `StationRecordSet` contains:
+  `Dictionary<Type, Dictionary<uint, object>>`
+- serialization fails on `System.RuntimeType`
+- there were also stale missing entity reference warnings from `MachineArtifactAnalyzer`
+
+Implication:
+
+- saving the live `Dev` station as a full map is not currently reliable,
+- this is a general runtime map serialization limitation / debt,
+- not specifically a sign that Z-level tile persistence itself is conceptually wrong.
+
+Important file:
+
+- `Content.Shared/StationRecords/StationRecordSet.cs`
+
+Related console command:
+
+- `RobustToolbox/Robust.Server/Console/Commands/MapCommands.cs`
+
+2. Mapping workflow is still not "done"
+
+Although placement/erase/pick were made more Z-aware, the full content authoring workflow is still rough.
+
+Still needed:
+
+- reliable floor-aware mapping UX,
+- reliable map save/load for edited maps,
+- cleaner editor/tool behavior across floors,
+- confidence that all placement actions target only the active floor.
+
+3. Vertical traversal semantics are still basic
+
+Implemented:
+
+- simple stairs/ladders between adjacent floors.
+
+Missing:
+
+- holes / shafts,
+- grates / catwalks,
+- explicit open-floor tiles,
+- ramps,
+- richer vertical traversal content rules.
+
+4. Many game systems are still not truly Z-native
+
+The world is not fully native-3D yet.
+
+Major systems still needing adaptation:
+
+- pathfinding / AI navigation,
+- interaction targeting and click priority,
+- examine/use/pickup semantics across floors,
+- lighting and FOV,
+- sound propagation,
+- projectile tracing / hitscan,
+- explosion / fire / heat propagation,
+- more general collision / broadphase assumptions,
+- map editor / save workflow.
+
+5. Floor rendering is functional but not final
+
+The current presentation is good enough to test and play with, but still prototype-quality.
+
+Still possible future work:
+
+- better wall cutaway behavior,
+- better lower-floor fade / softening,
+- possibly a true blur pass,
+- more polished visual transitions between floors.
+
+Current Technical State by Area
+
+Movement:
+
+- functional,
+- support/fall logic exists,
+- grounded state and friction integration exist,
+- major regressions found during testing were already fixed.
+
+Atmos:
+
+- functional enough for real testing,
+- ceiling rule currently works,
+- not a full 3D atmos redesign.
+
+Traversal:
+
+- functional,
+- stairs now auto-trigger on step,
+- ladders/stairs are still simple adjacent-floor connectors.
+
+Rendering:
+
+- functional,
+- current floor / lower floor logic exists,
+- not final polish.
+
+Mapping/placement:
+
+- partially adapted,
+- still a major future polish area.
+
+Persistence:
+
+- non-zero Z-level tile serialization work exists,
+- but live map round-trip through normal `savemap` on initialized station maps is not generally solved due to other runtime serialization issues.
+
+Key Files To Read First In A New Chat
+
+If a new assistant needs to continue work quickly, start with these:
+
+Core shared Z-level logic:
+
+- `Content.Shared/ZLevel/Systems/SharedZLevelSystem.cs`
+- `Content.Shared/ZLevel/Components/ZLevelKinematicsComponent.cs`
+- `Content.Shared/ZLevel/Components/ZLevelTraversalComponent.cs`
+
+Traversal:
+
+- `Content.Server/ZLevel/Systems/ZLevelTraversalSystem.cs`
+- `Resources/Prototypes/Entities/Structures/zlevel_traversal.yml`
+
+Map/storage/adjacency:
+
+- `RobustToolbox/Robust.Shared/GameObjects/Systems/SharedMapSystem.ZLevel.cs`
+- `RobustToolbox/Robust.Shared/Map/ZLevelAdjacency.cs`
+- `RobustToolbox/Robust.Shared/Map/ZLevelMapCoordinates.cs`
+- `RobustToolbox/Robust.Shared/GameStates/GameStateMapData.cs`
+- `RobustToolbox/Robust.Shared/Map/MapChunk.cs`
+
+Atmos:
+
+- `Content.Server/Atmos/EntitySystems/AtmosphereSystem.ZLevel.cs`
+- `Content.Shared/Atmos/TileAtmosphere.cs`
+- `Content.Shared/Atmos/Components/GridAtmosphereComponent.cs`
+
+Client presentation:
+
+- `Content.Client/ZLevel/ZLevelDebugOverlay.cs`
+- `Content.Client/ZLevel/ZLevelSpriteVisibilitySystem.cs`
+
+Placement/mapping:
+
+- `RobustToolbox/Robust.Shared/Network/Messages/MsgPlacement.cs`
+- `RobustToolbox/Robust.Client/Placement/PlacementManager.cs`
+- `RobustToolbox/Robust.Server/Placement/PlacementManager.cs`
+- `Content.Client/Mapping/MappingState.cs`
+
+Known save serialization failure area:
+
+- `Content.Shared/StationRecords/StationRecordSet.cs`
+- `RobustToolbox/Robust.Server/Console/Commands/MapCommands.cs`
+
+What The User Cares About Most
+
+The user’s priorities, inferred from the project direction and requests, are:
+
+1. Make floors feel real and playable.
+2. Keep changes practical and minimally invasive when possible.
+3. Prefer gameplay-visible progress over abstract engine purity.
+4. Keep the system moving toward a truly native vertical world.
+
+What The User Explicitly Does Not Want
+
+- unnecessary engine-side churn when a local practical fix is enough,
+- overcomplicated prototype-only dead ends,
+- misleading claims that something is implemented if it only exists in tests.
+
+Recommended Next Priorities
+
+If continuing from this point, the most sensible next areas are:
+
+1. Interaction targeting polish
+
+Make all use/examine/click/pickup/admin targeting consistently respect active floor first, with deliberate visibility-through-openings behavior.
+
+2. Mapping / building polish
+
+Make placement, erase, pick, and save workflows behave naturally per-floor.
+
+3. Special vertical openings
+
+Add explicit content/rules for holes, shafts, catwalks, grates, and other exceptions to the simple ceiling rule.
+
+4. Pathfinding / AI
+
+Make the game truly understand traversal between floors for non-player actors.
+
+5. Lighting / FOV / visibility semantics
+
+Make floor separation feel native beyond just sprite fade/hide rules.
+
+Important Warning For Future Assistants
+
+The intended and active repo is:
+
+`C:\Users\pedel\source\repos\space-station-14`
+
+The user may still have editor tabs open from the abandoned fork, but that fork is not the active project target.
+
+If you continue work, always verify that file edits are being made in `space-station-14`.
+
+Practical Summary
+
+Current state:
+
+- Z-level tiles exist.
+- Clients receive them.
+- Movement support/falling works.
+- Atmos ceiling behavior works.
+- Floor rendering works well enough for testing.
+- Stairs now auto-traverse on step.
+- Placement work has begun to become floor-aware.
+
+Not done:
+
+- full native 3D adaptation across all systems,
+- polished mapping/editor workflow,
+- safe live-map `savemap` for initialized station maps,
+- pathfinding/AI/lighting/sound/projectile adaptation,
+- full set of special vertical traversal/opening content.
+
+Bottom line:
+
+This fork already has a real playable Z-level prototype in the correct repository. It is beyond storage experiments and beyond debug-only floor changes. The next work is not "invent Z-levels" but "finish adapting the rest of the game around them in a controlled and practical order."

@@ -15,12 +15,14 @@ using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.Input;
 using Robust.Client.Placement;
+using Robust.Client.Player;
 using Robust.Client.ResourceManagement;
 using Robust.Client.UserInterface;
 using Robust.Client.UserInterface.CustomControls;
 using Robust.Shared.Enums;
 using Robust.Shared.Input.Binding;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Serialization.Markdown.Sequence;
@@ -49,6 +51,7 @@ public sealed class MappingState : GameplayStateBase
     [Dependency] private readonly MappingManager _mapping = default!;
     [Dependency] private readonly IOverlayManager _overlays = default!;
     [Dependency] private readonly IPlacementManager _placement = default!;
+    [Dependency] private readonly IPlayerManager _player = default!;
     [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
     [Dependency] private readonly IResourceCache _resources = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
@@ -71,6 +74,7 @@ public sealed class MappingState : GameplayStateBase
     private Control? _scrollTo;
     private bool _updatePlacement;
     private bool _updateEraseDecal;
+    private int _activeZLevel;
 
     private MappingScreen Screen => (MappingScreen) UserInterfaceManager.ActiveScreen!;
     private MainViewport Viewport => UserInterfaceManager.ActiveScreen!.GetWidget<MainViewport>()!;
@@ -116,7 +120,9 @@ public sealed class MappingState : GameplayStateBase
         Screen.EntityPlacementMode.OnItemSelected += OnEntityPlacementSelected;
         Screen.EraseEntityButton.OnToggled += OnEraseEntityPressed;
         Screen.EraseDecalButton.OnToggled += OnEraseDecalPressed;
+        Screen.ZLevelSpinBox.ValueChanged += OnZLevelChanged;
         _placement.PlacementChanged += OnPlacementChanged;
+        SetActiveZLevel(GetPlayerZLevel());
 
         CommandBinds.Builder
             .Bind(ContentKeyFunctions.MappingUnselect, new PointerInputCmdHandler(HandleMappingUnselect, outsidePrediction: true))
@@ -175,7 +181,9 @@ public sealed class MappingState : GameplayStateBase
         Screen.EntityPlacementMode.OnItemSelected -= OnEntityPlacementSelected;
         Screen.EraseEntityButton.OnToggled -= OnEraseEntityPressed;
         Screen.EraseDecalButton.OnToggled -= OnEraseDecalPressed;
+        Screen.ZLevelSpinBox.ValueChanged -= OnZLevelChanged;
         _placement.PlacementChanged -= OnPlacementChanged;
+        _placement.ActiveZLevelOverride = null;
         _prototypeManager.PrototypesReloaded -= OnPrototypesReloaded;
 
         UserInterfaceManager.ClearWindows();
@@ -400,6 +408,31 @@ public sealed class MappingState : GameplayStateBase
     private void OnPlacementChanged(object? sender, EventArgs e)
     {
         _updatePlacement = true;
+    }
+
+    private void OnZLevelChanged(Robust.Client.UserInterface.Controls.ValueChangedEventArgs args)
+    {
+        SetActiveZLevel(args.Value);
+    }
+
+    private void SetActiveZLevel(int zLevel)
+    {
+        _activeZLevel = zLevel;
+        _placement.ActiveZLevelOverride = zLevel;
+
+        if (Screen.ZLevelSpinBox.Value != zLevel)
+            Screen.ZLevelSpinBox.Value = zLevel;
+    }
+
+    private int GetPlayerZLevel()
+    {
+        if (_player.LocalEntity is not { } player ||
+            !_entityManager.TryGetComponent(player, out TransformComponent? playerXform))
+        {
+            return 0;
+        }
+
+        return _transform.GetZLevel((player, playerXform, _entityManager.GetComponentOrNull<ZLevelPositionComponent>(player)));
     }
 
     protected override void OnKeyBindStateChanged(ViewportBoundKeyEventArgs args)
@@ -787,6 +820,16 @@ public sealed class MappingState : GameplayStateBase
         if (State != CursorState.Pick)
             return false;
 
+        var currentZ = _activeZLevel;
+
+        if (uid != EntityUid.Invalid &&
+            _entityManager.TryGetComponent(uid, out TransformComponent? xform))
+        {
+            var entityZ = _transform.GetZLevel((uid, xform, _entityManager.GetComponentOrNull<ZLevelPositionComponent>(uid)));
+            if (entityZ != currentZ)
+                uid = EntityUid.Invalid;
+        }
+
         MappingPrototype? button = null;
 
         // Try and get tile under it
@@ -796,7 +839,7 @@ public sealed class MappingState : GameplayStateBase
             var mapPos = _transform.ToMapCoordinates(coords);
 
             if (_mapMan.TryFindGridAt(mapPos, out var gridUid, out var grid) &&
-                _entityManager.System<SharedMapSystem>().TryGetTileRef(gridUid, grid, coords, out var tileRef) &&
+                TryGetCurrentZTile(gridUid, grid, coords, currentZ, out var tileRef) &&
                 _allPrototypesDict.TryGetValue(_entityManager.System<TurfSystem>().GetContentTileDefinition(tileRef), out button))
             {
                 OnSelected(button);
@@ -824,6 +867,36 @@ public sealed class MappingState : GameplayStateBase
         }
 
         return true;
+    }
+
+    private bool TryGetCurrentZTile(EntityUid gridUid, MapGridComponent grid, EntityCoordinates coords, int currentZ, out Tile tile)
+    {
+        var mapSystem = _entityManager.System<SharedMapSystem>();
+
+        if (currentZ == 0)
+        {
+            if (mapSystem.TryGetTileRef(gridUid, grid, coords, out var tileRef))
+            {
+                tile = tileRef.Tile;
+                return true;
+            }
+        }
+        else
+        {
+            var indices = mapSystem.ZLevelTileIndicesFor(gridUid, grid, new ZLevelMapCoordinates(
+                _transform.ToMapCoordinates(coords).Position,
+                currentZ,
+                _transform.GetMapId(coords)));
+
+            if (mapSystem.TryGetZLevelTileRef(gridUid, grid, indices, out var tileRef))
+            {
+                tile = tileRef.Tile;
+                return true;
+            }
+        }
+
+        tile = Tile.Empty;
+        return false;
     }
 
     private bool HandleEditorCancelPlace(ICommonSession? session, EntityCoordinates coords, EntityUid uid)

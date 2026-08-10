@@ -18,6 +18,7 @@
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+.dotnet_cli/
 x64/
 x86/
 bld/

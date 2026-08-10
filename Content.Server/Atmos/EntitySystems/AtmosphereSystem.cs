@@ -71,6 +71,7 @@ public sealed partial class AtmosphereSystem : SharedAtmosphereSystem
         _firelockQuery = GetEntityQuery<FirelockComponent>();
 
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
+        SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
         SubscribeLocalEvent<PrototypesReloadedEventArgs>(OnPrototypesReloaded);
 
         CacheDecals();
@@ -88,6 +89,7 @@ public sealed partial class AtmosphereSystem : SharedAtmosphereSystem
         foreach (var change in ev.Changes)
         {
             InvalidateTile(ev.Entity.Owner, change.GridIndices);
+            InvalidateVerticalNeighbors(ev.Entity.Owner, new ZLevelTileIndices(change.GridIndices.X, change.GridIndices.Y, 0));
         }
     }
 

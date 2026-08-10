@@ -3,10 +3,14 @@ using Content.IntegrationTests.Fixtures;
 using Content.Server.Storage.EntitySystems;
 using Content.Shared.Hands.Components;
 using Content.Shared.Hands.EntitySystems;
+using Content.Shared.ZLevel.Components;
 using Robust.Server.GameObjects;
 using Robust.Server.Player;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
+using Robust.Shared.Maths;
 
 namespace Content.IntegrationTests.Tests.Hands;
 
@@ -132,5 +136,166 @@ public sealed class HandTests : GameTest
         Assert.That(containerSystem.IsInSameOrNoContainer((player, xform), (item, itemXform)));
 
         await server.WaitPost(() => mapSystem.DeleteMap(map.MapId));
+    }
+
+    [Test]
+    public async Task TestPickupDropPreservesUpperFloorZLevel()
+    {
+        var pair = Pair;
+        var server = pair.Server;
+
+        var entMan = server.ResolveDependency<IEntityManager>();
+        var playerMan = server.ResolveDependency<IPlayerManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var sys = entMan.System<SharedHandsSystem>();
+        var tSys = entMan.System<TransformSystem>();
+
+        var data = await pair.CreateTestMap();
+        await pair.RunTicksSync(5);
+
+        EntityUid item = default;
+        EntityUid player = default;
+        HandsComponent hands = default!;
+        await server.WaitPost(() =>
+        {
+            player = playerMan.Sessions.First().AttachedEntity!.Value;
+            var xform = entMan.GetComponent<TransformComponent>(player);
+            var playerZ = entMan.EnsureComponent<ZLevelPositionComponent>(player);
+            playerZ.ZLevel = 1;
+            playerZ.LocalZOffset = 0f;
+
+            item = entMan.SpawnEntity("Crowbar", tSys.GetMapCoordinates(player, xform: xform));
+            var itemZ = entMan.EnsureComponent<ZLevelPositionComponent>(item);
+            itemZ.ZLevel = 1;
+            itemZ.LocalZOffset = 0f;
+
+            hands = entMan.GetComponent<HandsComponent>(player);
+            sys.TryPickup(player, item, hands.ActiveHandId!);
+        });
+
+        await pair.RunTicksSync(5);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sys.GetActiveItem((player, hands)), Is.EqualTo(item));
+            Assert.That(entMan.HasComponent<ZLevelPositionComponent>(item), Is.False);
+        });
+
+        await server.WaitPost(() => sys.TryDrop(player, item));
+
+        await pair.RunTicksSync(5);
+        var droppedZ = entMan.GetComponent<ZLevelPositionComponent>(item);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sys.GetActiveItem((player, hands)), Is.Null);
+            Assert.That(droppedZ.ZLevel, Is.EqualTo(1));
+            Assert.That(droppedZ.LocalZOffset, Is.EqualTo(0f));
+        });
+
+        await server.WaitPost(() => mapSystem.DeleteMap(data.MapId));
+    }
+
+    [Test]
+    public async Task TestPickupDropClearsBaseFloorZLevelComponent()
+    {
+        var pair = Pair;
+        var server = pair.Server;
+
+        var entMan = server.ResolveDependency<IEntityManager>();
+        var playerMan = server.ResolveDependency<IPlayerManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var sys = entMan.System<SharedHandsSystem>();
+        var tSys = entMan.System<TransformSystem>();
+
+        var data = await pair.CreateTestMap();
+        await pair.RunTicksSync(5);
+
+        EntityUid item = default;
+        EntityUid player = default;
+        HandsComponent hands = default!;
+        await server.WaitPost(() =>
+        {
+            player = playerMan.Sessions.First().AttachedEntity!.Value;
+            var xform = entMan.GetComponent<TransformComponent>(player);
+            item = entMan.SpawnEntity("Crowbar", tSys.GetMapCoordinates(player, xform: xform));
+
+            var itemZ = entMan.EnsureComponent<ZLevelPositionComponent>(item);
+            itemZ.ZLevel = 1;
+            itemZ.LocalZOffset = 0f;
+
+            hands = entMan.GetComponent<HandsComponent>(player);
+            sys.TryPickup(player, item, hands.ActiveHandId!);
+        });
+
+        await pair.RunTicksSync(5);
+        Assert.That(entMan.HasComponent<ZLevelPositionComponent>(item), Is.False);
+
+        await server.WaitPost(() => sys.TryDrop(player, item));
+
+        await pair.RunTicksSync(5);
+        Assert.Multiple(() =>
+        {
+            Assert.That(sys.GetActiveItem((player, hands)), Is.Null);
+            Assert.That(entMan.HasComponent<ZLevelPositionComponent>(item), Is.False);
+        });
+
+        await server.WaitPost(() => mapSystem.DeleteMap(data.MapId));
+    }
+
+    [Test]
+    public async Task TestDropOnUnsupportedUpperFloorFallsToLowerSupport()
+    {
+        var pair = Pair;
+        var server = pair.Server;
+
+        var entMan = server.ResolveDependency<IEntityManager>();
+        var playerMan = server.ResolveDependency<IPlayerManager>();
+        var mapSystem = server.System<SharedMapSystem>();
+        var sys = entMan.System<SharedHandsSystem>();
+        var tSys = entMan.System<TransformSystem>();
+
+        var data = await pair.CreateTestMap();
+        await pair.RunTicksSync(5);
+
+        EntityUid item = default;
+        EntityUid player = default;
+        HandsComponent hands = default!;
+        await server.WaitPost(() =>
+        {
+            player = playerMan.Sessions.First().AttachedEntity!.Value;
+            var grid = entMan.GetComponent<MapGridComponent>(data.Grid);
+            var tile = data.Tile.GridIndices;
+
+            var playerZ = entMan.EnsureComponent<ZLevelPositionComponent>(player);
+            playerZ.ZLevel = 1;
+            playerZ.LocalZOffset = 0f;
+
+            mapSystem.SetZLevelTile(data.Grid.Owner, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), Tile.Empty);
+            mapSystem.SetZLevelTile(data.Grid.Owner, grid, new ZLevelTileIndices(tile.X, tile.Y, 0), new Tile(1));
+
+            var playerXform = entMan.GetComponent<TransformComponent>(player);
+            item = entMan.SpawnEntity("Crowbar", tSys.GetMapCoordinates(player, xform: playerXform));
+            var itemZ = entMan.EnsureComponent<ZLevelPositionComponent>(item);
+            itemZ.ZLevel = 1;
+            itemZ.LocalZOffset = 0f;
+
+            hands = entMan.GetComponent<HandsComponent>(player);
+            sys.TryPickup(player, item, hands.ActiveHandId!);
+            sys.TryDrop(player, item);
+        });
+
+        await pair.RunTicksSync(10);
+
+        await server.WaitAssertion(() =>
+        {
+            var droppedZ = entMan.GetComponent<ZLevelPositionComponent>(item);
+            Assert.Multiple(() =>
+            {
+                Assert.That(sys.GetActiveItem((player, hands)), Is.Null);
+                Assert.That(droppedZ.ZLevel, Is.EqualTo(0));
+                Assert.That(droppedZ.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
+            });
+        });
+
+        await server.WaitPost(() => mapSystem.DeleteMap(data.MapId));
     }
 }

@@ -30,6 +30,18 @@ namespace Content.Server.Atmos.EntitySystems
                 ConsiderSuperconductivity(gridAtmosphere, adjacent);
             }
 
+            foreach (var adjacent in new[] { tile.AdjacentTileAbove, tile.AdjacentTileBelow })
+            {
+                if (adjacent == null || adjacent.ThermalConductivity == 0f)
+                    continue;
+
+                if(adjacent.ArchivedCycle < gridAtmosphere.UpdateCounter)
+                    Archive(adjacent, gridAtmosphere.UpdateCounter);
+
+                NeighborConductWithSource(gridAtmosphere, adjacent, tile);
+                ConsiderSuperconductivity(gridAtmosphere, adjacent);
+            }
+
             RadiateToSpace(tile);
             FinishSuperconduction(gridAtmosphere, tile);
         }

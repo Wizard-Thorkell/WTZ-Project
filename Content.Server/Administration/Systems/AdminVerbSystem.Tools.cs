@@ -7,6 +7,7 @@ using Content.Server.Hands.Systems;
 using Content.Server.Stack;
 using Content.Server.Station.Systems;
 using Content.Server.Weapons.Ranged.Systems;
+using Content.Server.ZLevel.Components;
 using Content.Shared.Access;
 using Content.Shared.Access.Components;
 using Content.Shared.Access.Systems;
@@ -26,8 +27,11 @@ using Content.Shared.Power.Components;
 using Content.Shared.Power.EntitySystems;
 using Content.Shared.Stacks;
 using Content.Shared.Station.Components;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Content.Shared.Verbs;
 using Content.Shared.Weapons.Ranged.Components;
+using Robust.Shared.GameObjects;
 using Robust.Server.Physics;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -53,6 +57,7 @@ public sealed partial class AdminVerbSystem
     [Dependency] private readonly SharedBatterySystem _batterySystem = default!;
     [Dependency] private readonly MetaDataSystem _metaSystem = default!;
     [Dependency] private readonly GunSystem _gun = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
 
     private void AddTricksVerbs(GetVerbsEvent<Verb> args)
     {
@@ -731,6 +736,97 @@ public sealed partial class AdminVerbSystem
             };
             args.Verbs.Add(setCapacity);
         }
+
+        if (TryComp<TransformComponent>(args.Target, out var transform) &&
+            TryComp<PhysicsComponent>(args.Target, out _))
+        {
+            var currentZ = TryComp<ZLevelPositionComponent>(args.Target, out var zLevelPosition)
+                ? zLevelPosition.ZLevel
+                : 0;
+
+            if (!HasComp<ZLevelPositionComponent>(args.Target) || !HasComp<ZLevelKinematicsComponent>(args.Target))
+            {
+                Verb enableZLevel = new()
+                {
+                    Text = Loc.GetString("admin-verbs-enable-z-level"),
+                    Category = VerbCategory.Tricks,
+                    Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/VerbIcons/plus.svg.192dpi.png")),
+                    Act = () =>
+                    {
+                        if (!_zLevelSystem.EnsureZLevelEntity(args.Target, currentZ))
+                            return;
+
+                        EnsureComp<ZLevelDebugActionsComponent>(args.Target);
+                        _popup.PopupEntity(Loc.GetString("admin-popup-z-level-enabled"), args.User, args.User);
+                    },
+                    Impact = LogImpact.Medium,
+                    Message = Loc.GetString("admin-trick-enable-z-level-description"),
+                    Priority = (int) TricksVerbPriorities.EnableZLevel,
+                };
+                args.Verbs.Add(enableZLevel);
+            }
+            else
+            {
+                Verb disableZLevel = new()
+                {
+                    Text = Loc.GetString("admin-verbs-disable-z-level"),
+                    Category = VerbCategory.Tricks,
+                    Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/VerbIcons/close.svg.192dpi.png")),
+                    Act = () =>
+                    {
+                        RemCompDeferred<ZLevelDebugActionsComponent>(args.Target);
+
+                        if (!_zLevelSystem.DisableZLevelEntity(args.Target))
+                            return;
+
+                        _popup.PopupEntity(Loc.GetString("admin-popup-z-level-disabled"), args.User, args.User);
+                    },
+                    Impact = LogImpact.Medium,
+                    Message = Loc.GetString("admin-trick-disable-z-level-description"),
+                    Priority = (int) TricksVerbPriorities.DisableZLevel,
+                };
+                args.Verbs.Add(disableZLevel);
+            }
+
+            if (transform.GridUid != null)
+            {
+                Verb stampAbove = new()
+                {
+                    Text = Loc.GetString("admin-verbs-stamp-z-level-above"),
+                    Category = VerbCategory.Tricks,
+                    Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/VerbIcons/plus.svg.192dpi.png")),
+                    Act = () =>
+                    {
+                        if (!_zLevelSystem.StampSupportPatch(args.Target, currentZ + 1))
+                            return;
+
+                        _popup.PopupEntity(Loc.GetString("admin-popup-z-level-floor-stamped", ("z", currentZ + 1)), args.User, args.User);
+                    },
+                    Impact = LogImpact.Medium,
+                    Message = Loc.GetString("admin-trick-stamp-z-level-above-description"),
+                    Priority = (int) TricksVerbPriorities.StampZLevelAbove,
+                };
+                args.Verbs.Add(stampAbove);
+
+                Verb stampBelow = new()
+                {
+                    Text = Loc.GetString("admin-verbs-stamp-z-level-below"),
+                    Category = VerbCategory.Tricks,
+                    Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/VerbIcons/close.svg.192dpi.png")),
+                    Act = () =>
+                    {
+                        if (!_zLevelSystem.StampSupportPatch(args.Target, currentZ - 1))
+                            return;
+
+                        _popup.PopupEntity(Loc.GetString("admin-popup-z-level-floor-stamped", ("z", currentZ - 1)), args.User, args.User);
+                    },
+                    Impact = LogImpact.Medium,
+                    Message = Loc.GetString("admin-trick-stamp-z-level-below-description"),
+                    Priority = (int) TricksVerbPriorities.StampZLevelBelow,
+                };
+                args.Verbs.Add(stampBelow);
+            }
+        }
     }
 
     private void RefillEquippedTanks(EntityUid target, Gas gasType)
@@ -876,5 +972,9 @@ public sealed partial class AdminVerbSystem
         SnapJoints = -27,
         MakeMinigun = -28,
         SetBulletAmount = -29,
+        EnableZLevel = -30,
+        DisableZLevel = -31,
+        StampZLevelAbove = -34,
+        StampZLevelBelow = -35,
     }
 }

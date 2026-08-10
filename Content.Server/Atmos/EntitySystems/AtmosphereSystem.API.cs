@@ -6,6 +6,7 @@ using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Atmos.Reactions;
 using JetBrains.Annotations;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Utility;
 
@@ -114,7 +115,11 @@ public partial class AtmosphereSystem
             return null;
 
         var indices = XformSystem.GetGridTilePositionOrDefault(entity);
-        return GetTileMixture(entity.Comp.GridUid, entity.Comp.MapUid, indices, excite);
+        var zLevel = XformSystem.GetZLevel((entity.Owner, entity.Comp, CompOrNull<ZLevelPositionComponent>(entity.Owner)));
+
+        return zLevel == 0
+            ? GetTileMixture(entity.Comp.GridUid, entity.Comp.MapUid, indices, excite)
+            : GetZLevelTileMixture(entity.Comp.GridUid, entity.Comp.MapUid, new ZLevelTileIndices(indices.X, indices.Y, zLevel), excite);
     }
 
     /// <summary>
@@ -158,7 +163,11 @@ public partial class AtmosphereSystem
             return mixture;
 
         var position = XformSystem.GetGridTilePositionOrDefault((ent, ent.Comp));
-        return GetTileMixture(grid, map, position, excite);
+        var zLevel = XformSystem.GetZLevel((ent.Owner, ent.Comp, CompOrNull<ZLevelPositionComponent>(ent.Owner)));
+
+        return zLevel == 0
+            ? GetTileMixture(grid, map, position, excite)
+            : GetZLevelTileMixture(grid, map, new ZLevelTileIndices(position.X, position.Y, zLevel), excite);
     }
 
     /// <summary>
@@ -259,6 +268,32 @@ public partial class AtmosphereSystem
             return mapEnt.Comp.Mixture;
 
         // Default to a space mixture... This is a space game, after all!
+        return GasMixture.SpaceGas;
+    }
+
+    [PublicAPI]
+    public GasMixture? GetZLevelTileMixture(
+        Entity<GridAtmosphereComponent?, GasTileOverlayComponent?>? grid,
+        Entity<MapAtmosphereComponent?>? map,
+        ZLevelTileIndices gridTile,
+        bool excite = false)
+    {
+        if (grid is { } gridEnt && _atmosQuery.Resolve(gridEnt, ref gridEnt.Comp1, false)
+                               && TryGetTileAtmosphere(gridEnt.Comp1, gridTile, out var tile))
+        {
+            if (excite)
+            {
+                AddActiveTile(gridEnt.Comp1, tile);
+                if (gridTile.Z == 0)
+                    InvalidateVisuals((grid.Value.Owner, grid.Value.Comp2), tile.GridIndices);
+            }
+
+            return tile.Air;
+        }
+
+        if (map is { } mapEnt && _mapAtmosQuery.Resolve(mapEnt, ref mapEnt.Comp, false))
+            return mapEnt.Comp.Mixture;
+
         return GasMixture.SpaceGas;
     }
 
@@ -548,6 +583,33 @@ public partial class AtmosphereSystem
             : new TileMixtureEnumerator(atmosTile.AdjacentTiles);
     }
 
+    [PublicAPI]
+    public TileMixtureEnumerator GetAdjacentZLevelTileMixtures(Entity<GridAtmosphereComponent?> grid, ZLevelTileIndices tile, bool includeBlocked = false, bool excite = false)
+    {
+        if (!_atmosQuery.Resolve(grid, ref grid.Comp, false))
+            return TileMixtureEnumerator.Empty;
+
+        if (!TryGetTileAtmosphere(grid.Comp, tile, out var atmosTile))
+            return TileMixtureEnumerator.Empty;
+
+        var tiles = new TileAtmosphere?[Atmospherics.Directions + 2];
+        Array.Copy(atmosTile.AdjacentTiles, tiles, Atmospherics.Directions);
+        tiles[Atmospherics.Directions] = atmosTile.AdjacentTileAbove;
+        tiles[Atmospherics.Directions + 1] = atmosTile.AdjacentTileBelow;
+        return new TileMixtureEnumerator(tiles);
+    }
+
+    [PublicAPI]
+    public TileAtmosphere? GetZLevelTileAtmosphere(Entity<GridAtmosphereComponent?> grid, ZLevelTileIndices tile)
+    {
+        if (!_atmosQuery.Resolve(grid, ref grid.Comp, false))
+            return null;
+
+        return TryGetTileAtmosphere(grid.Comp, tile, out var atmosTile)
+            ? atmosTile
+            : null;
+    }
+
     /// <summary>
     /// Exposes a tile to a hotspot of given temperature and volume, igniting it if conditions are met.
     /// </summary>
@@ -602,7 +664,9 @@ public partial class AtmosphereSystem
         if (!_atmosQuery.TryGetComponent(tile.GridIndex, out var atmos))
             return;
 
-        DebugTools.Assert(atmos.Tiles.TryGetValue(tile.GridIndices, out var tmp) && tmp == tile);
+        DebugTools.Assert(tile.ZLevel == 0
+            ? atmos.Tiles.TryGetValue(tile.GridIndices, out var tmp) && tmp == tile
+            : atmos.ZLevelTiles.TryGetValue(new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel), out tmp) && tmp == tile);
         HotspotExpose(atmos, tile, exposedTemperature, exposedVolume, soh, sparkSourceUid);
     }
 

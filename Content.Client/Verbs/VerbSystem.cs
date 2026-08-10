@@ -3,6 +3,7 @@ using System.Numerics;
 using Content.Client.Examine;
 using Content.Client.Gameplay;
 using Content.Client.Popups;
+using Content.Client.ZLevel;
 using Content.Shared.CCVar;
 using Content.Shared.Examine;
 using Content.Shared.Tag;
@@ -35,6 +36,7 @@ namespace Content.Client.Verbs
         [Dependency] private readonly IConfigurationManager _cfg = default!;
         [Dependency] private readonly EntityLookupSystem _lookup = default!;
         [Dependency] private readonly EntityQuery<SpriteComponent> _spriteQuery = default!;
+        [Dependency] private readonly ZLevelTargetingSystem _zLevelTargeting = default!;
 
         private float _lookupSize;
 
@@ -147,7 +149,10 @@ namespace Content.Client.Verbs
             }
 
             if ((visibility & MenuVisibility.Invisible) != 0)
+            {
+                _zLevelTargeting.FilterEntities(entities, ZLevelTargetingMode.SameFloorOnly);
                 return entities.Count != 0;
+            }
 
             for (var i = entities.Count - 1; i >= 0; i--)
             {
@@ -165,6 +170,8 @@ namespace Content.Client.Verbs
                 if (!_spriteQuery.TryGetComponent(entities[i], out var spriteComponent) || !spriteComponent.Visible)
                     entities.RemoveSwap(i);
             }
+
+            _zLevelTargeting.FilterEntities(entities, ZLevelTargetingMode.SameFloorOnly);
 
             return entities.Count != 0;
         }

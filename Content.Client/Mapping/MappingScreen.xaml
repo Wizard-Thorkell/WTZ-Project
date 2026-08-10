@@ -47,6 +47,10 @@
                               ToolTip="{Loc entity-spawn-window-override-menu-tooltip}"
                               HorizontalExpand="True" />
             </BoxContainer>
+            <BoxContainer Name="ZLevelContainer" Access="Public" Orientation="Horizontal">
+                <Label Text="Z" VerticalAlignment="Center" Margin="0 0 6 0" />
+                <SpinBox Name="ZLevelSpinBox" Access="Public" HorizontalExpand="True" />
+            </BoxContainer>
             <BoxContainer Orientation="Horizontal">
                 <Button Name="EraseEntityButton" Access="Public" HorizontalExpand="True"
                         SetHeight="48"

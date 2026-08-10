@@ -1,7 +1,9 @@
 using Content.Shared.Database;
 using Content.Shared.Hands.Components;
 using Content.Shared.Item;
+using Content.Shared.ZLevel.Components;
 using Robust.Shared.Containers;
+using Robust.Shared.GameObjects;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Utility;
@@ -288,6 +290,10 @@ public abstract partial class SharedHandsSystem
             Log.Error($"Failed to insert {ToPrettyString(entity)} into users hand container when picking up. User: {ToPrettyString(uid)}. Hand: {hand}.");
             return;
         }
+
+        // Held entities should inherit the holder's current floor instead of keeping stale world-layer data.
+        RemComp<ZLevelPositionComponent>(entity);
+        RemComp<ZLevelKinematicsComponent>(entity);
 
         _interactionSystem.DoContactInteraction(uid, entity); //Possibly fires twice if manually picked up via interacting with the object
 

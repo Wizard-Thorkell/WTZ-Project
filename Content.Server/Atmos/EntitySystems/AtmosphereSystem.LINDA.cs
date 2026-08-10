@@ -24,14 +24,7 @@ namespace Content.Server.Atmos.EntitySystems
                 Archive(tile, fireCount);
 
             tile.CurrentCycle = fireCount;
-            var adjacentTileLength = 0;
-
-            for (var i = 0; i < Atmospherics.Directions; i++)
-            {
-                var direction = (AtmosDirection) (1 << i);
-                if(tile.AdjacentBits.IsFlagSet(direction))
-                    adjacentTileLength++;
-            }
+            var adjacentTileLength = GetConnectedTileCount(tile);
 
             for(var i = 0; i < Atmospherics.Directions; i++)
             {
@@ -97,6 +90,42 @@ namespace Content.Server.Atmos.EntitySystems
 
                     LastShareCheck(tile);
                 }
+            }
+
+            foreach (var enemyTile in new[] { tile.AdjacentTileAbove, tile.AdjacentTileBelow })
+            {
+                if (enemyTile?.Air == null || fireCount <= enemyTile.CurrentCycle)
+                    continue;
+
+                Archive(enemyTile, fireCount);
+
+                if (ExcitedGroups && tile.ExcitedGroup != null && enemyTile.ExcitedGroup != null)
+                {
+                    if (tile.ExcitedGroup != enemyTile.ExcitedGroup)
+                        ExcitedGroupMerge(gridAtmosphere, tile.ExcitedGroup, enemyTile.ExcitedGroup);
+                }
+                else if (CompareExchange(tile, enemyTile) != GasCompareResult.NoExchange)
+                {
+                    AddActiveTile(gridAtmosphere, enemyTile);
+                    if (ExcitedGroups)
+                    {
+                        var excitedGroup = tile.ExcitedGroup ?? enemyTile.ExcitedGroup;
+                        if (excitedGroup == null)
+                        {
+                            excitedGroup = new ExcitedGroup();
+                            gridAtmosphere.ExcitedGroups.Add(excitedGroup);
+                        }
+
+                        if (tile.ExcitedGroup == null)
+                            ExcitedGroupAddTile(excitedGroup, tile);
+
+                        if (enemyTile.ExcitedGroup == null)
+                            ExcitedGroupAddTile(excitedGroup, enemyTile);
+                    }
+                }
+
+                Share(tile, enemyTile, adjacentTileLength);
+                LastShareCheck(tile);
             }
 
             if(tile.Air != null)

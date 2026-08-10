@@ -3,12 +3,16 @@ using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Atmos.Piping.Components;
+using Content.Shared.ZLevel.Systems;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Atmos.EntitySystems;
 
 public partial class AtmosphereSystem
 {
+    [Robust.Shared.IoC.Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
+
     /*
     Partial class that stores miscellaneous utility methods for Atmospherics.
     */
@@ -71,6 +75,9 @@ public partial class AtmosphereSystem
         Entity<GridAtmosphereComponent, GasTileOverlayComponent, MapGridComponent, TransformComponent> ent,
         TileAtmosphere tile)
     {
+        if (tile.ZLevel != 0)
+            return;
+
         _gasTileOverlaySystem.Invalidate((ent.Owner, ent.Comp2), tile.GridIndices);
     }
 
@@ -103,7 +110,7 @@ public partial class AtmosphereSystem
 
         tile.AirtightData = tile.NoGridTile
             ? default
-            : GetAirtightData(uid, grid, tile.GridIndices);
+            : GetAirtightData(uid, grid, tile.GridIndices, tile.ZLevel);
 
         if (tile.AirtightData.BlockedDirections != oldBlocked && tile.ExcitedGroup != null)
             ExcitedGroupDispose(atmos, tile.ExcitedGroup);
@@ -118,13 +125,17 @@ public partial class AtmosphereSystem
     /// <param name="grid">The <see cref="MapGridComponent"/> the tile is on.</param>
     /// <param name="tile">The indices of the tile.</param>
     /// <returns>The current <see cref="AirtightData"/> for the tile.</returns>
-    private AirtightData GetAirtightData(EntityUid uid, MapGridComponent grid, Vector2i tile)
+    private AirtightData GetAirtightData(EntityUid uid, MapGridComponent grid, Vector2i tile, int zLevel = 0)
     {
         var blockedDirs = AtmosDirection.Invalid;
         var noAirWhenBlocked = false;
         var fixVacuum = false;
 
-        foreach (var ent in _map.GetAnchoredEntities(uid, grid, tile))
+        var inTile = zLevel == 0
+            ? _map.GetAnchoredEntities(uid, grid, tile)
+            : _zLevelSystem.GetAnchoredEntitiesOnZLevel(uid, grid, tile, zLevel);
+
+        foreach (var ent in inTile)
         {
             if (!_airtightQuery.TryGetComponent(ent, out var airtight))
                 continue;

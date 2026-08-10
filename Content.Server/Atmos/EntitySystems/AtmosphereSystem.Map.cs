@@ -2,6 +2,7 @@ using Content.Server.Atmos.Components;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Robust.Shared.GameStates;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Utility;
 
@@ -101,7 +102,10 @@ public partial class AtmosphereSystem
         foreach (var tile in atmos.MapTiles)
         {
             RemoveMapAtmos(atmos, tile);
-            atmos.InvalidatedCoords.Add(tile.GridIndices);
+            if (tile.ZLevel == 0)
+                atmos.InvalidatedCoords.Add(tile.GridIndices);
+            else
+                atmos.InvalidatedZLevelCoords.Add(new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel));
         }
         atmos.MapTiles.Clear();
     }

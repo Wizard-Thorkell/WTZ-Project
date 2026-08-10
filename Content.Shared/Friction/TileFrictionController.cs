@@ -1,5 +1,9 @@
+// DragonStation Z-Level prototype.
+// Copyright (c) pedel and OpenAI Codex.
+
 using System.Numerics;
 using Content.Shared.CCVar;
+using Content.Shared.ZLevel.Systems;
 using Content.Shared.Gravity;
 using Content.Shared.Interaction.Components;
 using Content.Shared.Interaction.Events;
@@ -23,6 +27,7 @@ namespace Content.Shared.Friction
     public sealed class TileFrictionController : VirtualController
     {
         [Dependency] private readonly IConfigurationManager _configManager = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
         [Dependency] private readonly ITileDefinitionManager _tileDefinitionManager = default!;
         [Dependency] private readonly SharedGravitySystem _gravity = default!;
         [Dependency] private readonly SharedMoverController _mover = default!;
@@ -36,6 +41,7 @@ namespace Content.Shared.Friction
         // For debug purposes only
         [Dependency] private readonly EntityQuery<InputMoverComponent> _moverQuery = default!;
         [Dependency] private readonly EntityQuery<BlockMovementComponent> _blockMoverQuery = default!;
+        private readonly List<EntityUid> _zLevelAnchored = new();
 
         private float _frictionModifier;
         private float _minDamping;
@@ -147,23 +153,38 @@ namespace Content.Shared.Friction
                     : tileModifier;
             }
 
-            var tile = _map.GetTileRef(xform.GridUid.Value, grid, xform.Coordinates);
+            Tile tile;
+            Vector2i tileIndices;
+            int zLevel;
+            if (_zLevelSystem.TryGetSupportTile(uid, out var supportTile))
+            {
+                tile = supportTile.Tile;
+                tileIndices = new Vector2i(supportTile.GridIndices.X, supportTile.GridIndices.Y);
+                zLevel = supportTile.GridIndices.Z;
+            }
+            else
+            {
+                var tileRef = _map.GetTileRef(xform.GridUid.Value, grid, xform.Coordinates);
+                tile = tileRef.Tile;
+                tileIndices = tileRef.GridIndices;
+                zLevel = _zLevelSystem.GetZLevel(uid);
+            }
 
             // If it's a map but on an empty tile then just assume it has gravity.
-            if (tile.Tile.IsEmpty &&
+            if (tile.IsEmpty &&
                 HasComp<MapComponent>(xform.GridUid) &&
                 (!TryComp<GravityComponent>(xform.GridUid, out var gravity) || gravity.Enabled))
                 return tileModifier;
 
             // Check for anchored ents that modify friction
-            var anc = _map.GetAnchoredEntitiesEnumerator(xform.GridUid.Value, grid, tile.GridIndices);
-            while (anc.MoveNext(out var tileEnt))
+            _zLevelSystem.GetAnchoredEntitiesOnZLevel(xform.GridUid.Value, grid, tileIndices, zLevel, _zLevelAnchored);
+            foreach (var tileEnt in _zLevelAnchored)
             {
                 if (_frictionQuery.TryGetComponent(tileEnt, out var friction))
                     tileModifier *= friction.Modifier;
             }
 
-            var tileDef = _tileDefinitionManager[tile.Tile.TypeId];
+            var tileDef = _tileDefinitionManager[tile.TypeId];
             return tileDef.Friction * tileModifier;
         }
 

@@ -6,6 +6,7 @@ using Content.Shared.Inventory.VirtualItem;
 using Content.Shared.Storage.Components;
 using Content.Shared.Tag;
 using Robust.Shared.Containers;
+using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Utility;
@@ -155,6 +156,7 @@ public abstract partial class SharedHandsSystem
         // drop the item with heavy calculations from their hands and place it at the calculated interaction range position
         // The DoDrop is handle if there's no drop target
         DoDrop(ent, handId, doDropInteraction: doDropInteraction);
+        StampEntityToWorldZLevel(entity.Value, GetWorldZLevel(ent));
 
         // if there's no drop location stop here
         if (targetDropLocation == null)
@@ -251,5 +253,27 @@ public abstract partial class SharedHandsSystem
 
         if (handId == ent.Comp.ActiveHandId)
             RaiseLocalEvent(entity.Value, new HandDeselectedEvent(ent));
+    }
+
+    private int GetWorldZLevel(EntityUid uid)
+    {
+        return TransformSystem.GetZLevel((uid, Transform(uid), CompOrNull<ZLevelPositionComponent>(uid)));
+    }
+
+    private void StampEntityToWorldZLevel(EntityUid uid, int zLevel)
+    {
+        if (zLevel == 0)
+        {
+            RemComp<ZLevelPositionComponent>(uid);
+            return;
+        }
+
+        var zComp = EnsureComp<ZLevelPositionComponent>(uid);
+        if (zComp.ZLevel == zLevel && zComp.LocalZOffset == 0f)
+            return;
+
+        zComp.ZLevel = zLevel;
+        zComp.LocalZOffset = 0f;
+        Dirty(uid, zComp);
     }
 }

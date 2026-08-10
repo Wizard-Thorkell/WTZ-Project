@@ -85,11 +85,29 @@ public sealed class TileAtmosphere : IGasMixtureHolder
     public readonly TileAtmosphere?[] AdjacentTiles = new TileAtmosphere[Atmospherics.Directions];
 
     /// <summary>
+    /// Vertical adjacent tile below this one, if one is connected for atmos flow.
+    /// </summary>
+    [ViewVariables]
+    public TileAtmosphere? AdjacentTileBelow;
+
+    /// <summary>
+    /// Vertical adjacent tile above this one, if one is connected for atmos flow.
+    /// </summary>
+    [ViewVariables]
+    public TileAtmosphere? AdjacentTileAbove;
+
+    /// <summary>
     /// Neighbouring tiles to which air can flow. This is a combination of this tile's unblocked direction, and the
     /// unblocked directions on adjacent tiles.
     /// </summary>
     [ViewVariables]
     public AtmosDirection AdjacentBits = AtmosDirection.Invalid;
+
+    [ViewVariables]
+    public bool AdjacentToBelow;
+
+    [ViewVariables]
+    public bool AdjacentToAbove;
 
     /// <summary>
     /// Current <see cref="MonstermosInfo"/> information for this tile.
@@ -129,6 +147,12 @@ public sealed class TileAtmosphere : IGasMixtureHolder
     /// </summary>
     [ViewVariables]
     public Vector2i GridIndices;
+
+    /// <summary>
+    /// The discrete Z-Level this tile belongs to.
+    /// </summary>
+    [ViewVariables]
+    public int ZLevel;
 
     /// <summary>
     /// The excited group this tile belongs to, if any.
@@ -231,6 +255,7 @@ public sealed class TileAtmosphere : IGasMixtureHolder
     {
         GridIndex = other.GridIndex;
         GridIndices = other.GridIndices;
+        ZLevel = other.ZLevel;
         Space = other.Space;
         NoGridTile = other.NoGridTile;
         MapAtmosphere = other.MapAtmosphere;

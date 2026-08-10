@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.Atmos.Serialization;
 using Content.Shared.NodeContainer.NodeGroups;
+using Robust.Shared.Map;
 
 namespace Content.Shared.Atmos.Components;
 
@@ -50,6 +51,9 @@ public sealed partial class GridAtmosphereComponent : Component
     [ViewVariables]
     [IncludeDataField(customTypeSerializer:typeof(TileAtmosCollectionSerializer))]
     public Dictionary<Vector2i, TileAtmosphere> Tiles = new(1000);
+
+    [ViewVariables]
+    public Dictionary<ZLevelTileIndices, TileAtmosphere> ZLevelTiles = new(256);
 
     [ViewVariables]
     public HashSet<TileAtmosphere> MapTiles = new(1000);
@@ -137,6 +141,9 @@ public sealed partial class GridAtmosphereComponent : Component
 
     [ViewVariables]
     public readonly HashSet<Vector2i> InvalidatedCoords = new(1000);
+
+    [ViewVariables]
+    public readonly HashSet<ZLevelTileIndices> InvalidatedZLevelCoords = new(256);
 
     [ViewVariables]
     public readonly Queue<TileAtmosphere> CurrentRunInvalidatedTiles = new();

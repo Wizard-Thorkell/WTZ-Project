@@ -3,6 +3,7 @@ using Content.Shared.Hands.EntitySystems;
 using Content.Shared.Interaction;
 using Content.Shared.Storage;
 using Content.Shared.Storage.Components;
+using Robust.Shared.GameObjects;
 using Robust.Shared.Random;
 
 namespace Content.Shared.Placeable;
@@ -71,6 +72,7 @@ public sealed class PlaceableSurfaceSystem : EntitySystem
         if (!_handsSystem.TryDrop(args.User, args.Used))
             return;
 
+        StampEntityToSurfaceZLevel(args.Used, uid);
         _transformSystem.SetCoordinates(args.Used,
             surface.PlaceCentered ? Transform(uid).Coordinates.Offset(surface.PositionOffset) : args.ClickLocation);
 
@@ -109,7 +111,27 @@ public sealed class PlaceableSurfaceSystem : EntitySystem
 
         foreach (var entity in args.DumpQueue)
         {
+            StampEntityToSurfaceZLevel(entity, ent);
             _transformSystem.SetWorldPositionRotation(entity, targetPos + _random.NextVector2Box() / 4, targetRot);
         }
+    }
+
+    private void StampEntityToSurfaceZLevel(EntityUid entity, EntityUid surface)
+    {
+        var zLevel = _transformSystem.GetZLevel((surface, Transform(surface), CompOrNull<ZLevelPositionComponent>(surface)));
+
+        if (zLevel == 0)
+        {
+            RemComp<ZLevelPositionComponent>(entity);
+            return;
+        }
+
+        var zComp = EnsureComp<ZLevelPositionComponent>(entity);
+        if (zComp.ZLevel == zLevel && zComp.LocalZOffset == 0f)
+            return;
+
+        zComp.ZLevel = zLevel;
+        zComp.LocalZOffset = 0f;
+        Dirty(entity, zComp);
     }
 }

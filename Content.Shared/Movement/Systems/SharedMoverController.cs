@@ -1,7 +1,11 @@
+// DragonStation Z-Level prototype.
+// Copyright (c) pedel and OpenAI Codex.
+
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Content.Shared.ActionBlocker;
 using Content.Shared.CCVar;
+using Content.Shared.ZLevel.Systems;
 using Content.Shared.Friction;
 using Content.Shared.Gravity;
 using Content.Shared.Inventory;
@@ -38,6 +42,7 @@ public abstract partial class SharedMoverController : VirtualController
     [Dependency] protected readonly IGameTiming Timing = default!;
     [Dependency] private   readonly ITileDefinitionManager _tileDefinitionManager = default!;
     [Dependency] private   readonly ActionBlockerSystem _blocker = default!;
+    [Dependency] private   readonly SharedZLevelSystem _zLevelSystem = default!;
     [Dependency] private   readonly EntityLookupSystem _lookup = default!;
     [Dependency] private   readonly InventorySystem _inventory = default!;
     [Dependency] private   readonly MobStateSystem _mobState = default!;
@@ -78,6 +83,7 @@ public abstract partial class SharedMoverController : VirtualController
     public Dictionary<EntityUid, bool> UsedMobMovement = new();
 
     private readonly HashSet<EntityUid> _aroundColliderSet = [];
+    private readonly List<EntityUid> _zLevelAnchored = [];
 
     public override void Initialize()
     {
@@ -274,10 +280,9 @@ public abstract partial class SharedMoverController : VirtualController
         }
         else
         {
-            if (MapGridQuery.TryComp(xform.GridUid, out var gridComp)
-                && _mapSystem.TryGetTileRef(xform.GridUid.Value, gridComp, xform.Coordinates, out var tile)
+            if (TryGetGroundTile(uid, xform, out var tile)
                 && physicsComponent.BodyStatus == BodyStatus.OnGround)
-                tileDef = (ContentTileDefinition)_tileDefinitionManager[tile.Tile.TypeId];
+                tileDef = (ContentTileDefinition)_tileDefinitionManager[tile.TypeId];
 
             var walkSpeed = moveSpeedComponent?.CurrentWalkSpeed ?? MovementSpeedModifierComponent.DefaultBaseWalkSpeed;
             var sprintSpeed = moveSpeedComponent?.CurrentSprintSpeed ?? MovementSpeedModifierComponent.DefaultBaseSprintSpeed;
@@ -582,15 +587,15 @@ public abstract partial class SharedMoverController : VirtualController
         }
 
         var position = _mapSystem.LocalToTile(xform.GridUid.Value, grid, xform.Coordinates);
+        var zLevel = _zLevelSystem.GetZLevel(uid);
         var soundEv = new GetFootstepSoundEvent(uid);
 
         // If the coordinates have a FootstepModifier component
         // i.e. component that emit sound on footsteps emit that sound
-        var anchored = _mapSystem.GetAnchoredEntitiesEnumerator(xform.GridUid.Value, grid, position);
-
-        while (anchored.MoveNext(out var maybeFootstep))
+        _zLevelSystem.GetAnchoredEntitiesOnZLevel(xform.GridUid.Value, grid, position, zLevel, _zLevelAnchored);
+        foreach (var maybeFootstep in _zLevelAnchored)
         {
-            RaiseLocalEvent(maybeFootstep.Value, ref soundEv);
+            RaiseLocalEvent(maybeFootstep, ref soundEv);
 
             if (soundEv.Sound != null)
             {
@@ -608,9 +613,9 @@ public abstract partial class SharedMoverController : VirtualController
         // Walking on a tile.
         // Tile def might have been passed in already from previous methods, so use that
         // if we have it
-        if (tileDef == null && _mapSystem.TryGetTileRef(xform.GridUid.Value, grid, position, out var tileRef))
+        if (tileDef == null && TryGetGroundTile(uid, xform, out var tile))
         {
-            tileDef = (ContentTileDefinition)_tileDefinitionManager[tileRef.Tile.TypeId];
+            tileDef = (ContentTileDefinition)_tileDefinitionManager[tile.TypeId];
         }
 
         if (tileDef == null)
@@ -655,5 +660,25 @@ public abstract partial class SharedMoverController : VirtualController
         // If we don't have a physics component, or have a static body type then we can't move.
         if (!PhysicsQuery.TryComp(entity, out var body) || body.BodyType == BodyType.Static)
             args.Cancel();
+    }
+
+    protected bool TryGetGroundTile(EntityUid uid, TransformComponent xform, out Tile tile)
+    {
+        tile = Tile.Empty;
+
+        if (!MapGridQuery.TryComp(xform.GridUid, out var grid))
+            return false;
+
+        if (_zLevelSystem.TryGetSupportTile(uid, out var supportTile))
+        {
+            tile = supportTile.Tile;
+            return !supportTile.Tile.IsEmpty;
+        }
+
+        if (!_mapSystem.TryGetTileRef(xform.GridUid!.Value, grid, xform.Coordinates, out var tileRef))
+            return false;
+
+        tile = tileRef.Tile;
+        return true;
     }
 }

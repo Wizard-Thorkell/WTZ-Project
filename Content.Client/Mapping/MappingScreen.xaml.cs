@@ -88,6 +88,7 @@ public sealed partial class MappingScreen : InGameScreen
             _decalZIndex = args.Value;
             UpdateDecal();
         };
+        ZLevelSpinBox.InitDefaultButtons();
 
         for (var i = 0; i < EntitySpawnWindow.InitOpts.Length; i++)
         {

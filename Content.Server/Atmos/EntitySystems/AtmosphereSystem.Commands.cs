@@ -155,9 +155,11 @@ public sealed partial class AtmosphereSystem
         atmos.CurrentRunTiles.Clear();
         atmos.CurrentRunExcitedGroups.Clear();
         atmos.InvalidatedCoords.Clear();
+        atmos.InvalidatedZLevelCoords.Clear();
         atmos.CurrentRunInvalidatedTiles.Clear();
         atmos.PossiblyDisconnectedTiles.Clear();
         atmos.Tiles.Clear();
+        atmos.ZLevelTiles.Clear();
 
         var volume = GetVolumeForTiles(ent);
         TryComp(ent.Comp4.MapUid, out MapAtmosphereComponent? mapAtmos);

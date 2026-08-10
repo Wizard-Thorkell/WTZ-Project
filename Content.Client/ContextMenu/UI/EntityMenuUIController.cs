@@ -5,6 +5,7 @@ using Content.Client.Examine;
 using Content.Client.Gameplay;
 using Content.Client.Verbs;
 using Content.Client.Verbs.UI;
+using Content.Client.ZLevel;
 using Content.Shared.CCVar;
 using Content.Shared.Examine;
 using Content.Shared.IdentityManagement;
@@ -51,6 +52,7 @@ namespace Content.Client.ContextMenu.UI
         [UISystemDependency] private readonly ExamineSystem _examineSystem = default!;
         [UISystemDependency] private readonly TransformSystem _xform = default!;
         [UISystemDependency] private readonly CombatModeSystem _combatMode = default!;
+        [UISystemDependency] private readonly ZLevelTargetingSystem _zLevelTargeting = default!;
 
         private bool _updating;
 
@@ -87,6 +89,10 @@ namespace Content.Client.ContextMenu.UI
         /// </summary>
         public void OpenRootMenu(List<EntityUid> entities)
         {
+            _zLevelTargeting.FilterEntities(entities, ZLevelTargetingMode.SameFloorOnly);
+            if (entities.Count == 0)
+                return;
+
             // close any old menus first.
             if (_context.RootMenu.Visible)
                 _context.Close();
@@ -120,6 +126,9 @@ namespace Content.Client.ContextMenu.UI
             // do examination?
             if (args.Function == ContentKeyFunctions.ExamineEntity)
             {
+                if (!_zLevelTargeting.IsEntityTargetable(entity.Value, ZLevelTargetingMode.VisibleCrossFloorExamine))
+                    return;
+
                 _systemManager.GetEntitySystem<ExamineSystem>().DoExamine(entity.Value);
                 args.Handle();
                 return;
@@ -133,6 +142,9 @@ namespace Content.Client.ContextMenu.UI
                 args.Function == ContentKeyFunctions.TryPullObject ||
                 args.Function == ContentKeyFunctions.MovePulledObject)
             {
+                if (!_zLevelTargeting.IsEntityTargetable(entity.Value, ZLevelTargetingMode.SameFloorOnly))
+                    return;
+
                 var inputSys = _systemManager.GetEntitySystem<InputSystem>();
 
                 var func = args.Function;
@@ -290,6 +302,9 @@ namespace Content.Client.ContextMenu.UI
         /// </summary>
         private void AddEntityToMenu(EntityUid entity, ContextMenuPopup menu)
         {
+            if (!_zLevelTargeting.IsEntityTargetable(entity, ZLevelTargetingMode.SameFloorOnly))
+                return;
+
             var element = new EntityMenuElement(entity);
             element.SubMenu = new ContextMenuPopup(_context, element);
             element.SubMenu.OnPopupOpen += () => _verb.OpenVerbMenu(entity, popup: element.SubMenu);
