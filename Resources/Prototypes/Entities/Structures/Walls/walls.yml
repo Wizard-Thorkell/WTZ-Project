@@ -55,6 +55,7 @@
     resistance: 2
   - type: BlockWeather
   - type: SunShadowCast
+  - type: ZLevelStructuralSupport
 
 - type: entity
   abstract: true

@@ -1,0 +1,42 @@
+# Mapper-visible markers and transient presentation for native Z-level stability.
+
+- type: entity
+  id: ZLevelStructuralCoreMarker
+  parent: MarkerBase
+  name: Z-level structural core
+  description: Opts this grid into structural stability and anchors nearby connected tiles.
+  components:
+  - type: Sprite
+    layers:
+    - state: blue
+      shader: unshaded
+  - type: ZLevelStructuralCore
+
+- type: entity
+  id: ZLevelStructuralSupportMarker
+  parent: MarkerBase
+  name: Z-level structural support
+  description: Conducts stability between this floor and the floor directly above.
+  components:
+  - type: Sprite
+    layers:
+    - state: green
+      shader: unshaded
+  - type: ZLevelStructuralSupport
+
+- type: entity
+  id: ZLevelStructuralCollapseDust
+  categories: [ HideSpawnMenu ]
+  components:
+  - type: TimedDespawn
+    lifetime: 0.3
+  - type: Sprite
+    drawdepth: Effects
+    noRot: true
+    color: "#aaa39acc"
+    sprite: Effects/chempuff.rsi
+    state: chempuff
+  - type: EffectVisuals
+  - type: Tag
+    tags:
+    - HideContextMenu

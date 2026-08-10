@@ -202,6 +202,34 @@ Implemented moving-grid frame foundation:
 - Mapping and placement keep their active floor local to the selected grid,
   converting only at the map-coordinate boundary.
 
+Implemented sparse structural stability and collapse:
+
+- `ZLevelStructuralGridComponent` opts a grid into structural simulation without
+  changing the behavior of legacy maps.
+- The pure multi-source solver models each existing tile as a sparse local
+  `(x, y, z)` node. Cores seed horizontal strength and explicit supports bridge
+  adjacent decks with configurable strength and transfer loss.
+- Immutable sparse snapshots are solved through a 5 ms `JobQueue`; each job
+  yields every 256 nodes so large connected structures do not monopolize a
+  server tick.
+- Grid revisions invalidate stale job results. Structural edits made while a
+  solve is running cannot apply an obsolete stability snapshot or trigger an
+  obsolete collapse.
+- Unsupported destructible turf receives a configurable delayed collapse.
+  Restoring support cancels it, while a fresh solve that still confirms the
+  failure preserves the original deadline.
+- At most eight tiles collapse per tick globally. Each collapse uses the normal
+  damage/destruction pipeline for anchored entities, then steps the turf down
+  through its `BaseTurf` rather than deleting an entire stack at once.
+- Core/support startup, shutdown, anchoring, reanchoring, local-Z changes, grid
+  splits, tile changes, and round shutdown all invalidate or rebuild the live
+  structural index.
+- Mapper-visible core/support markers are available, and base walls provide the
+  default upward support bridge on participating grids.
+- `showzstability` enables an admin-only overlay. Sparse snapshots are sent only
+  to opted-in sessions, and the client renders only the currently viewed deck,
+  including pending-collapse warnings.
+
 Partially implemented mapping and placement:
 
 - Placement network messages carry a ZLevel field.
@@ -235,6 +263,12 @@ Verified recently:
   passed.
 - `Content.Shared`, `Content.Server`, and `Content.Client` builds after frame
   integration: 0 errors.
+- Pure structural solver suite: 2 passed, 0 skipped, 0 failed.
+- Structural integration flow: core propagation, vertical support, delayed
+  collapse cancellation, support removal, local-Z support reindexing, anchored
+  wall destruction, and turf collapse passed end to end.
+- `Content.Server` and `Content.Client` builds after structural diagnostics: 0
+  errors.
 
 ## Reference Architecture Comparison
 
@@ -260,6 +294,28 @@ core world model differs from this prototype.
   normal PVS. It avoids repeated full-map renders, linked-map controller
   networks, and global recursive map overrides while preserving native
   hierarchy, chunk lifecycle, and sparse replication.
+
+Structural comparison was performed against Crystal Edge commit `dcb194ee03b5`
+and Monolith commit `b8d0b6d5a69a`, both fetched on 2026-08-10:
+
+- [Crystal Edge's ZCollapse module](https://github.com/crystallpunk-14/crystall-edge/tree/master/Content.Server/_CE/ZCollapse)
+  has the strongest reference implementation: opt-in stability grids, indexed
+  cores/supports, a multi-source whole-column flood fill, time-sliced jobs,
+  cancelable delayed collapse, an eight-tile tick budget, mapping previews, and
+  a networked debug overlay. Its graph nodes must pair `(grid, x, y)` across a
+  column of separate map grids.
+- DragonStation carries those proven ideas into native sparse nodes
+  `(x, y, z)`. It does not need map-column discovery or cross-map coordinate
+  matching, and its per-grid revision contract discards stale jobs and prevents
+  stale collapse timers from firing after concurrent edits. Debug state also
+  remains opt-in instead of becoming normal component replication.
+- Crystal Edge is still ahead in collapse presentation: it plays collapse audio
+  and throws recovered tile items onto the lower map. DragonStation deliberately
+  defers those pieces until sound/effects and falling debris have a correct
+  world-Z contract.
+- The inspected [Monolith repository](https://github.com/Monolith-Station/Monolith)
+  contains the Crystal Edge Z-level viewport, transit, PVS, ship, and planet
+  work, but no port of the ZCollapse/core/support subsystem at that commit.
 
 Decision: do not port either renderer/PVS architecture wholesale. Reuse their
 strong gameplay and presentation ideas through DragonStation's native sparse
@@ -299,6 +355,15 @@ Major unfinished areas:
 - FTL docking aligns grid frames, but arbitrary transit-map entry, planet
   landing, frame-authoring UI, and conflict policy for already-docked grid
   assemblies still need dedicated product rules.
+- Structural stability currently rebuilds one immutable sparse snapshot for the
+  whole dirty grid. The solve is time-sliced, but snapshot capture is still a
+  main-thread O(existing tiles) operation; chunk-local/incremental graph updates
+  remain a future optimization for very large ships.
+- Structural authoring has markers and an admin overlay, but still needs polished
+  mapper UI, authored beam/column families, and balance rules beyond the current
+  core-strength and wall-support defaults.
+- Collapse audio and tile-item debris are intentionally absent until their
+  presentation and destination use explicit world-Z semantics.
 
 ## Roadmap Phases
 
@@ -321,8 +386,10 @@ feature phases below remain the backlog and acceptance criteria for each area.
    respect vertical layers.
 8. [Done] Define a frame model for moving ships, stations, and planets, and
    integrate it with FTL docking, physics, renderer, PVS, and map coordinates.
-9. [Next] Add structural support and collapse as a late-stage consumer of the mature
-   vertical model.
+9. [Done] Add structural support and collapse as a late-stage consumer of the
+   mature vertical model.
+10. [In progress] Run the final cross-stage audit, full affected test matrix, and
+    produce the implementation/comparison handoff.
 
 Each completed stage should leave a focused commit, regression tests, and an
 updated verification record in this document.
