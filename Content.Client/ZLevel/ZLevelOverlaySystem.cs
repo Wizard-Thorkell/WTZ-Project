@@ -1,18 +1,21 @@
 // DragonStation Z-Level prototype.
 // Copyright (c) pedel and OpenAI Codex.
 
+using Content.Shared.CCVar;
 using Robust.Client.Graphics;
 using Robust.Client.Player;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Player;
 
 namespace Content.Client.ZLevel;
 
 /// <summary>
-/// Owns the lightweight debug overlay that makes Z-level testing readable in-game.
+/// Owns layered tile presentation and its optional diagnostics.
 /// </summary>
 public sealed class ZLevelOverlaySystem : EntitySystem
 {
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly IOverlayManager _overlayManager = default!;
     [Dependency] private readonly IPlayerManager _playerManager = default!;
 
@@ -20,12 +23,18 @@ public sealed class ZLevelOverlaySystem : EntitySystem
 
     public override void Initialize()
     {
+        _overlay = new ZLevelDebugOverlay();
+        Subs.CVar(_configuration, CCVars.ZLevelDebugOverlay, OnDebugOverlayChanged, true);
+
         SubscribeLocalEvent<ZLevelPositionComponent, ComponentInit>(OnInit);
         SubscribeLocalEvent<ZLevelPositionComponent, ComponentShutdown>(OnShutdown);
         SubscribeLocalEvent<ZLevelPositionComponent, LocalPlayerAttachedEvent>(OnPlayerAttached);
         SubscribeLocalEvent<ZLevelPositionComponent, LocalPlayerDetachedEvent>(OnPlayerDetached);
+    }
 
-        _overlay = new ZLevelDebugOverlay();
+    private void OnDebugOverlayChanged(bool enabled)
+    {
+        _overlay.ShowDebugInfo = enabled;
     }
 
     private void OnInit(Entity<ZLevelPositionComponent> ent, ref ComponentInit args)

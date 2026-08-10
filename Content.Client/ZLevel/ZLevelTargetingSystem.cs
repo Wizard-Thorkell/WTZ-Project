@@ -7,7 +7,6 @@ using System.Numerics;
 using Content.Client.Clickable;
 using Content.Client.Sprite;
 using Content.Shared.Input;
-using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.ComponentTrees;
@@ -18,7 +17,6 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Graphics;
 using Robust.Shared.Input;
 using Robust.Shared.Map;
-using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Utility;
 
@@ -37,17 +35,16 @@ public enum ZLevelTargetingMode : byte
 /// </summary>
 public sealed class ZLevelTargetingSystem : EntitySystem
 {
-    [Dependency] private readonly IMapManager _mapManager = default!;
+    [Dependency] private readonly IEyeManager _eyeManager = default!;
     [Dependency] private readonly IPlayerManager _playerManager = default!;
     [Dependency] private readonly ClickableSystem _clickable = default!;
-    [Dependency] private readonly SharedMapSystem _map = default!;
-    [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly SpriteTreeSystem _spriteTree = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
+    [Dependency] private readonly ZLevelViewContextSystem _viewContext = default!;
 
     private readonly List<(EntityUid Entity, int Depth, uint RenderOrder, float Bottom)> _candidates = new();
     private EntityQuery<ClickableComponent> _clickableQuery;
-    private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<SpriteComponent> _spriteQuery;
     private EntityQuery<TransformComponent> _transformQuery;
 
@@ -55,7 +52,6 @@ public sealed class ZLevelTargetingSystem : EntitySystem
     {
         base.Initialize();
         _clickableQuery = GetEntityQuery<ClickableComponent>();
-        _gridQuery = GetEntityQuery<MapGridComponent>();
         _spriteQuery = GetEntityQuery<SpriteComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
     }
@@ -86,7 +82,7 @@ public sealed class ZLevelTargetingSystem : EntitySystem
 
         _candidates.Clear();
 
-        var viewerContext = GetViewerContext();
+        var viewerContext = GetViewerContext(eye);
         var entities = _spriteTree.QueryAabb(coordinates.MapId, Box2.CenteredAround(coordinates.Position, new Vector2(1, 1)));
 
         foreach (var entity in entities)
@@ -142,7 +138,7 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         return IsEntityTargetable(entity, ZLevelTargetingMode.VisibleCrossFloorExamine);
     }
 
-    private bool IsEntityTargetable(EntityUid entity, ViewerContext viewer, ZLevelTargetingMode mode)
+    private bool IsEntityTargetable(EntityUid entity, ZLevelViewContext viewer, ZLevelTargetingMode mode)
     {
         if (!_transformQuery.TryComp(entity, out var xform) ||
             xform.MapID != viewer.MapId)
@@ -157,58 +153,24 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         return mode switch
         {
             ZLevelTargetingMode.SameFloorOnly => false,
-            ZLevelTargetingMode.VisibleCrossFloorExamine => entityZ < viewer.ZLevel && IsEntityVisibleAcrossOpenings(entity, viewer.ZLevel, xform),
-            ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.ZLevel && IsEntityVisibleAcrossOpenings(entity, viewer.ZLevel, xform),
-            ZLevelTargetingMode.VisibleTopmostAny => IsCrossFloorVisible(entity, viewer.ZLevel, entityZ, xform),
+            ZLevelTargetingMode.VisibleCrossFloorExamine => entityZ < viewer.ZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel),
+            ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.ZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel),
+            ZLevelTargetingMode.VisibleTopmostAny =>
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.ZLevel, allowAbove: true),
             _ => false
         };
     }
 
-    private bool IsCrossFloorVisible(EntityUid entity, int viewerZ, int entityZ, TransformComponent xform)
+    private ZLevelViewContext GetViewerContext(IEye? eye = null)
     {
-        if (entityZ == viewerZ)
-            return true;
+        eye ??= _eyeManager.CurrentEye;
+        if (_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var context))
+            return context;
 
-        return IsEntityVisibleAcrossOpenings(entity, viewerZ, xform);
+        return new ZLevelViewContext(null, MapId.Nullspace, 0);
     }
-
-    private bool IsEntityVisibleAcrossOpenings(EntityUid entity, int viewerZ, TransformComponent xform)
-    {
-        if (xform.MapID == MapId.Nullspace)
-            return false;
-
-        var mapCoords = _transform.GetMapCoordinates((entity, xform));
-        if (!_mapManager.TryFindGridAt(mapCoords, out var gridUid, out var grid) ||
-            !_gridQuery.TryComp(gridUid, out _))
-        {
-            return false;
-        }
-
-        var entityZ = _transform.GetZLevel((entity, xform, CompOrNull<ZLevelPositionComponent>(entity)));
-        var xy = _map.TileIndicesFor(gridUid, grid, mapCoords);
-        return _boundaries.IsStackOpen(
-            gridUid,
-            grid,
-            xy,
-            viewerZ,
-            entityZ,
-            ZLevelBoundaryChannels.Visibility);
-    }
-
-    private ViewerContext GetViewerContext()
-    {
-        if (_playerManager.LocalEntity is { } viewer &&
-            _transformQuery.TryComp(viewer, out var xform))
-        {
-            return new ViewerContext(
-                xform.MapID,
-                _transform.GetZLevel((viewer, xform, CompOrNull<ZLevelPositionComponent>(viewer))));
-        }
-
-        return new ViewerContext(MapId.Nullspace, 0);
-    }
-
-    private readonly record struct ViewerContext(MapId MapId, int ZLevel);
 
     private sealed class ClickableComparer : IComparer<(EntityUid Entity, int Depth, uint RenderOrder, float Bottom)>
     {

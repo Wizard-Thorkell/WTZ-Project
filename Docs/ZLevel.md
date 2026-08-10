@@ -110,14 +110,38 @@ Implemented first-pass atmos:
 
 Implemented first-pass client presentation:
 
-- Floors above the player are hidden.
-- Current floor is fully visible.
-- Lower floors can remain visible through openings.
-- Lower-floor sprites fade by depth.
+- `SharedZLevelVisibilitySystem` is the common bounded visibility authority for
+  renderer, targeting, and server PVS. It checks at most four floors and uses
+  the visibility boundary channel for every crossed boundary.
+- Floors above the represented camera floor are hidden, while the current floor
+  remains fully visible.
+- Lower floors remain visible only through a complete stack of openings and
+  fade by depth.
+- Entity sprites are filtered and modulated by a draw-time engine event. The
+  presentation path no longer mutates replicated `SpriteComponent.Color`.
+- Sparse floor tiles use one viewport and a bounded overlay pass from the
+  camera floor down to the maximum visible depth; it never scans all existing
+  layers.
+- View context follows the actual viewport eye, including remote `Eye.Target`
+  cameras, with the local player used only as a fallback.
+- Optional diagnostics are controlled by the archived client CVar
+  `zlevel.debug_overlay`; normal floor presentation does not depend on it.
 - Client targeting filters same-floor interactions and allows deliberate
   visible cross-floor examine/admin behavior.
 - Cross-floor visibility uses the same explicit boundary resolver as movement
   and atmosphere.
+
+Implemented first-pass Z-aware network visibility:
+
+- The server builds per-session vertical culling snapshots at 10 Hz on the main
+  thread, covering the same range and chunk margin as native PVS.
+- Attached entities and all view subscriptions contribute independent camera
+  contexts; visibility from any subscribed view keeps an entity relevant.
+- Hidden networked entities are excluded only from normal spatial PVS. Forced,
+  global, and explicit session overrides retain their native precedence.
+- Culling a transform parent also culls its descendants, covering contained or
+  otherwise non-spatial children without flattening entity hierarchies.
+- Disabling native PVS or disconnecting a session clears its exclusion state.
 
 Implemented vertical boundary foundation:
 
@@ -164,13 +188,44 @@ Partially implemented mapping and placement:
 Verified recently:
 
 - Full `SpaceStation14.slnx` build: 0 errors.
-- Focused Robust lifecycle/PVS run: 12 passed, 0 skipped, 0 failed.
+- Focused Robust PVS and ZLevel replication run: 3 passed, 0 skipped, 0 failed.
 - Broader Robust chunk, map, serialization, and physics runs: 17 passed,
   0 skipped, 0 failed.
-- Focused Content ZLevel run after active-body indexing: 13 passed, 1 skipped,
-  0 failed.
+- Focused Content ZLevel run after renderer/PVS integration: 9 passed, 1
+  skipped, 0 failed.
 - The skipped test is an atmos containing-mixture test that needs a dedicated
   upper-floor fixture.
+
+## Reference Architecture Comparison
+
+Crystal Edge and Monolith remain valuable reference implementations, but their
+core world model differs from this prototype.
+
+- [Crystal Edge's viewport integration](https://github.com/crystallpunk-14/crystall-edge/blob/master/Content.Client/_CE/ZLevels/Core/ScalingViewport.CEZLevels.cs)
+  renders a network of separate maps through repeated viewport passes and
+  synthetic eyes. Its broader
+  [ZLevel module](https://github.com/crystallpunk-14/crystall-edge/tree/master/Content.Shared/_CE/ZLevels)
+  provides mature medieval vertical gameplay such as flight, climbing,
+  throwing/falling, roofs, weather, and ladder caches.
+- [Monolith's viewport port](https://github.com/Monolith-Station/Monolith/blob/main/Content.Client/_CE/ZLevels/Core/ScalingViewport.CEZLevels.cs)
+  keeps the repeated-map-pass model and adds painter ordering, depth scaling,
+  and cloud presentation. Its
+  [PVS integration](https://github.com/Monolith-Station/Monolith/blob/main/Content.Server/_CE/ZLevels/PVS/CEPvsOverrideSystem.cs)
+  globally overrides linked map entities, while its
+  [transit implementation](https://github.com/Monolith-Station/Monolith/blob/main/Content.Server/_CE/ZLevels/Core/CEZLevelsSystem.Transit.cs)
+  and [core components](https://github.com/Monolith-Station/Monolith/tree/main/Content.Shared/_CE/ZLevels/Core/Components)
+  explore ships, planets, pilots, gravity, and transit maps.
+- DragonStation instead keeps sparse layers inside one native map/grid, one
+  viewport, one spatial frame, and per-session exclusions in normal PVS. It
+  avoids repeated full-map renders and global recursive map overrides while
+  preserving native hierarchy, chunk lifecycle, and sparse replication.
+
+Decision: do not port either renderer/PVS architecture wholesale. Reuse their
+strong gameplay and presentation ideas through DragonStation's native sparse
+model. Crystal Edge's vertical gameplay is the main reference for phase 6;
+Monolith's transit and frame concepts are the main reference for the moving
+ship/planet stage. Clouds, painter-style depth cues, and cutaways remain useful
+visual references after core lighting behavior is floor-aware.
 
 ## Known Gaps
 
@@ -209,8 +264,9 @@ feature phases below remain the backlog and acceptance criteria for each area.
 3. [Done] Replace implicit ceiling behavior with explicit vertical boundaries.
 4. [Done] Add active vertical bodies and bounded caches so work scales with
    relevant entities and known layers.
-5. [Next] Integrate renderer and PVS behavior around visible floors and openings.
-6. Stabilize atmosphere on top of the shared boundary model.
+5. [Done] Integrate renderer and PVS behavior around visible floors and
+   openings.
+6. [Next] Stabilize atmosphere on top of the shared boundary model.
 7. Expand vertical gameplay, construction, interaction, effects, and AI.
 8. Define a frame model for moving ships, stations, and planets.
 9. Add structural support and collapse as a late-stage consumer of the mature
@@ -368,14 +424,17 @@ Goal: make floors readable and attractive without relying on debug-only visuals.
 
 Tasks:
 
-- Replace sprite-color mutation hacks with a more robust presentation path if
-  needed.
-- Refine lower-floor fade, occlusion, and cutaway behavior.
-- Hide floors above while preserving useful context around openings.
+- [Done] Replace sprite-color mutation hacks with a draw-time presentation
+  path.
+- [Partial] Refine lower-floor fade, occlusion, and cutaway behavior. Bounded
+  opening-aware tile and sprite depth is implemented; wall-specific cutaways
+  remain.
+- [Done] Hide floors above while preserving useful context around openings.
 - Explore wall cutaways for upper floors and vertical shafts.
-- Add optional mapper/debug overlays for layer inspection.
+- [Done] Add optional mapper/debug overlays for layer inspection.
 - Ensure ZLevel presentation works with common lighting scenarios.
-- Avoid making lower floors visually noisy during normal play.
+- [Done] Bound lower-floor presentation to four levels and fade it by depth to
+  avoid visually noisy unbounded stacks.
 
 Exit criteria:
 

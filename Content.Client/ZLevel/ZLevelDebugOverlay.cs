@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.Map;
@@ -21,8 +22,7 @@ using Robust.Shared.Maths;
 namespace Content.Client.ZLevel;
 
 /// <summary>
-/// Debug-first Z-level overlay for testing layered tiles before the renderer is properly Z-aware.
-/// It keeps the active layer readable, dims floors below, and labels the player's current Z-level.
+/// Draws sparse Z-level tiles with bounded opening-aware depth and optional diagnostics.
 /// </summary>
 public sealed class ZLevelDebugOverlay : Overlay
 {
@@ -32,13 +32,15 @@ public sealed class ZLevelDebugOverlay : Overlay
     [Dependency] private readonly IResourceCache _resourceCache = default!;
     [Dependency] private readonly IClydeTileDefinitionManager _tileDefinitionManager = default!;
 
-    private readonly EntityLookupSystem _lookup;
     private readonly SharedMapSystem _mapSystem;
     private readonly SharedTransformSystem _transformSystem;
-    private readonly EntityQuery<TransformComponent> _transformQuery;
+    private readonly SharedZLevelVisibilitySystem _visibilitySystem;
+    private readonly ZLevelViewContextSystem _viewContextSystem;
     private readonly EntityQuery<ZLevelPositionComponent> _zLevelQuery;
     private readonly Font _font;
     private List<Entity<MapGridComponent>> _grids = new();
+
+    public bool ShowDebugInfo { get; set; }
 
     public override OverlaySpace Space => OverlaySpace.WorldSpaceBelowEntities | OverlaySpace.ScreenSpace;
     public override bool RequestScreenTexture => false;
@@ -47,10 +49,10 @@ public sealed class ZLevelDebugOverlay : Overlay
     {
         IoCManager.InjectDependencies(this);
 
-        _lookup = _entityManager.System<EntityLookupSystem>();
         _mapSystem = _entityManager.System<SharedMapSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
-        _transformQuery = _entityManager.GetEntityQuery<TransformComponent>();
+        _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
+        _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
         _zLevelQuery = _entityManager.GetEntityQuery<ZLevelPositionComponent>();
 
         var font = _resourceCache.GetResource<FontResource>("/Fonts/NotoSans/NotoSans-Regular.ttf");
@@ -60,23 +62,20 @@ public sealed class ZLevelDebugOverlay : Overlay
     protected override void Draw(in OverlayDrawArgs args)
     {
         if (_playerManager.LocalEntity is not { } player ||
-            !_transformQuery.TryComp(player, out var playerXform) ||
-            args.Viewport.Eye?.Position.MapId is not { } mapId ||
-            mapId == MapId.Nullspace ||
-            playerXform.MapID != mapId)
+            args.Viewport.Eye is not { } eye ||
+            !_viewContextSystem.TryGetViewContext(eye, player, out var view))
         {
             return;
         }
 
-        var playerZ = _zLevelQuery.TryComp(player, out var playerZComp) ? playerZComp.ZLevel : 0;
-
         switch (args.Space)
         {
             case OverlaySpace.WorldSpaceBelowEntities:
-                DrawWorld(args, player, playerZ, mapId);
+                DrawWorld(args, view.ZLevel, view.MapId);
                 break;
             case OverlaySpace.ScreenSpace:
-                DrawScreen(args, player, playerZ);
+                if (ShowDebugInfo)
+                    DrawScreen(args, view.Viewer ?? player, view.ZLevel);
                 break;
         }
     }
@@ -94,7 +93,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         }
     }
 
-    private void DrawWorld(in OverlayDrawArgs args, EntityUid player, int playerZ, MapId mapId)
+    private void DrawWorld(in OverlayDrawArgs args, int playerZ, MapId mapId)
     {
         _grids.Clear();
         _mapManager.FindGridsIntersecting(mapId, args.WorldBounds, ref _grids);
@@ -104,7 +103,6 @@ public sealed class ZLevelDebugOverlay : Overlay
             DrawGridTiles(args, grid, playerZ);
         }
 
-        DrawEntityHints(args, player, playerZ, mapId);
         _grids.Clear();
     }
 
@@ -115,9 +113,10 @@ public sealed class ZLevelDebugOverlay : Overlay
         var gridBounds = invMatrix.TransformBox(args.WorldBounds).Enlarged(grid.Comp.TileSize * 2);
         handle.SetTransform(matrix);
 
-        foreach (var z in _mapSystem.GetExistingZLevelLayers(grid.Owner, grid.Comp))
+        var lowestZ = playerZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
+        for (var z = lowestZ; z <= playerZ; z++)
         {
-            if (z > playerZ || z == 0)
+            if (z == 0)
                 continue;
 
             var minX = (int)Math.Floor(gridBounds.Left / grid.Comp.TileSize) - 1;
@@ -133,6 +132,17 @@ public sealed class ZLevelDebugOverlay : Overlay
                     if (tile.Tile.IsEmpty)
                         continue;
 
+                    if (z < playerZ &&
+                        !_visibilitySystem.IsTileVisibleFrom(
+                            grid.Owner,
+                            grid.Comp,
+                            new Vector2i(x, y),
+                            playerZ,
+                            z))
+                    {
+                        continue;
+                    }
+
                     var tileSize = grid.Comp.TileSize;
                     var localTile = new Box2(x * tileSize, y * tileSize, (x + 1) * tileSize, (y + 1) * tileSize);
                     if (!gridBounds.Intersects(localTile))
@@ -146,11 +156,6 @@ public sealed class ZLevelDebugOverlay : Overlay
         handle.SetTransform(Matrix3x2.Identity);
     }
 
-    private void DrawEntityHints(in OverlayDrawArgs args, EntityUid player, int playerZ, MapId mapId)
-    {
-        // The main presentation now relies on actual tile rendering and sprite fading.
-        // Keep entity hint boxes disabled in normal play so floor changes feel less synthetic.
-    }
     private void DrawTileTexture(DrawingHandleWorld handle, Box2 quad, Tile tile, Color color)
     {
         var regionMaybe = _tileDefinitionManager.TileAtlasRegion(tile);

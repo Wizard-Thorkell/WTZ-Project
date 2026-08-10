@@ -4,11 +4,13 @@
 #nullable enable
 using Content.IntegrationTests.Tests.Helpers;
 using Content.IntegrationTests.Tests.Movement;
+using Content.Server.ZLevel.Systems;
 using Content.Shared.StepTrigger.Systems;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using NUnit.Framework;
+using Robust.Shared;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -229,6 +231,135 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(grid.ChunkCount, Is.EqualTo(chunkCount),
                     "Boundary queries over empty space must not allocate map chunks.");
             });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelVisibilityIsOpeningAwareAndBounded()
+    {
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var visibility = SEntMan.System<SharedZLevelVisibilitySystem>();
+            var xform = SEntMan.System<SharedTransformSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
+            var tile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
+
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 0), new Tile(1));
+            Assert.That(visibility.IsTileVisibleFrom(MapData.Grid, grid, tile, 0, -1), Is.False);
+
+            var marker = SEntMan.SpawnEntity(null, playerCoords);
+            SEntMan.EnsureComponent<ZLevelPositionComponent>(marker).ZLevel = 0;
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(marker);
+            boundaries.SetBoundary(
+                (marker, boundary),
+                true,
+                -1,
+                ZLevelBoundaryChannels.Visibility,
+                ZLevelBoundaryChannels.None);
+            xform.AnchorEntity(marker, SEntMan.GetComponent<TransformComponent>(marker));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(visibility.IsTileVisibleFrom(MapData.Grid, grid, tile, 0, -1), Is.True);
+                Assert.That(visibility.IsTileVisibleFrom(
+                    MapData.Grid,
+                    grid,
+                    tile,
+                    0,
+                    -SharedZLevelVisibilitySystem.MaxVisibleLevelDistance), Is.True);
+                Assert.That(visibility.IsTileVisibleFrom(
+                    MapData.Grid,
+                    grid,
+                    tile,
+                    0,
+                    -SharedZLevelVisibilitySystem.MaxVisibleLevelDistance - 1), Is.False);
+                Assert.That(visibility.IsTileVisibleFrom(MapData.Grid, grid, tile, 0, 1), Is.False,
+                    "Normal gameplay visibility must not reveal floors above the viewer.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelPvsTracksVisibilityOpenings()
+    {
+        NetEntity target = default;
+        EntityUid? clientTarget = default;
+
+        await Server.WaitPost(() => Server.CfgMan.SetCVar(CVars.NetPVS, true));
+        await Server.WaitPost(() =>
+        {
+            target = SEntMan.GetNetEntity(SEntMan.SpawnEntity(null, SEntMan.GetCoordinates(TargetCoords)));
+        });
+        await RunTicks(10);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(target, out clientTarget), Is.True);
+            Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.False);
+        });
+
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var targetCoords = SEntMan.GetCoordinates(TargetCoords);
+            var targetTile = map.TileIndicesFor(MapData.Grid, grid, targetCoords);
+            var playerCoords = SEntMan.GetCoordinates(PlayerCoords);
+            var playerTile = map.TileIndicesFor(MapData.Grid, grid, playerCoords);
+
+            SEntMan.EnsureComponent<ZLevelPositionComponent>(SPlayer).ZLevel = 1;
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(playerTile.X, playerTile.Y, 1), new Tile(1));
+            map.SetZLevelTile(MapData.Grid, grid, new ZLevelTileIndices(targetTile.X, targetTile.Y, 1), new Tile(1));
+
+            var targetUid = SEntMan.GetEntity(target);
+            Assert.That(SEntMan.System<SharedZLevelVisibilitySystem>()
+                .IsEntityVisibleFrom(targetUid, MapId, 1), Is.False);
+            Assert.That(SEntMan.System<EntityLookupSystem>()
+                .GetEntitiesInRange(Transform.GetMapCoordinates(targetUid), 1f), Does.Contain(targetUid));
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+        await RunSeconds(0.5f);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.True,
+                "A closed floor must remove lower-floor entities from normal spatial PVS.");
+        });
+
+        EntityUid opening = default;
+        await Server.WaitPost(() =>
+        {
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var xform = SEntMan.System<SharedTransformSystem>();
+            opening = SEntMan.SpawnEntity(null, SEntMan.GetCoordinates(TargetCoords));
+            SEntMan.EnsureComponent<ZLevelPositionComponent>(opening).ZLevel = 1;
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(opening);
+            boundaries.SetBoundary(
+                (opening, boundary),
+                true,
+                -1,
+                ZLevelBoundaryChannels.Visibility,
+                ZLevelBoundaryChannels.None);
+            xform.AnchorEntity(opening, SEntMan.GetComponent<TransformComponent>(opening));
+        });
+        await RunSeconds(0.5f);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.False,
+                "Opening the boundary must restore lower-floor entities to PVS.");
+        });
+
+        await Server.WaitPost(() => SEntMan.DeleteEntity(opening));
+        await RunSeconds(0.5f);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.True,
+                "Closing the boundary again must evict lower-floor entities.");
         });
     }
 
