@@ -1,11 +1,16 @@
 # ZLevel Roadmap
 
-DragonStation Z-Level prototype. Copyright (c) pedel and OpenAI Codex.
+WTZ Project native Z-level prototype. Copyright (c) pedel and OpenAI Codex.
 
-This document is the working roadmap for turning DragonStation's experimental
+This document is the working roadmap for turning WTZ Project's experimental
 ZLevel prototype into a high-quality native vertical-space feature. It should be
 kept practical: every section exists to help future code changes stay coherent,
 testable, and aligned with the desired final product.
+
+Official repositories:
+
+- Project and game content: https://github.com/Wizard-Thorkell/WTZ-Project
+- Engine fork: https://github.com/Wizard-Thorkell/WTZ-Engine
 
 ## Product Goal
 
@@ -89,6 +94,22 @@ Implemented movement and gameplay basics:
   including transfers onto grids with displaced vertical frame origins.
 - Placeable surfaces and storage dumps preserve world Z while converting to the
   destination grid's local frame.
+
+Implemented connected artificial gravity:
+
+- Native `ZLevelMap` maps no longer interpret grid-wide gravity as an infinite
+  downward pull through empty Z space.
+- Each active `GravityGeneratorComponent` defines an attraction plane at its
+  authored local Z level.
+- A sparse multi-source flood fill follows only adjacent non-empty tiles in
+  `(x, y, z)`. Empty columns above or below connected station structure inherit
+  its field, while disconnected asteroid or debris islands remain weightless.
+- Bodies above a generator plane accelerate downward; bodies below it
+  accelerate upward. Crossing the attraction plane stops vertical drift, and
+  intervening floor boundaries still catch bodies in either direction.
+- Field results are cached per grid and invalidated by tile, source, parent,
+  power-state, and Z changes. Legacy maps keep the original grid-wide gravity
+  behavior.
 
 Implemented traversal and debug tooling:
 
@@ -236,7 +257,15 @@ Implemented sparse structural stability and collapse:
   to opted-in sessions, and the client renders only the currently viewed deck,
   including pending-collapse warnings.
 
-Partially implemented mapping and placement:
+Implemented versioned mapping and placement:
+
+- `ZLevelMapComponent` opts a map into format version 1 and declares its valid
+  floor range, default floor, and default boundary policy.
+- Map serialization rejects unsupported format versions, non-zero layers on
+  unmarked maps, and authored layers outside the declared range.
+- Legacy maps remain ordinary 2D maps. The mapper does not silently migrate or
+  infer Z-level metadata for them; initializing Z-level authoring is an explicit
+  action for new or deliberately updated maps.
 
 - Placement network messages carry a ZLevel field.
 - Mapping mode has an explicit active-Z spinbox.
@@ -252,10 +281,27 @@ Partially implemented mapping and placement:
 - Mapping/admin commands expose tile-region authoring helpers:
   `zcopytiles <gridUid> <x1> <y1> <x2> <y2> <sourceZ> <targetZ> [includeEmpty]`
   and `zcleartiles <gridUid> <x1> <y1> <x2> <y2> <z>`.
+- Mapping mode can initialize a versioned map, create an empty floor, copy or
+  replace a complete floor including serializable entity hierarchies, and
+  delete a floor without treating the mapper's player entity as map content.
+- Adjacent-floor preview shows the immediately lower and upper floor with
+  distinct transparency without changing normal gameplay visibility.
+- A boundary brush exposes opening, shaft, grate, and sealed marker prototypes
+  directly in the mapping panel.
+- `Resources/Maps/Test/ZLevel/zlevel-mapping-station.yml` is the canonical
+  three-floor authoring fixture. Its fourth tile layer is a roof over the top
+  playable floor.
 
 Final verification on 2026-08-10:
 
 - Full `SpaceStation14.slnx` build: 0 errors.
+- Mapping stabilization rerun: full `SpaceStation14.slnx` build completed with
+  0 errors; the existing legacy package and obsolescence warnings remain.
+- Content Z-level and placement matrix: 35 passed, 0 failed.
+- Versioned map-format suite: 5 passed for validation, actor safety, complete
+  floor copy, infrastructure round-trip, and the official three-floor map.
+- Mapping editor startup smoke test: 1 passed.
+- Robust shared Z-level serialization: 4 passed.
 - 55 focused tests passed across Robust shared/server integration, Content unit,
   and Content integration suites.
 - Robust shared integration: 8 passed for coordinate serialization, tile-index
@@ -297,7 +343,7 @@ follow mechanically.
   [transit implementation](https://github.com/Monolith-Station/Monolith/blob/main/Content.Server/_CE/ZLevels/Core/CEZLevelsSystem.Transit.cs)
   and [core components](https://github.com/Monolith-Station/Monolith/tree/main/Content.Shared/_CE/ZLevels/Core/Components)
   explore ships, planets, pilots, gravity, and transit maps.
-- DragonStation instead keeps sparse layers inside each native grid, one map
+- WTZ Project instead keeps sparse layers inside each native grid, one map
   viewport, explicit per-grid vertical origins, and per-session exclusions in
   normal PVS. It avoids repeated full-map renders, linked-map controller
   networks, and global recursive map overrides while preserving native
@@ -312,13 +358,13 @@ and Monolith commit `b8d0b6d5a69a`, both fetched on 2026-08-10:
   cancelable delayed collapse, an eight-tile tick budget, mapping previews, and
   a networked debug overlay. Its graph nodes must pair `(grid, x, y)` across a
   column of separate map grids.
-- DragonStation carries those proven ideas into native sparse nodes
+- WTZ Project carries those proven ideas into native sparse nodes
   `(x, y, z)`. It does not need map-column discovery or cross-map coordinate
   matching, and its per-grid revision contract discards stale jobs and prevents
   stale collapse timers from firing after concurrent edits. Debug state also
   remains opt-in instead of becoming normal component replication.
 - Crystal Edge is still ahead in collapse presentation: it plays collapse audio
-  and throws recovered tile items onto the lower map. DragonStation deliberately
+  and throws recovered tile items onto the lower map. WTZ Project deliberately
   defers those pieces until sound/effects and falling debris have a correct
   world-Z contract.
 - The inspected [Monolith repository](https://github.com/Monolith-Station/Monolith)
@@ -326,7 +372,7 @@ and Monolith commit `b8d0b6d5a69a`, both fetched on 2026-08-10:
   work, but no port of the ZCollapse/core/support subsystem at that commit.
 
 Decision: do not port either renderer/PVS architecture wholesale. Reuse their
-strong gameplay and presentation ideas through DragonStation's native sparse
+strong gameplay and presentation ideas through WTZ Project's native sparse
 model. Crystal Edge's vertical gameplay is the main reference for phase 6;
 Monolith's transit and frame concepts are the main reference for the moving
 ship/planet stage. Clouds, painter-style depth cues, and cutaways remain useful
@@ -334,15 +380,15 @@ visual references after core lighting behavior is floor-aware.
 
 ### Final Audit Verdict
 
-| Capability | DragonStation | Crystal Edge | Monolith | Verdict |
+| Capability | WTZ Project | Crystal Edge | Monolith | Verdict |
 | --- | --- | --- | --- | --- |
-| World model | Sparse native layers per grid | Linked maps per floor | Linked maps plus transit maps | DragonStation has the smaller, more native state model. |
-| Replication and PVS | Sparse chunks and per-session normal-PVS exclusions | Linked-map overrides | Global linked-map override | DragonStation has the clearest isolation and lifecycle contract. |
-| Moving ships and planets | Explicit world/local Z frame origins and frame-aware docking | Map-network controllers | Mature transit, planet, pilot, and gravity product layer | DragonStation has the stronger coordinate primitive; Monolith has broader product behavior. |
-| Atmosphere and construction | Native sparse cells, boundaries, tools, cables, and power isolation | Broad gameplay integration on linked maps | Partial CE port | DragonStation is ahead in engine-level integration. |
-| Structural collapse | Sparse `(x, y, z)` solver, revisions, stale-job rejection, delayed collapse | Mature time-sliced solver and richer presentation | Not present at the inspected commit | DragonStation is stronger in concurrency safety; Crystal Edge is stronger in presentation. |
+| World model | Sparse native layers per grid | Linked maps per floor | Linked maps plus transit maps | WTZ Project has the smaller, more native state model. |
+| Replication and PVS | Sparse chunks and per-session normal-PVS exclusions | Linked-map overrides | Global linked-map override | WTZ Project has the clearest isolation and lifecycle contract. |
+| Moving ships and planets | Explicit world/local Z frame origins and frame-aware docking | Map-network controllers | Mature transit, planet, pilot, and gravity product layer | WTZ Project has the stronger coordinate primitive; Monolith has broader product behavior. |
+| Atmosphere and construction | Native sparse cells, boundaries, tools, cables, and power isolation | Broad gameplay integration on linked maps | Partial CE port | WTZ Project is ahead in engine-level integration. |
+| Structural collapse | Sparse `(x, y, z)` solver, revisions, stale-job rejection, delayed collapse | Mature time-sliced solver and richer presentation | Not present at the inspected commit | WTZ Project is stronger in concurrency safety; Crystal Edge is stronger in presentation. |
 | Vertical gameplay | Basic traversal, falling, placement, and construction | Mature flight, climbing, roofs, throwing, and weather | CE-derived plus space-oriented systems | Crystal Edge remains the strongest gameplay reference. |
-| Rendering | One native viewport with floor filtering | Repeated viewport passes | Repeated passes, depth scaling, and clouds | DragonStation is cheaper architecturally; Monolith is visually richer today. |
+| Rendering | One native viewport with floor filtering | Repeated viewport passes | Repeated passes, depth scaling, and clouds | WTZ Project is cheaper architecturally; Monolith is visually richer today. |
 
 The project is no longer just a prototype patch. Its engine, replication,
 coordinate-frame, atmosphere, construction, PVS, and structural contracts form
@@ -464,6 +510,8 @@ Goal: make it natural to create, inspect, edit, erase, and save layered spaces.
 Tasks:
 
 - [Done] Add a clear active-Z control to mapping mode.
+- [Done] Add an explicit, versioned Z-level map contract and reject invalid
+  saves before writing YAML.
 - [Done] Ensure tile placement always targets the selected/active Z.
 - [Done] Ensure entity placement stamps the entity to the selected/active Z.
 - [Done] Ensure tile erase targets only the selected/active Z.
@@ -471,14 +519,13 @@ Tasks:
   admin/all-floor mode.
 - [Done] Ensure rectangle erase respects active Z for both tiles and entities.
 - Ensure pick mode chooses active-floor tiles/entities first.
-- Add visual mapping feedback for current Z, below layers, and hidden above
+- [Done] Add visual mapping feedback for the current and immediately adjacent
   layers.
-- [Partial] Add a mapper-safe workflow for copying a floor patch to another Z.
-  Shared map APIs and admin/mapping commands exist and compile; polished mapping
-  UI exposure still needs work.
-- [Partial] Add mapper commands for clearing a Z layer or a bounded region on a
-  Z layer. `zcleartiles` handles bounded regions; full-layer cleanup should
-  either wrap the same API with known bounds or be added as a separate command.
+- [Done] Add a mapper-safe workflow for copying a complete floor, including
+  tiles and serializable entity hierarchies, to another Z.
+- [Done] Add UI operations for creating and deleting complete floors; retain
+  `zcopytiles` and `zcleartiles` for bounded tile-only maintenance.
+- [Done] Expose explicit vertical boundary authoring as a mapper brush.
 - [Done] Validate map save/load of authored non-zero layers in controlled
   fixture maps.
 - [Done] Decide whether the editor's active Z should come from the player entity,
@@ -497,12 +544,45 @@ Tests:
 - [Covered] Saved fixture maps preserve non-zero `zTiles`.
 - [Covered] Loaded fixture maps restore non-zero `zTiles` without allocating
   empty layers.
+- [Covered] Complete floor copy preserves anchored entities and survives a
+  save/load cycle.
+- [Covered] Cable, atmosphere pipe, APC, walls, stairs, and spawn markers retain
+  their effective floor and anchoring through repeated save/load cycles.
+- [Covered] Copying or deleting a floor never copies or deletes an attached
+  actor, and actor Z state is excluded from authored-map validation.
 
 Exit criteria:
 
-- A mapper can build a small two-floor test room using normal tools.
-- The room can be saved, loaded, and edited again.
-- Cross-floor erase/pick accidents are covered by tests.
+- [Covered] A mapper can build a small two-floor test room using normal tools.
+- [Covered] The room can be saved, loaded, and edited again.
+- [Covered] Cross-floor erase/pick accidents are covered by tests.
+
+Mapper workflow:
+
+1. Create or load a pre-map-initialized mapping map. Z-level floor operations
+   deliberately refuse live initialized maps.
+2. Press the Z-level initialize button once. This adds format version 1 with the
+   active floor as the initial range and default floor.
+3. Select a Z value, then create an empty floor or copy an existing floor into
+   it. Copy replaces the target floor's tiles and map-savable entity hierarchy.
+4. Place and erase tiles, entities, decals, cables, pipes, and structures using
+   normal mapping tools; placement and erase are restricted to the active Z.
+5. Choose the default boundary policy, then use the boundary brush for local
+   openings, shafts, grates, or explicit seals. Adjacent preview can be toggled
+   while aligning floors.
+6. Save normally. Validation runs before YAML is written and refuses undeclared
+   layers, unsupported format versions, or non-zero layers on an unmarked map.
+7. Reload and continue editing. The canonical manual fixture is
+   `/Maps/Test/ZLevel/zlevel-mapping-station.yml`.
+
+Round smoke workflow:
+
+1. Run `forcemap ZLevelMappingStation` from the server/admin console.
+2. Restart or start the round normally.
+3. Join as Passenger. The fixture is registered as a cut-down `TestStation`,
+   with Passenger, late-join, and observer spawn points. Its mini gravity
+   generator bypasses APC power only for this laboratory map so the connected
+   field at `z = 0` is immediately available for manual tests.
 
 ### Phase 2: Explicit Vertical Openings
 
