@@ -276,7 +276,11 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
             InvalidateGrid(gridUid);
     }
 
-    private void InvalidateGrid(EntityUid gridUid)
+    /// <summary>
+    /// Invalidates one grid after an external batch edit or diagnostic workload.
+    /// Normal tile and source events call this automatically.
+    /// </summary>
+    public void InvalidateGrid(EntityUid gridUid)
     {
         var removed = _caches.Remove(gridUid);
         var managed = IsManagedGrid(gridUid);

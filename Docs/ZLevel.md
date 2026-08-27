@@ -879,6 +879,23 @@ Useful smoke commands:
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --filter "FullyQualifiedName~ZLevel|FullyQualifiedName~PlacementZLevel" --no-restore
 ```
 
+Deterministic performance baselines:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_baseline.ps1
+```
+
+Use `-NoBuild` after compiling `Content.IntegrationTests`, and
+`-OutputDirectory <path>` to select the snapshot directory. The runner creates
+one schema-versioned JSON document for each 3-, 6-, and 10-floor generated
+fixture. Each document records fixture topology, workload dimensions, elapsed
+time, managed allocations, and the complete warm-up and measured metrics.
+
+The baseline tests use structural assertions only. Compare timings and
+allocations on equivalent machines and configurations; do not treat local Debug
+measurements as portable release thresholds. Current captures and their review
+are recorded in `Docs/ZLevelImplementationLedger.md`.
+
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.
 
