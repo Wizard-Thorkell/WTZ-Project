@@ -4,6 +4,7 @@ using Content.Server.Stack;
 using Content.Shared.Destructible.Thresholds;
 using Content.Shared.Prototypes;
 using Content.Shared.Stacks;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.GameObjects;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Random;
@@ -32,7 +33,9 @@ namespace Content.Server.Destructible.Thresholds.Behaviors
         public void Execute(EntityUid owner, DestructibleSystem system, EntityUid? cause = null)
         {
             var tSys = system.EntityManager.System<TransformSystem>();
+            var zLevels = system.EntityManager.System<SharedZLevelSystem>();
             var position = tSys.GetMapCoordinates(owner);
+            var worldZLevel = zLevels.GetWorldZLevel(owner);
 
             var getRandomVector = () => new Vector2(system.Random.NextFloat(-Offset, Offset), system.Random.NextFloat(-Offset, Offset));
 
@@ -58,6 +61,7 @@ namespace Content.Server.Destructible.Thresholds.Behaviors
                         var spawned = SpawnInContainer
                             ? system.EntityManager.SpawnNextToOrDrop(entityId, owner)
                             : system.EntityManager.SpawnEntity(entityId, position.Offset(getRandomVector()));
+                        zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
                         system.StackSystem.SetCount((spawned, null), count);
 
                         TransferForensics(spawned, system, owner);
@@ -69,6 +73,7 @@ namespace Content.Server.Destructible.Thresholds.Behaviors
                             var spawned = SpawnInContainer
                                 ? system.EntityManager.SpawnNextToOrDrop(entityId, owner)
                                 : system.EntityManager.SpawnEntity(entityId, position.Offset(getRandomVector()));
+                            zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
 
                             TransferForensics(spawned, system, owner);
                         }

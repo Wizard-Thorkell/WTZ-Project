@@ -1,6 +1,7 @@
 ﻿using Content.Server.Explosion.Components;
 using Content.Server.Weapons.Ranged.Systems;
 using Content.Shared.Trigger;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.GameObjects;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
@@ -14,6 +15,7 @@ public sealed class ProjectileGrenadeSystem : EntitySystem
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
     [Dependency] private readonly TransformSystem _transformSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
 
     public override void Initialize()
@@ -60,6 +62,7 @@ public sealed class ProjectileGrenadeSystem : EntitySystem
     private void FragmentIntoProjectiles(EntityUid uid, ProjectileGrenadeComponent component)
     {
         var grenadeCoord = _transformSystem.GetMapCoordinates(uid);
+        var grenadeWorldZLevel = _zLevels.GetWorldZLevel(uid);
         var shootCount = 0;
         var totalCount = component.Container.ContainedEntities.Count + component.UnspawnedCount;
 
@@ -71,6 +74,8 @@ public sealed class ProjectileGrenadeSystem : EntitySystem
 
         while (TrySpawnContents(grenadeCoord, component, out var contentUid))
         {
+            _zLevels.StampWorldZLevelPosition(contentUid, grenadeWorldZLevel);
+
             Angle angle;
             if (component.RandomAngle)
                 angle = _random.NextAngle();

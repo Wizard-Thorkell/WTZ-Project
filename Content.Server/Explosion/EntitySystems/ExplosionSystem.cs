@@ -67,6 +67,7 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
     [Dependency] private readonly SharedZLevelMetricsSystem _zLevelMetrics = default!;
 
     private readonly ZLevelTraceBuffer _explosionTraceBuffer = new();
+    private readonly HashSet<int> _cameraShakeWorldLevels = new();
 
     private EntityQuery<FlammableComponent> _flammableQuery;
     private EntityQuery<PhysicsComponent> _physicsQuery;
@@ -449,7 +450,13 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
             iterationIntensity);
 
         // camera shake
-        CameraShake(iterationIntensity.Count * 4f, pos, queued.TotalIntensity);
+        CameraShake(
+            iterationIntensity.Count * 4f,
+            pos,
+            queued.TotalIntensity,
+            worldZ,
+            spaceData,
+            gridData);
 
         //For whatever bloody reason, sound system requires ENTITY coordinates.
         var mapEntityCoords = _transformSystem.ToCoordinates(_map.GetMap(pos.MapId), pos);
@@ -502,17 +509,46 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
             _tileHistoryQuery);
     }
 
-    private void CameraShake(float range, MapCoordinates epicenter, float totalIntensity)
+    private void CameraShake(
+        float range,
+        MapCoordinates epicenter,
+        float totalIntensity,
+        int epicenterWorldZ,
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData,
+        Dictionary<ExplosionGridLayer, ExplosionGridTileFlood> gridData)
     {
+        _cameraShakeWorldLevels.Clear();
+        _cameraShakeWorldLevels.Add(epicenterWorldZ);
+        foreach (var worldZ in spaceData.Keys)
+        {
+            _cameraShakeWorldLevels.Add(worldZ);
+        }
+
+        foreach (var layer in gridData.Keys)
+        {
+            _cameraShakeWorldLevels.Add(
+                _transformSystem.LocalToWorldZLevel(layer.GridUid, layer.LocalZ));
+        }
+
         var players = Filter.Empty();
         players.AddInRange(epicenter, range, _playerManager, EntityManager);
+        var candidates = 0;
+        var applied = 0;
+        var rejectedWorldZ = 0;
 
         foreach (var player in players.Recipients)
         {
             if (player.AttachedEntity is not EntityUid uid)
                 continue;
 
-            var playerPos = _transformSystem.GetWorldPosition(player.AttachedEntity!.Value);
+            candidates++;
+            if (!_cameraShakeWorldLevels.Contains(_zLevel.GetWorldZLevel(uid)))
+            {
+                rejectedWorldZ++;
+                continue;
+            }
+
+            var playerPos = _transformSystem.GetWorldPosition(uid);
             var delta = epicenter.Position - playerPos;
 
             if (delta.EqualsApprox(Vector2.Zero))
@@ -521,7 +557,12 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
             var distance = delta.Length();
             var effect = 5 * MathF.Pow(totalIntensity, 0.5f) * (1 - distance / range);
             if (effect > 0.01f)
+            {
                 _recoilSystem.KickCamera(uid, -delta.Normalized() * effect);
+                applied++;
+            }
         }
+
+        _zLevelMetrics.RecordExplosionCameraShake(candidates, applied, rejectedWorldZ);
     }
 }

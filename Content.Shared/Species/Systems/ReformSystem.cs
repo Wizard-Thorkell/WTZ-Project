@@ -4,6 +4,7 @@ using Content.Shared.DoAfter;
 using Content.Shared.Popups;
 using Content.Shared.Stunnable;
 using Content.Shared.Mind;
+using Content.Shared.ZLevel.Systems;
 using Content.Shared.Zombies;
 using Robust.Shared.Network;
 using Robust.Shared.Prototypes;
@@ -22,6 +23,7 @@ public sealed partial class ReformSystem : EntitySystem
     [Dependency] private readonly SharedStunSystem _stunSystem = default!;
     [Dependency] private readonly IGameTiming _gameTiming = default!;
     [Dependency] private readonly SharedMindSystem _mindSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -91,6 +93,7 @@ public sealed partial class ReformSystem : EntitySystem
         // Spawn a new entity
         // This is, to an extent, taken from polymorph. I don't use polymorph for various reasons- most notably that this is permanent.
         var child = SpawnNextToOrDrop(comp.ReformPrototype, uid);
+        _zLevels.StampWorldZLevelPosition(child, _zLevels.GetWorldZLevel(uid));
 
         // This transfers the mind to the new entity
         if (_mindSystem.TryGetMind(uid, out var mindId, out var mind))

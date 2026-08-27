@@ -21,6 +21,7 @@ using Content.Shared.Popups;
 using Content.Shared.Random.Helpers;
 using Content.Shared.Throwing;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Serialization;
@@ -46,6 +47,7 @@ public sealed class SharedKitchenSpikeSystem : EntitySystem
     [Dependency] private readonly SharedDoAfterSystem _doAfterSystem = default!;
     [Dependency] private readonly SharedInteractionSystem _interaction = default!;
     [Dependency] private readonly SharedPopupSystem _popupSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -295,6 +297,7 @@ public sealed class SharedKitchenSpikeSystem : EntitySystem
         var entry = butcherable.SpawnedEntities[index];
 
         var uid = PredictedSpawnNextToOrDrop(entry.PrototypeId, ent);
+        _zLevels.StampWorldZLevelPosition(uid, _zLevels.GetWorldZLevel(ent));
         _metaDataSystem.SetEntityName(uid,
             Loc.GetString("comp-kitchen-spike-meat-name",
                 ("name", Name(uid)),

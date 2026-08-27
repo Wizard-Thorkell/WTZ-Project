@@ -83,6 +83,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _explosionVerticalRejected;
     private long _explosionAreaBudgetExhaustions;
     private long _explosionIterationBudgetExhaustions;
+    private long _explosionCameraShakeCandidates;
+    private long _explosionCameraShakesApplied;
+    private long _explosionCameraShakesWorldZRejected;
     private long _explosionTopologyTimestampTicks;
     private long _explosionLastTopologyTimestampTicks;
     private long _explosionMaxTopologyTimestampTicks;
@@ -316,6 +319,13 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             elapsedTimestampTicks);
     }
 
+    public void RecordExplosionCameraShake(int candidates, int applied, int worldZRejected)
+    {
+        _explosionCameraShakeCandidates += candidates;
+        _explosionCameraShakesApplied += applied;
+        _explosionCameraShakesWorldZRejected += worldZRejected;
+    }
+
     public void RecordAtmosOverlayUpdate(
         int invalidatedTiles,
         int invalidatedUpperTiles,
@@ -402,6 +412,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _explosionVerticalRejected,
             _explosionAreaBudgetExhaustions,
             _explosionIterationBudgetExhaustions,
+            _explosionCameraShakeCandidates,
+            _explosionCameraShakesApplied,
+            _explosionCameraShakesWorldZRejected,
             TimestampTicksToMilliseconds(_explosionTopologyTimestampTicks),
             TimestampTicksToMilliseconds(_explosionLastTopologyTimestampTicks),
             TimestampTicksToMilliseconds(_explosionMaxTopologyTimestampTicks),
@@ -483,6 +496,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _explosionVerticalRejected = 0;
         _explosionAreaBudgetExhaustions = 0;
         _explosionIterationBudgetExhaustions = 0;
+        _explosionCameraShakeCandidates = 0;
+        _explosionCameraShakesApplied = 0;
+        _explosionCameraShakesWorldZRejected = 0;
         _explosionTopologyTimestampTicks = 0;
         _explosionLastTopologyTimestampTicks = 0;
         _explosionMaxTopologyTimestampTicks = 0;
@@ -569,6 +585,9 @@ public readonly record struct ZLevelMetricsSnapshot(
     long ExplosionVerticalRejected,
     long ExplosionAreaBudgetExhaustions,
     long ExplosionIterationBudgetExhaustions,
+    long ExplosionCameraShakeCandidates,
+    long ExplosionCameraShakesApplied,
+    long ExplosionCameraShakesWorldZRejected,
     double ExplosionTopologyMilliseconds,
     double ExplosionLastTopologyMilliseconds,
     double ExplosionMaxTopologyMilliseconds,

@@ -9,6 +9,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Random;
 using System.Numerics;
 using Content.Shared.Explosion.EntitySystems;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Server.Explosion.EntitySystems;
 
@@ -19,6 +20,7 @@ public sealed class ScatteringGrenadeSystem : SharedScatteringGrenadeSystem
     [Dependency] private readonly ThrowingSystem _throwingSystem = default!;
     [Dependency] private readonly TransformSystem _transformSystem = default!;
     [Dependency] private readonly TriggerSystem _trigger = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -58,12 +60,15 @@ public sealed class ScatteringGrenadeSystem : SharedScatteringGrenadeSystem
             if (component.IsTriggered && totalCount > 0)
             {
                 var grenadeCoord = _transformSystem.GetMapCoordinates(uid);
+                var grenadeWorldZLevel = _zLevels.GetWorldZLevel(uid);
                 var thrownCount = 0;
                 var segmentAngle = 360 / totalCount;
                 var additionalIntervalDelay = 0f;
 
                 while (TrySpawnContents(grenadeCoord, component, out var contentUid))
                 {
+                    _zLevels.StampWorldZLevelPosition(contentUid, grenadeWorldZLevel);
+
                     Angle angle;
                     if (component.RandomAngle)
                         angle = _random.NextAngle();

@@ -10,6 +10,7 @@ using Content.Shared.Movement.Systems;
 using Content.Shared.Projectiles;
 using Content.Shared.Throwing;
 using Content.Shared.ZLevel;
+using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -30,6 +31,7 @@ public sealed class SharedZLevelSystem : VirtualController
 {
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedContainerSystem _containers = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly SharedZLevelGravitySystem _zLevelGravity = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
@@ -262,11 +264,19 @@ public sealed class SharedZLevelSystem : VirtualController
     /// <summary>
     /// Stamps a world-space Z position onto an entity using its current grid's local frame.
     /// Local layer zero without an offset keeps the canonical component-free representation.
+    /// Contained entities instead clear explicit state and inherit their holder's floor.
     /// </summary>
     public bool StampWorldZLevelPosition(EntityUid uid, int worldZLevel, float localOffset = 0f)
     {
         if (!_transformQuery.TryComp(uid, out var transform))
             return false;
+
+        // Contained entities follow their holder's floor and are stamped when released.
+        if (_containers.IsEntityInContainer(uid))
+        {
+            ClearZLevelPosition(uid);
+            return true;
+        }
 
         var localZLevel = worldZLevel - _transform.GetZLevelFrameOrigin((uid, transform));
 

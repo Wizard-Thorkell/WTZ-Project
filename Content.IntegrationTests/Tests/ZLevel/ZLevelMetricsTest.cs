@@ -75,6 +75,7 @@ public sealed class ZLevelMetricsTest : GameTest
                 areaBudgetExhausted: true,
                 iterationBudgetExhausted: false,
                 elapsedTimestampTicks: 0);
+            metrics.RecordExplosionCameraShake(candidates: 5, applied: 3, worldZRejected: 2);
             var explosionSnapshot = metrics.Snapshot();
             Assert.Multiple(() =>
             {
@@ -88,6 +89,9 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(explosionSnapshot.ExplosionVerticalRejected, Is.EqualTo(1));
                 Assert.That(explosionSnapshot.ExplosionAreaBudgetExhaustions, Is.EqualTo(1));
                 Assert.That(explosionSnapshot.ExplosionIterationBudgetExhaustions, Is.Zero);
+                Assert.That(explosionSnapshot.ExplosionCameraShakeCandidates, Is.EqualTo(5));
+                Assert.That(explosionSnapshot.ExplosionCameraShakesApplied, Is.EqualTo(3));
+                Assert.That(explosionSnapshot.ExplosionCameraShakesWorldZRejected, Is.EqualTo(2));
             });
 
             metrics.ResetCounters();
@@ -119,6 +123,9 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.ExplosionVerticalRejected, Is.Zero);
                 Assert.That(resetSnapshot.ExplosionAreaBudgetExhaustions, Is.Zero);
                 Assert.That(resetSnapshot.ExplosionIterationBudgetExhaustions, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionCameraShakeCandidates, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionCameraShakesApplied, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionCameraShakesWorldZRejected, Is.Zero);
                 Assert.That(resetSnapshot.ExplosionTopologyMilliseconds, Is.Zero);
                 Assert.That(resetSnapshot.ExplosionLastTopologyMilliseconds, Is.Zero);
                 Assert.That(resetSnapshot.ExplosionMaxTopologyMilliseconds, Is.Zero);

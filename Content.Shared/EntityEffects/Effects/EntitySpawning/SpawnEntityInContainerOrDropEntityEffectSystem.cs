@@ -1,6 +1,8 @@
 ﻿using Robust.Shared.Containers;
 using Robust.Shared.Network;
 
+using Content.Shared.ZLevel.Systems;
+
 namespace Content.Shared.EntityEffects.Effects.EntitySpawning;
 
 /// <summary>
@@ -12,12 +14,14 @@ namespace Content.Shared.EntityEffects.Effects.EntitySpawning;
 public sealed partial class SpawnEntityInContainerOrDropEntityEffectSystem : EntityEffectSystem<ContainerManagerComponent, SpawnEntityInContainerOrDrop>
 {
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     protected override void Effect(Entity<ContainerManagerComponent> entity, ref EntityEffectEvent<SpawnEntityInContainerOrDrop> args)
     {
         var quantity = args.Effect.Number * (int)Math.Floor(args.Scale);
         var proto = args.Effect.Entity;
         var container = args.Effect.ContainerName;
+        var worldZLevel = _zLevels.GetWorldZLevel(entity);
 
         var xform = Transform(entity);
 
@@ -25,14 +29,16 @@ public sealed partial class SpawnEntityInContainerOrDropEntityEffectSystem : Ent
         {
             for (var i = 0; i < quantity; i++)
             {
-                PredictedSpawnInContainerOrDrop(proto, entity, container, xform, entity.Comp);
+                var spawned = PredictedSpawnInContainerOrDrop(proto, entity, container, xform, entity.Comp);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
             }
         }
         else if (_net.IsServer)
         {
             for (var i = 0; i < quantity; i++)
             {
-                SpawnInContainerOrDrop(proto, entity, container, xform, entity.Comp);
+                var spawned = SpawnInContainerOrDrop(proto, entity, container, xform, entity.Comp);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
             }
         }
     }

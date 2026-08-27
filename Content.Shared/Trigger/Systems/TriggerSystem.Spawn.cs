@@ -68,13 +68,21 @@ public sealed partial class TriggerSystem
     /// <param name="predicted">Whether to use predicted spawning.</param>
     private void SpawnTriggerHelper(Entity<TransformComponent> target, EntProtoId proto, bool useMapCoords, bool predicted)
     {
+        var worldZLevel = _zLevels.GetWorldZLevel(target);
+
         if (useMapCoords)
         {
             var mapCoords = _transform.GetMapCoordinates(target);
             if (predicted)
-                EntityManager.PredictedSpawn(proto, mapCoords);
+            {
+                var spawned = EntityManager.PredictedSpawn(proto, mapCoords);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
+            }
             else if (_net.IsServer)
-                Spawn(proto, mapCoords);
+            {
+                var spawned = Spawn(proto, mapCoords);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
+            }
         }
 
         else
@@ -84,9 +92,15 @@ public sealed partial class TriggerSystem
                 return;
 
             if (predicted)
-                PredictedSpawnAttachedTo(proto, coords);
+            {
+                var spawned = PredictedSpawnAttachedTo(proto, coords);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
+            }
             else if (_net.IsServer)
-                SpawnAttachedTo(proto, coords);
+            {
+                var spawned = SpawnAttachedTo(proto, coords);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
+            }
         }
     }
 

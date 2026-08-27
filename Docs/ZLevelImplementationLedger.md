@@ -8,8 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/generated-effects`.
-- Active package: `P2.3c2 generated entity/effect placement and cross-floor
-  camera-shake authority`.
+- Active package: `P2.4 central direct and remote interaction validation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -809,7 +808,7 @@ treated as Debug-run noise.
 | --- | --- | --- |
 | P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
 | P2.2 | Physical projectiles and thrown-entity traversal | Complete |
-| P2.3 | Explosions, fire, heat, and generated effects | In progress |
+| P2.3 | Explosions, fire, heat, and generated effects | Complete |
 | P2.4 | Central direct and remote interaction validation | Pending |
 
 P2.2 is split into independently gated subpackages:
@@ -826,7 +825,7 @@ presentation can each pass the completion gate independently:
 | --- | --- | --- |
 | P2.3a | Authoritative per-floor explosion topology and blast processing | Complete |
 | P2.3b | Z-aware fire and atmospheric heat propagation | Complete |
-| P2.3c | Generated effect placement and cross-floor presentation hardening | In progress |
+| P2.3c | Generated effect placement and cross-floor presentation hardening | Complete |
 
 P2.3c is split so persistent layered presentation and transient entity effects
 remain independently reviewable:
@@ -834,7 +833,139 @@ remain independently reviewable:
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P2.3c1 | Persistent decals, mapping operations, serialization, and rendering by floor | Complete |
-| P2.3c2 | Generated entity/effect stamping and floor-authoritative camera shake | Pending |
+| P2.3c2 | Generated entity/effect stamping and floor-authoritative camera shake | Complete |
+
+## Completed Package: P2.3c2 Generated Entity And Effect Floor Authority
+
+### Scope
+
+- Capture source world Z before destruction, despawn, grenade content removal,
+  or other lifecycle changes can erase the authoritative floor.
+- Stamp destruction debris, construction outputs, stack splits, despawn
+  replacements, entity effects, trigger and spawn-table results, butcher and
+  refinement outputs, reform entities, AI debug spawns, and grenade payloads.
+- Make `StampWorldZLevelPosition` preserve container inheritance: contained
+  entities clear explicit floor state and follow their holder, while entities
+  dropped onto a grid or map receive the requested world floor.
+- Filter explosion camera-shake recipients by the world floors actually reached
+  by authoritative grid and space topology, without changing sound behavior.
+- Record camera-shake candidates, applications, and world-Z rejections in shared
+  metrics and expose them through `zlevelmetrics`.
+
+### Acceptance Criteria
+
+- Every covered generated entity remains on source world Z across a frame whose
+  local layer one maps to world Z six.
+- Source floor is captured before source deletion or payload removal and applied
+  before a grenade payload is thrown or fired.
+- Predicted and server spawn paths, attached and map-coordinate triggers, entity
+  tables, stack splits, and container fallback all preserve the same authority.
+- Contained results have no stale explicit floor, follow their container after a
+  floor change, and gain explicit floor state only if spawning falls back to the
+  map.
+- A closed explosion boundary rejects an overlapping upper-floor camera
+  recipient; opening only the `Explosion` channel makes that same recipient
+  eligible without moving it.
+- Z 0 remains component-free where possible, moving frame origins use world/local
+  conversion, and server topology remains authoritative.
+
+### Explicit Deferrals
+
+- P2.4 owns central direct, tool, alternate-click, pull, and remote interaction
+  validation; this package does not add interaction policy to spawn systems.
+- P4 owns vertical sound propagation. Explosion audio is intentionally unchanged.
+- P8 owns exhaustive production-content auditing of rare raw spawn paths, live
+  camera feel, and high-player-count profiling beyond the covered shared helpers
+  and known generated-output consumers.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to generated-entity floor authority,
+      container inheritance, camera-shake filtering, metrics, tests, and this
+      ledger.
+- [x] Invariant review: Z 0, local/world conversion, frame origin five, moving
+      frames, source deletion, container inheritance, prediction, server
+      authority, and independent boundary channels were reviewed.
+- [x] Automated verification: 10/10 dedicated package tests, 132/132 focused
+      Z-level integration tests, 2/2 structural unit tests, and 3/3 generated
+      stress baselines passed with no skips.
+- [x] Performance evidence: generated placement remains event-driven; camera
+      filtering reuses one retained `HashSet<int>`; the 3/6/10-floor measured
+      workloads each allocate 6,336 bytes with 100% warm cache hits and zero
+      evictions.
+- [x] Documentation: covered producers, container behavior, topology authority,
+      metrics, tests, limitations, and the P2.4 handoff are recorded here.
+- [x] Dependency check: `RobustToolbox` is clean at
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea`; no WTZ Engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices; generated baseline and diagnostic artifacts remain ignored.
+- [x] Mini review: findings and residual risks are recorded below.
+- [x] Commit: package prepared as the isolated `Keep generated effects on their
+      Z levels` commit on `zlevel/generated-effects`; remote verification follows
+      the package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed with
+  zero errors. Its 713 warnings are existing dependency, analyzer, vulnerability,
+  and upstream obsolescence warnings.
+- Dedicated coverage passes 10/10: seven generated-entity cases, one
+  topology-authoritative camera-shake case, and two metric cases.
+- Generated-entity tests cover destruction, timed despawn, predicted and server
+  entity effects, inserted and dropped container results, stack splitting,
+  direct and table triggers, and scattering/projectile grenade payloads.
+- The final focused Z-level integration matrix passes 132/132 with no skips;
+  structural unit tests pass 2/2 and generated stress fixtures pass 3/3.
+- Final local Debug stress measurements retained the fixed allocation profile:
+
+| Floors | Measured ms | Measured allocations | Boundary hit rate | Evictions |
+| ---: | ---: | ---: | ---: | ---: |
+| 3 | 8.096 | 6,336 B | 100% | 0 |
+| 6 | 13.509 | 6,336 B | 100% | 0 |
+| 10 | 24.611 | 6,336 B | 100% | 0 |
+
+These timings are comparison evidence rather than release thresholds. The
+fixture does not generate package effects, so it proves absence of unrelated
+steady-state overhead rather than spawn throughput.
+
+### Decisions
+
+- Resolve and store source world Z before destructive lifecycle operations, then
+  convert against the spawned entity's current frame only after its final parent
+  or map attachment is known.
+- Treat containment as vertical inheritance. A contained entity cannot occupy an
+  independent physical floor; release paths already stamp the holder's current
+  world Z when returning it to the map.
+- Keep spawn authority in Content rather than intercepting generic engine spawn
+  APIs. This avoids a Content dependency in WTZ Engine and leaves deliberately
+  cross-floor producers free to express their own destination.
+- Derive camera eligibility from the explosion's reached grid/space layer sets.
+  Preserve vanilla planar range and recoil magnitude once a floor is eligible.
+- Keep audio untouched until P4 can model attenuation and portal traversal as a
+  dedicated sound concern.
+
+### Mini Review
+
+- Finding: the direct helper audit closed every `SpawnNextToOrDrop` and
+  `SpawnInContainerOrDrop` consumer found in Content; the existing sharp/butcher
+  path was already floor-aware and now benefits from container-safe stamping.
+- Finding: the review caught ordering in shared stack splitting and moved source
+  world-Z capture before count mutation.
+- Finding: the first container test exposed that blindly stamping an inserted
+  entity would freeze it on its old floor. Central container inheritance now
+  protects both new and existing stamp callers.
+- Finding: opening only an explosion boundary changes the same upper-floor player
+  from rejected to accepted, proving that camera authority follows topology rather
+  than a hard-coded floor comparison.
+- Residual risk: camera shake is authorized per reached floor and retains vanilla
+  2D range; it does not model room-level attenuation or structural vibration.
+- Residual risk: raw specialized `Spawn` calls outside the audited generated
+  output families may still require migration as their owning subsystem enters
+  later roadmap phases.
+- Next package: P2.4 will centralize server-side direct and remote interaction
+  validation, beginning with a request-path inventory and explicit same-floor,
+  boundary, and exception contracts.
 
 ## Completed Package: P2.3c1 Persistent Layered Decals
 
@@ -1629,3 +1760,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.3a | `Make explosions Z-level authoritative` | 14 explosion, 9 prototype, 120 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.3b | `Make fire and atmosphere overlays Z-aware` | 12 atmosphere, 14 explosion, 120 integration, 9 prototype, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.3c1 | `Layer decals across Z levels` | 4 decal, 5 map format, 109 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.3c2 | `Keep generated effects on their Z levels` | 10 package, 132 integration, 2 unit, 3 baseline, full build, diff check | Complete |

@@ -8,6 +8,7 @@ using Content.Shared.Nutrition.Prototypes;
 using Content.Shared.Popups;
 using Content.Shared.Storage.Components;
 using Content.Shared.Tag;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Random;
 
@@ -24,6 +25,7 @@ public sealed class FoodSequenceSystem : SharedFoodSequenceSystem
     [Dependency] private readonly SharedSolutionContainerSystem _solutionContainer = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly TagSystem _tag = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -86,6 +88,7 @@ public sealed class FoodSequenceSystem : SharedFoodSequenceSystem
     private void Metamorf(Entity<FoodSequenceStartPointComponent> start, MetamorphRecipePrototype recipe)
     {
         var result = PredictedSpawnNextToOrDrop(recipe.Result, start);
+        _zLevels.StampWorldZLevelPosition(result, _zLevels.GetWorldZLevel(start));
 
         //Try putting in container
         _transform.DropNextTo(result, (start, Transform(start)));

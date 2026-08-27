@@ -2,6 +2,7 @@ using Content.Shared.Construction;
 using Content.Shared.Interaction;
 using Content.Shared.Storage;
 using Content.Shared.Tools.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Network;
 using Robust.Shared.Random;
 
@@ -12,6 +13,7 @@ public sealed class ToolRefinablSystem : EntitySystem
     [Dependency] private readonly INetManager _net = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly SharedToolSystem _toolSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -45,9 +47,11 @@ public sealed class ToolRefinablSystem : EntitySystem
 
         var xform = Transform(uid);
         var spawns = EntitySpawnCollection.GetSpawns(component.RefineResult, _random);
+        var worldZLevel = _zLevels.GetWorldZLevel(uid);
         foreach (var spawn in spawns)
         {
-            SpawnNextToOrDrop(spawn, uid, xform);
+            var spawned = SpawnNextToOrDrop(spawn, uid, xform);
+            _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
         }
 
         Del(uid);

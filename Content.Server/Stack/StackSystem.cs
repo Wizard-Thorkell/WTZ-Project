@@ -31,6 +31,8 @@ namespace Content.Server.Stack
             if (!Resolve(ent.Owner, ref ent.Comp))
                 return null;
 
+            var worldZLevel = ZLevels.GetWorldZLevel(ent.Owner);
+
             // Try to remove the amount of things we want to split from the original stack...
             if (!TryUse(ent, amount))
                 return null;
@@ -40,6 +42,7 @@ namespace Content.Server.Stack
 
             // Set the output parameter in the event instance to the newly split stack.
             var newEntity = SpawnAtPosition(stackType.Spawn, spawnPosition);
+            ZLevels.StampWorldZLevelPosition(newEntity, worldZLevel);
 
             // There should always be a StackComponent
             var stackComp = Comp<StackComponent>(newEntity);
@@ -159,6 +162,7 @@ namespace Content.Server.Stack
         public EntityUid SpawnNextToOrDrop(int amount, StackPrototype prototype, EntityUid source)
         {
             var entity = SpawnNextToOrDrop(prototype.Spawn, source); // The real SpawnNextToOrDrop
+            ZLevels.StampWorldZLevelPosition(entity, ZLevels.GetWorldZLevel(source));
             SetCount((entity, null), amount);
             return entity;
         }
@@ -184,9 +188,11 @@ namespace Content.Server.Stack
             }
 
             var spawnedEnts = new List<EntityUid>();
+            var worldZLevel = ZLevels.GetWorldZLevel(target);
             foreach (var count in amounts)
             {
                 var entity = SpawnNextToOrDrop(entityPrototype, target); // The real SpawnNextToOrDrop
+                ZLevels.StampWorldZLevelPosition(entity, worldZLevel);
                 spawnedEnts.Add(entity);
                 if (TryComp<StackComponent>(entity, out var stackComp)) // prevent errors from the Resolve
                     SetCount((entity, stackComp), count);

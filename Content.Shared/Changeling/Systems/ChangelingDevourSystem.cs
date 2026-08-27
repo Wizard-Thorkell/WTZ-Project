@@ -14,6 +14,7 @@ using Content.Shared.Nutrition.Components;
 using Content.Shared.Popups;
 using Content.Shared.Storage;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Network;
 using Robust.Shared.Random;
@@ -34,6 +35,7 @@ public sealed class ChangelingDevourSystem : EntitySystem
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly ISharedAdminLogManager _adminLogger = default!;
     [Dependency] private readonly IRobustRandom _robustRandom = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -275,11 +277,13 @@ public sealed class ChangelingDevourSystem : EntitySystem
     private void RipClothing(EntityUid victim, Entity<ButcherableComponent> item)
     {
         var spawnEntities = EntitySpawnCollection.GetSpawns(item.Comp.SpawnedEntities, _robustRandom);
+        var worldZLevel = _zLevels.GetWorldZLevel(victim);
 
         foreach (var proto in spawnEntities)
         {
             // TODO: once predictedRandom is in, make this a Coordinate offset of 0.25f from the victims position
-            PredictedSpawnNextToOrDrop(proto, victim);
+            var spawned = PredictedSpawnNextToOrDrop(proto, victim);
+            _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
         }
 
         PredictedQueueDel(item.Owner);

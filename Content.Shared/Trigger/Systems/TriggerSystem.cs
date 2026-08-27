@@ -9,6 +9,7 @@ using Content.Shared.Roles;
 using Content.Shared.Timing;
 using Content.Shared.Trigger.Components;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Network;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Timing;
@@ -44,6 +45,7 @@ public sealed partial class TriggerSystem : EntitySystem
     [Dependency] private readonly SharedRoleSystem _role = default!;
     [Dependency] private readonly SharedMindSystem _mind = default!;
     [Dependency] private readonly EntityTableSystem _entityTable = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public const string DefaultTriggerKey = "trigger";
 

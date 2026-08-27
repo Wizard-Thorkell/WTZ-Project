@@ -108,6 +108,10 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"iterations={metrics.ExplosionIterationBudgetExhaustions}, " +
             $"limits={explosion.MaxArea} tiles/{explosion.MaxIterations} iterations");
         shell.WriteLine(
+            $"  explosion camera shake: candidates={metrics.ExplosionCameraShakeCandidates}, " +
+            $"applied={metrics.ExplosionCameraShakesApplied}, " +
+            $"world-z-rejected={metrics.ExplosionCameraShakesWorldZRejected}");
+        shell.WriteLine(
             $"  atmos overlay: updates={metrics.AtmosOverlayUpdates}, " +
             $"tiles={metrics.AtmosOverlayInvalidatedTiles}, " +
             $"upper-tiles={metrics.AtmosOverlayInvalidatedUpperTiles}, " +

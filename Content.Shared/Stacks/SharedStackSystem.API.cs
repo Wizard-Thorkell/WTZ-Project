@@ -24,9 +24,12 @@ public abstract partial class SharedStackSystem
             || stackEnt.Comp.Count == 1) // If it's at one, just use this
             return stackEnt.Owner;
 
-        ReduceCount(stackEnt, 1);
         var stackId = _prototype.Index(stackEnt.Comp.StackTypeId);
-        return PredictedSpawnNextToOrDrop(stackId.Spawn, stackEnt.Owner);
+        var worldZLevel = ZLevels.GetWorldZLevel(stackEnt.Owner);
+        ReduceCount(stackEnt, 1);
+        var spawned = PredictedSpawnNextToOrDrop(stackId.Spawn, stackEnt.Owner);
+        ZLevels.StampWorldZLevelPosition(spawned, worldZLevel);
+        return spawned;
     }
 
     #endregion

@@ -1,5 +1,7 @@
 ﻿using Robust.Shared.Network;
 
+using Content.Shared.ZLevel.Systems;
+
 namespace Content.Shared.EntityEffects.Effects.EntitySpawning;
 
 /// <summary>
@@ -10,24 +12,28 @@ namespace Content.Shared.EntityEffects.Effects.EntitySpawning;
 public sealed partial class SpawnEntityEntityEffectSystem : EntityEffectSystem<TransformComponent, SpawnEntity>
 {
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     protected override void Effect(Entity<TransformComponent> entity, ref EntityEffectEvent<SpawnEntity> args)
     {
         var quantity = args.Effect.Number * (int)Math.Floor(args.Scale);
         var proto = args.Effect.Entity;
+        var worldZLevel = _zLevels.GetWorldZLevel(entity);
 
         if (args.Effect.Predicted)
         {
             for (var i = 0; i < quantity; i++)
             {
-                PredictedSpawnNextToOrDrop(proto, entity, entity.Comp);
+                var spawned = PredictedSpawnNextToOrDrop(proto, entity, entity.Comp);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
             }
         }
         else if (_net.IsServer)
         {
             for (var i = 0; i < quantity; i++)
             {
-                SpawnNextToOrDrop(proto, entity, entity.Comp);
+                var spawned = SpawnNextToOrDrop(proto, entity, entity.Comp);
+                _zLevels.StampWorldZLevelPosition(spawned, worldZLevel);
             }
         }
     }

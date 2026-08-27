@@ -23,6 +23,7 @@ using Content.Shared.Power.EntitySystems;
 using Content.Shared.Repairable;
 using Content.Shared.StationAi;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
@@ -64,6 +65,7 @@ public abstract partial class SharedStationAiSystem : EntitySystem
     [Dependency] private readonly StationAiVisionSystem _vision = default!;
     [Dependency] private readonly IPrototypeManager _protoManager = default!;
     [Dependency] private readonly MobStateSystem _mobState = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     // StationAiHeld is added to anything inside of an AI core.
     // StationAiHolder indicates it can hold an AI positronic brain (e.g. holocard / core).
@@ -128,6 +130,7 @@ public abstract partial class SharedStationAiSystem : EntitySystem
                     if (_net.IsClient)
                         return;
                     var brain = SpawnInContainerOrDrop(DefaultAi, ent.Owner, StationAiCoreComponent.Container);
+                    _zLevels.StampWorldZLevelPosition(brain, _zLevels.GetWorldZLevel(ent));
                     _mind.ControlMob(user, brain);
                 },
                 Impact = LogImpact.High,
