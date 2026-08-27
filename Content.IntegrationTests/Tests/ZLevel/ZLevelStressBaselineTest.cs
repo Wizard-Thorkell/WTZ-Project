@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.Server.ZLevel.Systems;
+using Content.Shared.CCVar;
 using Content.Shared.Gravity;
 using Content.Shared.Maps;
 using Content.Shared.ZLevel.Systems;
@@ -57,6 +58,18 @@ public sealed class ZLevelStressBaselineTest : GameTest
     public async Task GeneratedFixtureProducesMachineReadableBaseline(int floorCount)
     {
         await OverrideCVar(Side.Server, CVars.NetPVS, true);
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelBoundaryCacheCapacity,
+            SharedZLevelBoundarySystem.DefaultBoundaryCacheCapacity);
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelVisibilityMaxLevelDistance,
+            SharedZLevelVisibilitySystem.DefaultMaxVisibleLevelDistance);
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelPvsVisibilityCheckBudget,
+            ZLevelPvsSystem.DefaultVisibilityCheckBudget);
         var testMap = await Pair.CreateTestMap(initialized: false);
         ZLevelStressBaseline? baseline = null;
         ZLevelStressFixture? fixture = null;
@@ -123,12 +136,19 @@ public sealed class ZLevelStressBaselineTest : GameTest
                 PrepareColdRun(SEntMan, stressFixture);
                 var warmup = CaptureRun(SEntMan, session, stressFixture, WarmupIterations, moveGrid: false);
                 var measured = CaptureRun(SEntMan, session, stressFixture, MeasuredIterations, moveGrid: true);
+                var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+                var visibility = SEntMan.System<SharedZLevelVisibilitySystem>();
+                var pvs = SEntMan.System<ZLevelPvsSystem>();
 
-                AssertRunCoverage(stressFixture, warmup, measured);
+                AssertRunCoverage(stressFixture, boundaries.BoundaryCacheCapacity, warmup, measured);
                 Assert.That(transform.GetWorldPosition(stressFixture.MovingGridUid), Is.Not.EqualTo(movingGridStart));
 
                 baseline = new ZLevelStressBaseline(
-                    1,
+                    2,
+                    new ZLevelStressBudgetSnapshot(
+                        boundaries.BoundaryCacheCapacity,
+                        visibility.MaxVisibleLevelDistance,
+                        pvs.VisibilityCheckBudget),
                     CreateFixtureSnapshot(stressFixture),
                     new ZLevelStressWorkloadSnapshot(
                         WarmupIterations,
@@ -295,6 +315,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
 
     private static void AssertRunCoverage(
         ZLevelStressFixture fixture,
+        int boundaryCacheCapacity,
         ZLevelStressRunSnapshot warmup,
         ZLevelStressRunSnapshot measured)
     {
@@ -318,6 +339,9 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(warmupMetrics.PvsCandidates, Is.GreaterThanOrEqualTo(fixture.CandidateEntities.Count));
             Assert.That(warmupMetrics.PvsVisible + warmupMetrics.PvsCulled,
                 Is.EqualTo(warmupMetrics.PvsCandidates));
+            Assert.That(warmupMetrics.PvsVisibilityChecks, Is.GreaterThan(0));
+            Assert.That(warmupMetrics.PvsBudgetExhaustions, Is.Zero);
+            Assert.That(warmupMetrics.PvsFailOpenCandidates, Is.Zero);
 
             Assert.That(measured.ElapsedMilliseconds, Is.GreaterThanOrEqualTo(0d));
             Assert.That(measured.AllocatedBytes, Is.GreaterThanOrEqualTo(0));
@@ -329,13 +353,24 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(measuredMetrics.PvsRefreshes, Is.EqualTo(MeasuredIterations));
             Assert.That(measuredMetrics.PvsVisible + measuredMetrics.PvsCulled,
                 Is.EqualTo(measuredMetrics.PvsCandidates));
+            Assert.That(measuredMetrics.PvsVisibilityChecks, Is.GreaterThan(0));
+            Assert.That(measuredMetrics.PvsBudgetExhaustions, Is.Zero);
+            Assert.That(measuredMetrics.PvsFailOpenCandidates, Is.Zero);
         });
 
-        if (fixture.BoundarySamples.Count > SharedZLevelBoundarySystem.MaxCachedBoundaries)
+        if (fixture.BoundarySamples.Count > boundaryCacheCapacity)
         {
             Assert.That(warmupMetrics.BoundaryEvictions, Is.GreaterThan(0),
                 "The 10-floor fixture must exercise bounded-cache eviction.");
+            return;
         }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(warmupMetrics.BoundaryEvictions, Is.Zero);
+            Assert.That(measuredMetrics.BoundaryCacheMisses, Is.Zero,
+                "A workload that fits the configured cache must be fully hot after warm-up.");
+        });
     }
 
     private static ZLevelStressFixtureSnapshot CreateFixtureSnapshot(ZLevelStressFixture fixture)
@@ -382,10 +417,16 @@ public sealed class ZLevelStressBaselineTest : GameTest
 
 internal sealed record ZLevelStressBaseline(
     int SchemaVersion,
+    ZLevelStressBudgetSnapshot Budgets,
     ZLevelStressFixtureSnapshot Fixture,
     ZLevelStressWorkloadSnapshot Workload,
     ZLevelStressRunSnapshot Warmup,
     ZLevelStressRunSnapshot Measured);
+
+internal sealed record ZLevelStressBudgetSnapshot(
+    int BoundaryCacheCapacity,
+    int VisibilityMaxLevelDistance,
+    int PvsVisibilityCheckBudget);
 
 internal sealed record ZLevelStressFixtureSnapshot(
     int FloorCount,

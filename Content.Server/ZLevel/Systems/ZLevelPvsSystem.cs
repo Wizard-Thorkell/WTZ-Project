@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared;
@@ -24,6 +25,9 @@ namespace Content.Server.ZLevel.Systems;
 public sealed class ZLevelPvsSystem : EntitySystem
 {
     private const float RefreshInterval = 0.1f;
+    public const int DefaultVisibilityCheckBudget = 16384;
+    public const int MaximumVisibilityCheckBudget = 1_000_000;
+
     [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly ISharedPlayerManager _players = default!;
     [Dependency] private readonly EntityLookupSystem _lookup = default!;
@@ -44,6 +48,9 @@ public sealed class ZLevelPvsSystem : EntitySystem
     private float _refreshAccumulator = RefreshInterval;
     private float _priorityViewSize;
     private bool _pvsEnabled;
+    private int _visibilityCheckBudget = DefaultVisibilityCheckBudget;
+
+    public int VisibilityCheckBudget => _visibilityCheckBudget;
 
     public override void Initialize()
     {
@@ -56,6 +63,11 @@ public sealed class ZLevelPvsSystem : EntitySystem
         Subs.CVar(_configuration, CVars.NetPVS, OnPvsEnabled, true);
         Subs.CVar(_configuration, CVars.NetMaxUpdateRange, _ => RefreshViewSize(), true);
         Subs.CVar(_configuration, CVars.NetPvsPriorityRange, _ => RefreshViewSize(), true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelPvsVisibilityCheckBudget,
+            value => _visibilityCheckBudget = Math.Clamp(value, 0, MaximumVisibilityCheckBudget),
+            true);
     }
 
     public override void Shutdown()
@@ -105,10 +117,12 @@ public sealed class ZLevelPvsSystem : EntitySystem
         if (_viewers.Count == 0)
         {
             _pvs.ClearSessionCulling(session);
-            RecordRefresh(started);
+            RecordRefresh(started, 0, false);
             return;
         }
 
+        var visibilityChecks = 0;
+        var budgetExhausted = false;
         foreach (var viewer in _viewers)
         {
             _viewerCandidates.Clear();
@@ -127,15 +141,34 @@ public sealed class ZLevelPvsSystem : EntitySystem
                 }
 
                 _candidates.Add(candidate);
+                if (budgetExhausted || _visible.Contains(candidate))
+                    continue;
+
+                if (visibilityChecks >= _visibilityCheckBudget)
+                {
+                    budgetExhausted = true;
+                    continue;
+                }
+
+                visibilityChecks++;
                 if (_visibility.IsEntityVisibleFrom(candidate, viewer.MapId, viewer.ZLevel))
                     _visible.Add(candidate);
             }
         }
 
+        if (budgetExhausted)
+        {
+            // A partial exclusion set could hide an entity visible from a viewer
+            // we did not evaluate. Preserve correctness by failing open for this refresh.
+            _pvs.ClearSessionCulling(session);
+            RecordRefresh(started, visibilityChecks, true);
+            return;
+        }
+
         _culled.UnionWith(_candidates);
         _culled.ExceptWith(_visible);
         _pvs.ReplaceSessionCulling(session, _culled);
-        RecordRefresh(started);
+        RecordRefresh(started, visibilityChecks, false);
     }
 
     private void CollectViewers(ICommonSession session)
@@ -182,13 +215,15 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _priorityViewSize = MathF.Max(8f, MathF.Max(normal, priority));
     }
 
-    private void RecordRefresh(long started)
+    private void RecordRefresh(long started, int visibilityChecks, bool budgetExhausted)
     {
         _metrics.RecordPvsRefresh(
             _viewers.Count,
             _candidates.Count,
-            _visible.Count,
-            _culled.Count,
+            budgetExhausted ? _candidates.Count : _visible.Count,
+            budgetExhausted ? 0 : _culled.Count,
+            visibilityChecks,
+            budgetExhausted,
             Stopwatch.GetTimestamp() - started);
     }
 

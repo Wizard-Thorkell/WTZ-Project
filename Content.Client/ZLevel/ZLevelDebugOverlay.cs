@@ -108,13 +108,14 @@ public sealed class ZLevelDebugOverlay : Overlay
             _font,
             metricsPosition,
             $"Z metrics (local)  boundary q:{metrics.BoundaryQueries} hit:{metrics.BoundaryCacheHitPercent:0.0}% " +
-            $"cache:{_boundarySystem.CachedBoundaryCount}/{SharedZLevelBoundarySystem.MaxCachedBoundaries}",
+            $"cache:{_boundarySystem.CachedBoundaryCount}/{_boundarySystem.BoundaryCacheCapacity}",
             metricsColor);
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 14f),
             $"visibility entity:{metrics.VisibilityEntityQueries} tile:{metrics.VisibilityTileQueries} " +
-            $"cross:{metrics.VisibilityBoundaryChecks} reject:{metrics.VisibilityEarlyRejections}",
+            $"cross:{metrics.VisibilityBoundaryChecks} reject:{metrics.VisibilityEarlyRejections} " +
+            $"depth:{_visibilitySystem.MaxVisibleLevelDistance}",
             metricsColor);
         args.ScreenHandle.DrawString(
             _font,
@@ -153,7 +154,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         var playerLocalZ = _transformSystem.WorldToLocalZLevel(grid.Owner, playerWorldZ);
         var lowestZ = MappingPreviewEnabled
             ? playerLocalZ - 1
-            : playerLocalZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
+            : playerLocalZ - _visibilitySystem.MaxVisibleLevelDistance;
         var highestZ = MappingPreviewEnabled ? playerLocalZ + 1 : playerLocalZ;
         for (var z = lowestZ; z <= highestZ; z++)
         {

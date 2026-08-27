@@ -2,7 +2,9 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using System;
+using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Components;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -15,8 +17,10 @@ namespace Content.Shared.ZLevel.Systems;
 /// </summary>
 public sealed class SharedZLevelVisibilitySystem : EntitySystem
 {
-    public const int MaxVisibleLevelDistance = 4;
+    public const int DefaultMaxVisibleLevelDistance = 4;
+    public const int MaximumVisibleLevelDistance = 32;
 
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
@@ -25,12 +29,20 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
 
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<TransformComponent> _transformQuery;
+    private int _maxVisibleLevelDistance = DefaultMaxVisibleLevelDistance;
+
+    public int MaxVisibleLevelDistance => _maxVisibleLevelDistance;
 
     public override void Initialize()
     {
         base.Initialize();
         _gridQuery = GetEntityQuery<MapGridComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelVisibilityMaxLevelDistance,
+            value => _maxVisibleLevelDistance = Math.Clamp(value, 0, MaximumVisibleLevelDistance),
+            true);
     }
 
     public bool IsEntityVisibleFrom(
@@ -57,7 +69,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         }
 
         if ((entityWorldZ > viewerWorldZ && !allowAbove) ||
-            Math.Abs(entityWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
+            Math.Abs(entityWorldZ - viewerWorldZ) > _maxVisibleLevelDistance)
         {
             _metrics.RecordVisibilityEarlyRejection();
             return false;
@@ -103,7 +115,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         }
 
         if ((targetWorldZ > viewerWorldZ && !allowAbove) ||
-            Math.Abs(targetWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
+            Math.Abs(targetWorldZ - viewerWorldZ) > _maxVisibleLevelDistance)
         {
             _metrics.RecordVisibilityEarlyRejection();
             return false;

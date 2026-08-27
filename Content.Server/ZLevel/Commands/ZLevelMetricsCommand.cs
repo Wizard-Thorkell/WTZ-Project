@@ -2,6 +2,7 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using Content.Server.Administration;
+using Content.Server.ZLevel.Systems;
 using Content.Shared.Administration;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Console;
@@ -36,17 +37,20 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var metrics = metricsSystem.Snapshot();
         var boundaries = _entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
+        var pvs = _entityManager.System<ZLevelPvsSystem>();
+        var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
 
         shell.WriteLine("Native Z-level metrics for this process since the last reset:");
         shell.WriteLine(
             $"  boundary: queries={metrics.BoundaryQueries}, hits={metrics.BoundaryCacheHits}, " +
             $"misses={metrics.BoundaryCacheMisses}, hit-rate={metrics.BoundaryCacheHitPercent:0.00}%, " +
-            $"cache={boundaries.CachedBoundaryCount}/{SharedZLevelBoundarySystem.MaxCachedBoundaries}, " +
+            $"cache={boundaries.CachedBoundaryCount}/{boundaries.BoundaryCacheCapacity}, " +
             $"invalidations={metrics.BoundaryInvalidations}, evictions={metrics.BoundaryEvictions}");
         shell.WriteLine(
             $"  visibility: entity={metrics.VisibilityEntityQueries}, tile={metrics.VisibilityTileQueries}, " +
             $"same-level={metrics.VisibilitySameLevel}, boundary-checks={metrics.VisibilityBoundaryChecks}, " +
-            $"early-rejections={metrics.VisibilityEarlyRejections}");
+            $"early-rejections={metrics.VisibilityEarlyRejections}, " +
+            $"max-world-z-distance={visibility.MaxVisibleLevelDistance}");
         shell.WriteLine(
             $"  gravity: queries={metrics.GravityQueries}, hit-rate={metrics.GravityCacheHitPercent:0.00}%, " +
             $"cached-grids={gravity.CachedGridCount}, pending={gravity.PendingRefreshGridCount}, " +
@@ -58,6 +62,9 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         shell.WriteLine(
             $"  pvs: refreshes={metrics.PvsRefreshes}, viewers={metrics.PvsViewers}, " +
             $"candidates={metrics.PvsCandidates}, visible={metrics.PvsVisible}, culled={metrics.PvsCulled}, " +
+            $"checks={metrics.PvsVisibilityChecks}/{pvs.VisibilityCheckBudget}, " +
+            $"budget-exhaustions={metrics.PvsBudgetExhaustions}, " +
+            $"fail-open-candidates={metrics.PvsFailOpenCandidates}, " +
             $"avg={metrics.PvsAverageRefreshMilliseconds:0.000}ms, " +
             $"last={metrics.PvsLastRefreshMilliseconds:0.000}ms, max={metrics.PvsMaxRefreshMilliseconds:0.000}ms");
     }

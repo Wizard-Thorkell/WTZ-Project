@@ -894,7 +894,14 @@ time, managed allocations, and the complete warm-up and measured metrics.
 The baseline tests use structural assertions only. Compare timings and
 allocations on equivalent machines and configurations; do not treat local Debug
 measurements as portable release thresholds. Current captures and their review
-are recorded in `Docs/ZLevelImplementationLedger.md`.
+are recorded in `Docs/ZLevelImplementationLedger.md` and
+`Docs/ZLevelBaselineReport.md`.
+
+Schema-versioned snapshots also record the effective boundary-cache,
+visibility-distance, and PVS-check budgets. These can be tuned with
+`zlevel.boundary_cache_capacity`, `zlevel.visibility_max_level_distance`, and
+`zlevel.pvs_visibility_check_budget`; see the baseline report for clamps and
+fail-soft behavior.
 
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.

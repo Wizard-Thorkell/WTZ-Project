@@ -453,7 +453,7 @@ public sealed class ZLevelMovementTest : MovementTest
             });
 
             var chunkCount = grid.ChunkCount;
-            for (var i = 0; i < SharedZLevelBoundarySystem.MaxCachedBoundaries + 32; i++)
+            for (var i = 0; i < boundaries.BoundaryCacheCapacity + 32; i++)
             {
                 Assert.That(boundaries.TryGetBoundary(
                     MapData.Grid,
@@ -467,7 +467,7 @@ public sealed class ZLevelMovementTest : MovementTest
             Assert.Multiple(() =>
             {
                 Assert.That(boundaries.CachedBoundaryCount,
-                    Is.LessThanOrEqualTo(SharedZLevelBoundarySystem.MaxCachedBoundaries));
+                    Is.LessThanOrEqualTo(boundaries.BoundaryCacheCapacity));
                 Assert.That(grid.ChunkCount, Is.EqualTo(chunkCount),
                     "Boundary queries over empty space must not allocate map chunks.");
             });
@@ -509,13 +509,13 @@ public sealed class ZLevelMovementTest : MovementTest
                     grid,
                     tile,
                     0,
-                    -SharedZLevelVisibilitySystem.MaxVisibleLevelDistance), Is.True);
+                    -visibility.MaxVisibleLevelDistance), Is.True);
                 Assert.That(visibility.IsTileVisibleFrom(
                     MapData.Grid,
                     grid,
                     tile,
                     0,
-                    -SharedZLevelVisibilitySystem.MaxVisibleLevelDistance - 1), Is.False);
+                    -visibility.MaxVisibleLevelDistance - 1), Is.False);
                 Assert.That(visibility.IsTileVisibleFrom(MapData.Grid, grid, tile, 0, 1), Is.False,
                     "Normal gameplay visibility must not reveal floors above the viewer.");
             });

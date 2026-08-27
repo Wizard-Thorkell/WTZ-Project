@@ -3,7 +3,9 @@
 
 using System;
 using System.Collections.Generic;
+using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Components;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -18,8 +20,11 @@ namespace Content.Shared.ZLevel.Systems;
 /// </summary>
 public sealed class SharedZLevelBoundarySystem : EntitySystem
 {
-    public const int MaxCachedBoundaries = 4096;
+    public const int DefaultBoundaryCacheCapacity = 8192;
+    public const int MinimumBoundaryCacheCapacity = 256;
+    public const int MaximumBoundaryCacheCapacity = 131072;
 
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
@@ -30,9 +35,11 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     private readonly Dictionary<EntityUid, BoundaryRegistration> _registrations = new();
     private readonly Dictionary<BoundaryCacheKey, BoundaryCacheEntry> _boundaryCache = new();
     private readonly Queue<BoundaryCacheToken> _boundaryCacheOrder = new();
+    private int _boundaryCacheCapacity = DefaultBoundaryCacheCapacity;
     private long _nextCacheSequence;
 
     public int CachedBoundaryCount => _boundaryCache.Count;
+    public int BoundaryCacheCapacity => _boundaryCacheCapacity;
 
     public override void Initialize()
     {
@@ -51,6 +58,12 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
         SubscribeLocalEvent<MapGridComponent, EntityTerminatingEvent>(OnGridTerminating);
+
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelBoundaryCacheCapacity,
+            OnBoundaryCacheCapacityChanged,
+            true);
     }
 
     public bool TryGetBoundary(
@@ -356,22 +369,54 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         _boundaryCache[key] = new BoundaryCacheEntry(state, sequence);
         _boundaryCacheOrder.Enqueue(new BoundaryCacheToken(key, sequence));
 
-        if (_boundaryCacheOrder.Count > MaxCachedBoundaries * 2)
+        if (_boundaryCacheOrder.Count > _boundaryCacheCapacity * 2)
         {
-            _boundaryCacheOrder.Clear();
-            foreach (var (cachedKey, entry) in _boundaryCache)
-            {
-                _boundaryCacheOrder.Enqueue(new BoundaryCacheToken(cachedKey, entry.Sequence));
-            }
+            CompactCacheOrder();
         }
 
-        while (_boundaryCache.Count > MaxCachedBoundaries && _boundaryCacheOrder.TryDequeue(out var oldest))
+        TrimBoundaryCache();
+    }
+
+    private void OnBoundaryCacheCapacityChanged(int configuredCapacity)
+    {
+        var capacity = Math.Clamp(
+            configuredCapacity,
+            MinimumBoundaryCacheCapacity,
+            MaximumBoundaryCacheCapacity);
+        if (_boundaryCacheCapacity == capacity)
+            return;
+
+        _boundaryCacheCapacity = capacity;
+        TrimBoundaryCache();
+        if (_boundaryCacheOrder.Count > _boundaryCacheCapacity * 2)
+            CompactCacheOrder();
+    }
+
+    private void TrimBoundaryCache()
+    {
+        while (_boundaryCache.Count > _boundaryCacheCapacity && _boundaryCacheOrder.TryDequeue(out var oldest))
         {
             if (!_boundaryCache.TryGetValue(oldest.Key, out var current) || current.Sequence != oldest.Sequence)
                 continue;
 
             _boundaryCache.Remove(oldest.Key);
             _metrics.RecordBoundaryEviction();
+        }
+    }
+
+    private void CompactCacheOrder()
+    {
+        _boundaryCacheOrder.Clear();
+        var ordered = new List<BoundaryCacheToken>(_boundaryCache.Count);
+        foreach (var (cachedKey, entry) in _boundaryCache)
+        {
+            ordered.Add(new BoundaryCacheToken(cachedKey, entry.Sequence));
+        }
+
+        ordered.Sort(static (left, right) => left.Sequence.CompareTo(right.Sequence));
+        foreach (var token in ordered)
+        {
+            _boundaryCacheOrder.Enqueue(token);
         }
     }
 

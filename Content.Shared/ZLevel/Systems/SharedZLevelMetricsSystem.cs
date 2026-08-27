@@ -40,6 +40,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _pvsCandidates;
     private long _pvsVisible;
     private long _pvsCulled;
+    private long _pvsVisibilityChecks;
+    private long _pvsBudgetExhaustions;
+    private long _pvsFailOpenCandidates;
     private long _pvsRefreshTimestampTicks;
     private long _pvsLastRefreshTimestampTicks;
     private long _pvsMaxRefreshTimestampTicks;
@@ -129,6 +132,8 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         int candidateCount,
         int visibleCount,
         int culledCount,
+        int visibilityChecks,
+        bool budgetExhausted,
         long elapsedTimestampTicks)
     {
         _pvsRefreshes++;
@@ -136,6 +141,12 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _pvsCandidates += candidateCount;
         _pvsVisible += visibleCount;
         _pvsCulled += culledCount;
+        _pvsVisibilityChecks += visibilityChecks;
+        if (budgetExhausted)
+        {
+            _pvsBudgetExhaustions++;
+            _pvsFailOpenCandidates += candidateCount;
+        }
         _pvsRefreshTimestampTicks += elapsedTimestampTicks;
         _pvsLastRefreshTimestampTicks = elapsedTimestampTicks;
         _pvsMaxRefreshTimestampTicks = Math.Max(_pvsMaxRefreshTimestampTicks, elapsedTimestampTicks);
@@ -170,6 +181,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _pvsCandidates,
             _pvsVisible,
             _pvsCulled,
+            _pvsVisibilityChecks,
+            _pvsBudgetExhaustions,
+            _pvsFailOpenCandidates,
             TimestampTicksToMilliseconds(_pvsRefreshTimestampTicks),
             TimestampTicksToMilliseconds(_pvsLastRefreshTimestampTicks),
             TimestampTicksToMilliseconds(_pvsMaxRefreshTimestampTicks));
@@ -203,6 +217,9 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _pvsCandidates = 0;
         _pvsVisible = 0;
         _pvsCulled = 0;
+        _pvsVisibilityChecks = 0;
+        _pvsBudgetExhaustions = 0;
+        _pvsFailOpenCandidates = 0;
         _pvsRefreshTimestampTicks = 0;
         _pvsLastRefreshTimestampTicks = 0;
         _pvsMaxRefreshTimestampTicks = 0;
@@ -241,6 +258,9 @@ public readonly record struct ZLevelMetricsSnapshot(
     long PvsCandidates,
     long PvsVisible,
     long PvsCulled,
+    long PvsVisibilityChecks,
+    long PvsBudgetExhaustions,
+    long PvsFailOpenCandidates,
     double PvsRefreshMilliseconds,
     double PvsLastRefreshMilliseconds,
     double PvsMaxRefreshMilliseconds)

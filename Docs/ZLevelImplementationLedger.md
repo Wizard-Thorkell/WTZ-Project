@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/baseline-stress-fixtures`.
-- Active package: `P0.3 Configurable budgets and baseline report`.
+- Active branch: `zlevel/baseline-budgets`.
+- Active package: `P1.1 ZLevelTrace contract and reference behavior`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -40,8 +40,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 
 | Phase | Responsibility | Status |
 | --- | --- | --- |
-| P0 | Baselines, stress fixtures, metrics, budgets, and observability | In progress |
-| P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Pending |
+| P0 | Baselines, stress fixtures, metrics, budgets, and observability | Complete |
+| P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | In progress |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Pending |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Pending |
 | P4 | Vertical sound propagation through cached portals | Pending |
@@ -56,7 +56,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P0.1 | Process-local metrics, debug presentation, command, and ledger | Complete |
 | P0.2 | Generated 3, 6, and 10-floor stress fixtures and benchmark runner | Complete |
-| P0.3 | Configurable budgets, fail-soft behavior, and baseline report | In progress |
+| P0.3 | Configurable budgets, fail-soft behavior, and baseline report | Complete |
 
 ## Completed Package: P0.1 Observability Foundation
 
@@ -225,9 +225,9 @@ this is the first concrete capacity input for P0.3.
   bounded fail-soft behavior, and publish a baseline report that distinguishes
   correctness limits from tunable performance budgets.
 
-## Active Package: P0.3 Configurable Budgets And Baseline Report
+## Completed Package: P0.3 Configurable Budgets And Baseline Report
 
-### Planned Scope
+### Scope
 
 - Inventory current Z-level cache capacities, per-frame limits, and bounded
   scans, including the 4,096-entry boundary cache exposed by P0.2.
@@ -238,9 +238,121 @@ this is the first concrete capacity input for P0.3.
 - Re-run the P0.2 matrix before and after the policy change and publish the
   comparison without converting local timings into brittle test thresholds.
 
+### Acceptance Criteria
+
+- Performance policy is named and configurable without turning gameplay
+  invariants into arbitrary global limits.
+- Every configured value has an effective clamp and exposes the value actually
+  used by the system.
+- Boundary-cache pressure never changes boundary results.
+- PVS exhaustion cannot hide entities based on a partial viewer evaluation.
+- Metrics identify exhaustion and fail-open behavior without per-query
+  allocations.
+- P0.2 snapshots include their effective budgets and remain reproducible under
+  local server configuration changes.
+
+### Evidence
+
+- `dotnet build Content.IntegrationTests/Content.IntegrationTests.csproj
+  --no-restore -consoleloggerparameters:ErrorsOnly` passed with zero errors and
+  538 pre-existing warnings.
+- Four focused budget cases passed: boundary capacity clamping and recomputation,
+  both visibility-distance clamps, and whole-refresh PVS fail-open behavior.
+- The generated baseline runner passed all 3-, 6-, and 10-floor cases and wrote
+  schema-version 2 snapshots with effective budget values.
+- The complete focused integration matrix passed 53/53 tests; focused unit tests
+  passed 2/2.
+- The before/after method, environment, values, and deferred limits are recorded
+  in `Docs/ZLevelBaselineReport.md`.
+
+The final local Debug comparison showed the intended capacity effect:
+
+| Floors | P0.2 measured ms | P0.3 measured ms | Hot hit rate before | Hot hit rate after | Warm evictions before | Warm evictions after |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 7.006 | 7.469 | 100% | 100% | 0 | 0 |
+| 6 | 12.985 | 12.654 | 100% | 100% | 0 | 0 |
+| 10 | 52.011 | 20.351 | 50.1% | 100% | 2,199 | 0 |
+
+All measured cases remained at 6,336 managed bytes. The 10-floor timing improved
+60.9% after eliminating deterministic cache churn; smaller timing changes are
+treated as Debug-run noise.
+
+### Decisions
+
+- Raise the boundary-cache default from 4,096 to 8,192 entries, clamp it to
+  256 through 131,072, and replicate the server value to clients.
+- Preserve correctness under cache pressure by evicting oldest entries and
+  recomputing them on demand. Sequence ordering survives queue compaction.
+- Keep normal visibility at four world-Z levels by default, with an effective
+  range of zero through 32 replicated to clients.
+- Limit PVS to 16,384 Z visibility checks per session refresh by default. On
+  exhaustion, clear the complete Z culling snapshot for that refresh so normal
+  engine PVS fails open instead of applying a partial exclusion set.
+- Record PVS checks, exhausted refreshes, and fail-open candidates in process
+  metrics and expose effective values through `zlevelmetrics` and the overlay.
+- Do not impose a tile cap on synchronous gravity builds. A correct cap requires
+  an incremental solver and previous-cache or double-buffer behavior.
+- Do not classify structural collapse throughput or per-entity step-down depth
+  as part of this shared cache and visibility package.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only configuration, bounded cache and PVS
+      policy, metrics/presentation, focused tests, baselines, and documentation.
+- [x] Invariant review: Z 0 and moving-grid coordinate behavior are unchanged;
+      boundary channels share the same cache; authority remains server-side;
+      replicated values keep client visibility policy aligned.
+- [x] Automated verification: build, 4 budget cases, 3 baseline cases, 53/53
+      focused integration tests, and 2/2 focused unit tests passed.
+- [x] Performance evidence: schema-version 2 captures and the P0.2/P0.3
+      comparison are recorded in `Docs/ZLevelBaselineReport.md`.
+- [x] Documentation: CVar names, clamps, failure policy, operations guidance,
+      limitations, commands, and results are recorded.
+- [x] Dependency check: no WTZ Engine change is required for P0.3.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, generated artifacts are ignored, and the diff is package-scoped.
+- [x] Mini review: findings, residual risks, and P1.1 are recorded below.
+- [x] Commit: saved as `Add configurable Z-level performance budgets` on
+      `zlevel/baseline-budgets`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: the P0.2 10-floor slowdown was boundary-cache capacity churn rather
+  than growth in measured managed allocations.
+- Finding: session-wide PVS fail-open gives a simple correctness guarantee when
+  the visibility-check budget is exhausted.
+- Residual risk: PVS candidate collection itself remains unbounded because the
+  engine lookup API is not paged or resumable.
+- Residual risk: cold gravity construction remains a synchronous whole-grid
+  operation; P0 metrics can now identify its cost but cannot safely interrupt it.
+- Next package: define the immutable `ZLevelTrace` request/result contract and
+  lock down same-level 2D reference behavior before adding vertical crossings.
+
+## Phase P1 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P1.1 | Trace request/result contract, channels, and 2D reference behavior | In progress |
+| P1.2 | Ordered vertical crossings and boundary-channel integration | Pending |
+| P1.3 | Moving-frame normalization, determinism, and allocation hardening | Pending |
+
+## Active Package: P1.1 ZLevelTrace Contract And Reference Behavior
+
+### Planned Scope
+
+- Define request, segment, tile visit, entity hit, and boundary-crossing value
+  types without coupling specialized consumer policy to the primitive.
+- Represent local and world Z explicitly and require an owning map/grid frame.
+- Define trace channels for projectile, explosion, visibility, interaction,
+  sound, and effects queries.
+- Preserve the existing engine 2D ray behavior when origin and destination are
+  on the same world Z.
+- Add deterministic reference tests before implementing vertical crossing logic.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
 | 2026-08-27 | P0.1 | `Add native Z-level performance observability` | 46 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.2 | `Add deterministic Z-level stress baselines` | 3 baseline cases, 49 integration, 2 unit, diff check | Complete |
+| 2026-08-27 | P0.3 | `Add configurable Z-level performance budgets` | 4 budget, 3 baseline, 53 integration, 2 unit, diff check | Complete |
