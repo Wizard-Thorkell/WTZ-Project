@@ -110,8 +110,8 @@ public readonly record struct ZLevelTraceBoundaryCrossing(
     bool IsOpen);
 
 /// <summary>
-/// Immutable trace snapshot. P1.3 will add a caller-owned buffer overload for
-/// hot consumers after the complete vertical contract is stable.
+/// Immutable trace snapshot for cold callers that need independent result
+/// lifetime. Hot callers can use the caller-owned buffer overload.
 /// </summary>
 public readonly record struct ZLevelTraceResult(
     ZLevelTraceTermination Termination,
@@ -120,6 +120,16 @@ public readonly record struct ZLevelTraceResult(
     ImmutableArray<ZLevelTraceTileVisit> TileVisits,
     ImmutableArray<ZLevelTraceEntityHit> EntityHits,
     ImmutableArray<ZLevelTraceBoundaryCrossing> BoundaryCrossings)
+{
+    public bool ReachedDestination => Termination == ZLevelTraceTermination.Completed;
+}
+
+/// <summary>
+/// Header returned by the caller-owned buffer overload.
+/// </summary>
+public readonly record struct ZLevelTraceBufferResult(
+    ZLevelTraceTermination Termination,
+    ZLevelTracePoint FinalPoint)
 {
     public bool ReachedDestination => Termination == ZLevelTraceTermination.Completed;
 }

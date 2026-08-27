@@ -89,11 +89,22 @@ distance, entity UID, and segment sequence. Per-segment physics candidates use
 the same deterministic distance and UID tie break. Exact 2D corner crossings
 advance diagonally once, matching the existing pathfinding grid-cast convention.
 
+Hot callers can instead own a `ZLevelTraceBuffer` and call
+`Trace(request, buffer)`. That overload returns only a
+`ZLevelTraceBufferResult` header; ordered output remains in the buffer as
+read-only lists and spans. Every invocation clears and replaces the logical
+contents, so consumers must finish reading before reusing the same buffer. Its
+list and scratch capacities are retained across calls, and `EnsureCapacity`
+allows known output sizes to be reserved before entering a hot loop. The
+immutable overload remains the convenience API for cold callers and takes a
+snapshot independent of later traces.
+
 `Completed` is the only termination that sets `ReachedDestination`. A closed
 boundary returns coherent completed work up to that boundary. Invalid inputs,
 different maps, unresolved frames, and preflight crossing-budget failures return
 an empty result at the origin. If a tile budget is exhausted, the overflowing
-segment is rolled back while previously completed segments remain coherent.
+segment is rolled back while previously completed segments remain coherent. The
+same complete-segment rollback applies when the entity-hit budget is exhausted.
 
 ## Options And Budgets
 
@@ -110,10 +121,11 @@ whose local tiles and boundaries govern this request. It does not select an
 entity broadphase: physics hits still come from the map and are filtered by
 effective world Z.
 
-Two replicated server CVars bound one query:
+Three replicated server CVars bound one query:
 
 - `zlevel.trace_max_vertical_crossings`, default 64, clamped to 1 through 1024.
 - `zlevel.trace_max_tile_visits`, default 8192, clamped to 1 through 1000000.
+- `zlevel.trace_max_entity_hits`, default 4096, clamped to 1 through 1000000.
 
 Effective values are visible through `zlevelmetrics` and the local Z-level debug
 overlay. `IterationBudgetExceeded` is deterministic and never silently skips a
@@ -124,9 +136,10 @@ boundary or emits a truncated tile sequence.
 - A request can evaluate boundaries from one common or explicit grid frame.
   Automatic entry into and exit from several structural frames is not yet
   modeled.
-- Immutable arrays, per-query lists, the engine ray, and the vertical point
-  lookup allocate. P1.3 adds caller-owned buffers and measures the hot path
-  before any production consumer is migrated.
+- The immutable convenience overload allocates its snapshot by design. The
+  buffered overload reuses WTZ-owned result and scratch collections, while the
+  engine physics ray can still allocate internally. P1.3b2 measures each
+  workload before any production consumer is migrated.
 - No gameplay system consumes this API yet. Hitscan is the first P2 migration
   after the complete P1 primitive is stable.
 
@@ -138,9 +151,11 @@ Focused reference tests:
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --no-restore --filter "FullyQualifiedName~ZLevelTraceTest|FullyQualifiedName~ZLevelBudgetTest"
 ```
 
-The cumulative P1.3a matrix covers Z0 physics parity, world-Z filtering,
+The cumulative P1.3b1 matrix covers Z0 physics parity, world-Z filtering,
 translated and rotated frames, movement after endpoint creation, explicit map
 and cross-grid projection, overlapping-grid non-inference, matching client and
 server output, horizontal and perfect-diagonal tile order, upward and downward
 multi-floor traces, perfectly vertical fixture hits, channel-specific openings,
-closed-boundary truncation, unresolved frames, and both trace budgets.
+closed-boundary truncation, unresolved frames, all three trace budgets,
+complete-segment hit rollback, and reusable-buffer equivalence with immutable
+results.

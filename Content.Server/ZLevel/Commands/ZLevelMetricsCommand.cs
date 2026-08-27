@@ -70,6 +70,6 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"last={metrics.PvsLastRefreshMilliseconds:0.000}ms, max={metrics.PvsMaxRefreshMilliseconds:0.000}ms");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
-            $"tile-visits={trace.MaxTileVisits}");
+            $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");
     }
 }

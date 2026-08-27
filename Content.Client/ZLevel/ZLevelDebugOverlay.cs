@@ -135,7 +135,7 @@ public sealed class ZLevelDebugOverlay : Overlay
             _font,
             metricsPosition + new Vector2(0f, 56f),
             $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
-            $"tiles:{_traceSystem.MaxTileVisits}",
+            $"tiles:{_traceSystem.MaxTileVisits} hits:{_traceSystem.MaxEntityHits}",
             metricsColor);
     }
 

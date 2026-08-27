@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/trace-frame-normalization`.
-- Active package: `P1.3b Allocation hardening, trace budgets, metrics, and benchmark`.
+- Active branch: `zlevel/trace-metrics-benchmark`.
+- Active package: `P1.3b2 Trace metrics and benchmark`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -335,7 +335,8 @@ treated as Debug-run noise.
 | P1.1 | Trace request/result contract, channels, and 2D reference behavior | Complete |
 | P1.2 | Ordered vertical crossings and boundary-channel integration | Complete |
 | P1.3a | Current-frame normalization and explicit structural ownership | Complete |
-| P1.3b | Reusable buffers, output budgets, metrics, and trace benchmark | In progress |
+| P1.3b1 | Reusable buffers and bounded entity-hit output | Complete |
+| P1.3b2 | Trace metrics, allocation evidence, and reproducible benchmark | In progress |
 
 ## Completed Package: P1.1 ZLevelTrace Contract And Reference Behavior
 
@@ -626,20 +627,98 @@ treated as Debug-run noise.
 - Next package: add caller-owned buffers, a hit budget, trace counters and
   timings, and a reproducible trace-specific allocation/performance workload.
 
-## Active Package: P1.3b Allocation Hardening, Trace Budgets, Metrics, And Benchmark
+## Completed Package: P1.3b1 Reusable Buffers And Bounded Hit Output
+
+### Scope
+
+- Add caller-owned reusable output and scratch storage while preserving the
+  immutable convenience API for cold callers.
+- Bound entity-hit output with a replicated server CVar and expose the effective
+  budget through the existing admin command and client debug overlay.
+- Roll back every output collection to the segment bookmark when either tile or
+  entity-hit work exceeds its budget.
+
+### Acceptance Criteria
+
+- Reusing one buffer replaces its logical contents without replacing its public
+  list views or shrinking reserved capacity.
+- Buffered and immutable calls produce equivalent ordered results.
+- Entity-hit overflow returns `IterationBudgetExceeded` without exposing any
+  part of the overflowing segment.
+- Invalid inputs and preflight failures clear a previously used buffer.
+- Existing callers of the immutable overload retain source and result-lifetime
+  compatibility.
+
+### Evidence
+
+- `Content.IntegrationTests` builds with zero errors; warnings are the existing
+  analyzer, dependency, and upstream warning set.
+- The new buffer-reuse/equivalence and entity-hit rollback tests pass together.
+- Eight trace tests, seven budget tests, the complete 64-test Z-level integration
+  matrix, two structural unit tests, and three stress baselines pass.
+
+### Decisions
+
+- Keep the immutable overload as a cold-path convenience wrapper over the same
+  buffered implementation so behavior cannot diverge.
+- Make buffers caller-owned and single-invocation views: each call clears
+  counts, retains capacities, and invalidates the previous logical result.
+- Keep segment assembly atomic with one bookmark spanning segments, tile visits,
+  entity hits, and boundary crossings.
+- Treat the existing crossing, tile, and hit limits together as the aggregate
+  output bound; no fourth total-count CVar is needed while every collection has
+  an independent finite ceiling.
+- Clamp the hit budget to at least one, matching the established trace-budget
+  fail-soft policy.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to trace storage, hit bounding, tests,
+      observability labels, and contract/ledger documentation.
+- [x] Invariant review: frame normalization, world-Z hit filtering, Z 0,
+      boundary ordering, and server-owned replicated budgets are unchanged.
+- [x] Automated verification: build, 8/8 trace tests, 7/7 budget tests, 64/64
+      focused integration tests, 2/2 focused unit tests, and 3/3 stress
+      baselines passed.
+- [x] Performance evidence: this package makes WTZ-owned collections reusable
+      and tests capacity retention; quantified allocations and timings are
+      intentionally the next P1.3b2 package, so no unmeasured zero-allocation
+      claim is made here.
+- [x] Documentation: ownership, lifetime, budgets, rollback, limitations, and
+      verification commands are recorded in `Docs/ZLevelTrace.md`.
+- [x] Dependency check: existing Robust collection, lookup, and physics APIs are
+      sufficient; no WTZ Engine revision change is required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices; the tree contains only the ten intended source, test, UI, and
+      documentation files and no generated artifacts.
+- [x] Mini review: findings, residual risks, and P1.3b2 are recorded below.
+- [x] Commit: save as `Add reusable Z-level trace buffers` on
+      `zlevel/trace-allocation-hardening`; remote verification follows the
+      commit.
+
+### Mini Review
+
+- Finding: one buffered core now defines both hot and immutable behavior,
+  eliminating duplicate trace implementations.
+- Finding: segment bookmarks make failure atomic across all ordered outputs,
+  including a physics ray that discovers more entities than allowed.
+- Residual risk: engine-owned ray enumeration may still allocate even when WTZ
+  output storage is warm.
+- Residual risk: no gameplay consumer uses the buffered path yet; migration
+  begins only after P1 closes.
+- Next package: instrument trace counts, terminations, sizes, and timings, then
+  capture repeatable allocation/performance workloads.
+
+## Active Package: P1.3b2 Trace Metrics And Benchmark
 
 ### Planned Scope
 
-- Add caller-owned reusable output and scratch buffers while preserving the
-  immutable convenience API for cold callers.
-- Bound entity-hit and aggregate output work with explicit segment rollback and
-  fail-soft semantics.
 - Instrument query counts, terminations, output sizes, and elapsed time without
   allocating on the buffered tile-only path.
 - Add repeatable same-level, diagonal multi-floor, closed-boundary, and
   budget-exhaustion trace workloads with machine-readable measurements.
-- Cover buffer reuse, equal-distance ties, extreme coordinates, budget clamps,
-  metrics reset, and allocation behavior in tests.
+- Cover equal-distance ties, extreme coordinates, metrics reset, and allocation
+  behavior in tests.
 
 ## Package History
 
@@ -651,3 +730,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P1.1 | `Define the shared Z-level trace contract` | 4 trace, 57 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.2 | `Implement ordered vertical Z-level traces` | 5 trace, 11 trace/budget, 60 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P1.3a | `Normalize Z-level traces across moving frames` | 7 trace, 62 integration, 2 unit, diff check | Complete |
+| 2026-08-27 | P1.3b1 | `Add reusable Z-level trace buffers` | 8 trace, 7 budget, 64 integration, 2 unit, 3 baseline, diff check | Complete |

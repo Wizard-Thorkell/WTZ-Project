@@ -52,6 +52,15 @@ public sealed partial class CCVars
             8_192,
             CVar.REPLICATED | CVar.SERVER);
 
+    /// <summary>
+    /// Maximum entity hits emitted by one shared trace.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTraceMaxEntityHits =
+        CVarDef.Create(
+            "zlevel.trace_max_entity_hits",
+            4_096,
+            CVar.REPLICATED | CVar.SERVER);
+
     public static readonly CVarDef<bool> ZLevelDebugOverlay =
         CVarDef.Create("zlevel.debug_overlay", false, CVar.CLIENTONLY | CVar.ARCHIVE);
 }

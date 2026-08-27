@@ -6,11 +6,13 @@ using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.CCVar;
+using Content.Shared.Physics;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared;
 using Robust.Shared.Enums;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 
@@ -194,6 +196,58 @@ public sealed class ZLevelBudgetTest : GameTest
                 Assert.That(result.TileVisits, Is.Empty,
                     "An overflowing segment must not expose a truncated tile sequence.");
                 Assert.That(result.EntityHits, Is.Empty);
+            });
+        });
+    }
+
+    [Test]
+    public async Task TraceEntityHitBudgetRollsBackTheOverflowingSegment()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelTraceMaxEntityHits, 0);
+        var testMap = await Pair.CreateTestMap();
+        ZLevelTracePoint origin = default;
+        ZLevelTracePoint destination = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.MaxEntityHits, Is.EqualTo(1));
+            SEntMan.SpawnEntity(
+                "ZLevelTraceObstacle",
+                new EntityCoordinates(testMap.Grid, new Vector2(1.5f, 0.5f)));
+            SEntMan.SpawnEntity(
+                "ZLevelTraceObstacle",
+                new EntityCoordinates(testMap.Grid, new Vector2(2.5f, 0.5f)));
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(3.5f, 0.5f),
+                0,
+                out destination), Is.True);
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var result = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Projectile,
+                (int)CollisionGroup.BulletImpassable));
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.IterationBudgetExceeded));
+                Assert.That(result.Segments, Is.Empty);
+                Assert.That(result.TileVisits, Is.Empty);
+                Assert.That(result.EntityHits, Is.Empty,
+                    "An overflowing hit set must roll back the complete segment.");
+                Assert.That(result.BoundaryCrossings, Is.Empty);
             });
         });
     }

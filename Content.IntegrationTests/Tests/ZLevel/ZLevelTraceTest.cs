@@ -720,6 +720,103 @@ public sealed class ZLevelTraceTest : GameTest
         });
     }
 
+    [Test]
+    public async Task BufferedTraceReusesStorageAndMatchesImmutableResult()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(5.5f, 2.5f),
+                0,
+                out var destination), Is.True);
+            var request = new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.IncludeTileVisits);
+            var buffer = new ZLevelTraceBuffer();
+            buffer.EnsureCapacity(1, 16, 0, 0);
+            var segments = buffer.Segments;
+            var tiles = buffer.TileVisits;
+
+            var buffered = trace.Trace(request, buffer);
+            var immutable = trace.Trace(request);
+            var capacities = new
+            {
+                buffer.SegmentCapacity,
+                buffer.TileVisitCapacity,
+                buffer.EntityHitCapacity,
+                buffer.BoundaryCrossingCapacity,
+            };
+            Assert.Multiple(() =>
+            {
+                Assert.That(buffered.Termination, Is.EqualTo(immutable.Termination));
+                Assert.That(buffered.FinalPoint, Is.EqualTo(immutable.FinalPoint));
+                Assert.That(buffer.Segments, Is.EqualTo(immutable.Segments));
+                Assert.That(buffer.TileVisits, Is.EqualTo(immutable.TileVisits));
+                Assert.That(buffer.EntityHits, Is.EqualTo(immutable.EntityHits));
+                Assert.That(buffer.BoundaryCrossings, Is.EqualTo(immutable.BoundaryCrossings));
+                Assert.That(buffer.SegmentSpan.Length, Is.EqualTo(buffer.Segments.Count));
+                Assert.That(buffer.TileVisitSpan.Length, Is.EqualTo(buffer.TileVisits.Count));
+            });
+
+            var reverse = trace.Trace(request with
+            {
+                Origin = destination,
+                Destination = origin,
+            }, buffer);
+            Assert.Multiple(() =>
+            {
+                Assert.That(reverse.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(buffer.Segments, Is.SameAs(segments));
+                Assert.That(buffer.TileVisits, Is.SameAs(tiles));
+                Assert.That(buffer.SegmentCapacity, Is.EqualTo(capacities.SegmentCapacity));
+                Assert.That(buffer.TileVisitCapacity, Is.EqualTo(capacities.TileVisitCapacity));
+                Assert.That(buffer.EntityHitCapacity, Is.EqualTo(capacities.EntityHitCapacity));
+                Assert.That(buffer.BoundaryCrossingCapacity, Is.EqualTo(capacities.BoundaryCrossingCapacity));
+                Assert.That(buffer.Segments.Select(segment => segment.Sequence), Is.EqualTo(new[] { 0 }));
+                Assert.That(buffer.TileVisits.Select(visit => visit.Sequence),
+                    Is.EqualTo(Enumerable.Range(0, buffer.TileVisits.Count)));
+            });
+
+            var invalid = trace.Trace(request with
+            {
+                Origin = ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    new Vector2(float.NaN, 0f),
+                    0,
+                    testMap.MapId)),
+            }, buffer);
+            Assert.Multiple(() =>
+            {
+                Assert.That(invalid.Termination, Is.EqualTo(ZLevelTraceTermination.InvalidCoordinates));
+                Assert.That(buffer.Segments, Is.Empty);
+                Assert.That(buffer.TileVisits, Is.Empty);
+                Assert.That(buffer.EntityHits, Is.Empty);
+                Assert.That(buffer.BoundaryCrossings, Is.Empty);
+                Assert.That(buffer.SegmentCapacity, Is.EqualTo(capacities.SegmentCapacity));
+                Assert.That(buffer.TileVisitCapacity, Is.EqualTo(capacities.TileVisitCapacity));
+            });
+
+            buffer.Clear();
+            Assert.Multiple(() =>
+            {
+                Assert.That(buffer.Segments, Is.Empty);
+                Assert.That(buffer.TileVisits, Is.Empty);
+                Assert.That(buffer.SegmentCapacity, Is.EqualTo(capacities.SegmentCapacity));
+                Assert.That(buffer.TileVisitCapacity, Is.EqualTo(capacities.TileVisitCapacity));
+            });
+        });
+    }
+
     private static IEqualityComparer<Vector2> Vector2Comparer { get; } =
         new ApproximateVector2Comparer(0.0001f);
 

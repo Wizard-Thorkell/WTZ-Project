@@ -26,6 +26,8 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     public const int MaximumMaxVerticalCrossings = 1024;
     public const int DefaultMaxTileVisits = 8192;
     public const int MaximumMaxTileVisits = 1_000_000;
+    public const int DefaultMaxEntityHits = 4096;
+    public const int MaximumMaxEntityHits = 1_000_000;
 
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly IConfigurationManager _configuration = default!;
@@ -37,9 +39,11 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     private EntityQuery<MapGridComponent> _gridQuery;
     private int _maxVerticalCrossings = DefaultMaxVerticalCrossings;
     private int _maxTileVisits = DefaultMaxTileVisits;
+    private int _maxEntityHits = DefaultMaxEntityHits;
 
     public int MaxVerticalCrossings => _maxVerticalCrossings;
     public int MaxTileVisits => _maxTileVisits;
+    public int MaxEntityHits => _maxEntityHits;
 
     public override void Initialize()
     {
@@ -54,6 +58,11 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             _configuration,
             CCVars.ZLevelTraceMaxTileVisits,
             value => _maxTileVisits = Math.Clamp(value, 1, MaximumMaxTileVisits),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelTraceMaxEntityHits,
+            value => _maxEntityHits = Math.Clamp(value, 1, MaximumMaxEntityHits),
             true);
     }
 
@@ -86,6 +95,16 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
 
     public ZLevelTraceResult Trace(in ZLevelTraceRequest request)
     {
+        var buffer = new ZLevelTraceBuffer();
+        var result = Trace(request, buffer);
+        return ToImmutableResult(result, buffer);
+    }
+
+    public ZLevelTraceBufferResult Trace(in ZLevelTraceRequest request, ZLevelTraceBuffer buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        buffer.Clear();
+
         if (!TryNormalizePoint(request.Origin, out var normalizedOrigin) ||
             !TryNormalizePoint(request.Destination, out var normalizedDestination))
         {
@@ -132,7 +151,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         destinationWorld = normalizedDestination.WorldCoordinates;
 
         if (originWorld.Z == destinationWorld.Z)
-            return TraceSameLevel(normalizedRequest);
+            return TraceSameLevel(normalizedRequest, buffer);
 
         if (frameUid is not { } gridUid ||
             !_gridQuery.TryComp(gridUid, out var grid))
@@ -144,7 +163,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         if (crossingCount > _maxVerticalCrossings)
             return EmptyResult(ZLevelTraceTermination.IterationBudgetExceeded, normalizedOrigin);
 
-        return TraceVerticalSameFrame(normalizedRequest, gridUid, grid, (int)crossingCount);
+        return TraceVerticalSameFrame(normalizedRequest, gridUid, grid, (int)crossingCount, buffer);
     }
 
     private bool TryNormalizePoint(ZLevelTracePoint point, out ZLevelTracePoint normalized)
@@ -205,12 +224,13 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         return true;
     }
 
-    private ZLevelTraceResult TraceSameLevel(in ZLevelTraceRequest request)
+    private ZLevelTraceBufferResult TraceSameLevel(
+        in ZLevelTraceRequest request,
+        ZLevelTraceBuffer buffer)
     {
-        var accumulator = new TraceAccumulator();
         var length = GetTraceLength(request.Origin.WorldCoordinates, request.Destination.WorldCoordinates);
         if (!TryAppendSegment(
-                accumulator,
+                buffer,
                 request,
                 request.Origin,
                 request.Destination,
@@ -220,19 +240,19 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             return BuildResult(
                 ZLevelTraceTermination.IterationBudgetExceeded,
                 request.Origin,
-                accumulator);
+                buffer);
         }
 
-        return BuildResult(ZLevelTraceTermination.Completed, request.Destination, accumulator);
+        return BuildResult(ZLevelTraceTermination.Completed, request.Destination, buffer);
     }
 
-    private ZLevelTraceResult TraceVerticalSameFrame(
+    private ZLevelTraceBufferResult TraceVerticalSameFrame(
         in ZLevelTraceRequest request,
         EntityUid gridUid,
         MapGridComponent grid,
-        int crossingCount)
+        int crossingCount,
+        ZLevelTraceBuffer buffer)
     {
-        var accumulator = new TraceAccumulator();
         var origin = request.Origin;
         var destination = request.Destination;
         var originWorld = origin.WorldCoordinates;
@@ -269,7 +289,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                 originWorld.MapId);
 
             if (!TryAppendSegment(
-                    accumulator,
+                    buffer,
                     request,
                     currentPoint,
                     pointBefore,
@@ -279,7 +299,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                 return BuildResult(
                     ZLevelTraceTermination.IterationBudgetExceeded,
                     currentPoint,
-                    accumulator);
+                    buffer);
             }
 
             var tile = GetTile(localPosition, grid.TileSize);
@@ -291,24 +311,24 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                     toLocalZ,
                     out var state))
             {
-                return BuildResult(ZLevelTraceTermination.InvalidCoordinates, pointBefore, accumulator);
+                return BuildResult(ZLevelTraceTermination.InvalidCoordinates, pointBefore, buffer);
             }
 
             var isOpen = state.IsOpen(request.BoundaryChannels);
-            accumulator.BoundaryCrossings.Add(new ZLevelTraceBoundaryCrossing(
-                accumulator.BoundaryCrossings.Count,
+            buffer.MutableBoundaryCrossings.Add(new ZLevelTraceBoundaryCrossing(
+                buffer.MutableBoundaryCrossings.Count,
                 gridUid,
                 tile,
                 fromLocalZ,
                 toLocalZ,
                 fromWorldZ,
                 toWorldZ,
-                accumulator.Segments.Count - 1,
+                buffer.MutableSegments.Count - 1,
                 crossingDistance,
                 state,
                 isOpen));
             if (!isOpen)
-                return BuildResult(ZLevelTraceTermination.ClosedBoundary, pointBefore, accumulator);
+                return BuildResult(ZLevelTraceTermination.ClosedBoundary, pointBefore, buffer);
 
             currentPoint = CreateGridPoint(
                 gridUid,
@@ -321,7 +341,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         }
 
         if (!TryAppendSegment(
-                accumulator,
+                buffer,
                 request,
                 currentPoint,
                 destination,
@@ -331,39 +351,37 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             return BuildResult(
                 ZLevelTraceTermination.IterationBudgetExceeded,
                 currentPoint,
-                accumulator);
+                buffer);
         }
 
-        return BuildResult(ZLevelTraceTermination.Completed, destination, accumulator);
+        return BuildResult(ZLevelTraceTermination.Completed, destination, buffer);
     }
 
     private bool TryAppendSegment(
-        TraceAccumulator accumulator,
+        ZLevelTraceBuffer buffer,
         in ZLevelTraceRequest request,
         ZLevelTracePoint start,
         ZLevelTracePoint end,
         float startDistance,
         float endDistance)
     {
-        var segmentSequence = accumulator.Segments.Count;
-        var initialTileCount = accumulator.TileVisits.Count;
+        var bookmark = buffer.Bookmark();
+        var segmentSequence = buffer.MutableSegments.Count;
         if ((request.Options & ZLevelTraceOptions.IncludeTileVisits) != 0 &&
             !TryAppendSameFrameTiles(
-                accumulator.TileVisits,
+                buffer.MutableTileVisits,
                 start,
                 end,
                 segmentSequence,
                 startDistance,
                 endDistance))
         {
-            accumulator.TileVisits.RemoveRange(
-                initialTileCount,
-                accumulator.TileVisits.Count - initialTileCount);
+            buffer.Rollback(bookmark);
             return false;
         }
 
         var frameUid = start.GridUid == end.GridUid ? start.GridUid : null;
-        accumulator.Segments.Add(new ZLevelTraceSegment(
+        buffer.MutableSegments.Add(new ZLevelTraceSegment(
             segmentSequence,
             start,
             end,
@@ -372,23 +390,25 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             endDistance));
 
         if ((request.Options & ZLevelTraceOptions.IncludeEntityHits) != 0 &&
-            request.CollisionMask != 0)
-        {
-            AppendSameLevelEntityHits(
-                accumulator.EntityHits,
+            request.CollisionMask != 0 &&
+            !TryAppendSameLevelEntityHits(
+                buffer,
                 request,
                 start,
                 end,
                 segmentSequence,
                 startDistance,
-                endDistance);
+                endDistance))
+        {
+            buffer.Rollback(bookmark);
+            return false;
         }
 
         return true;
     }
 
-    private void AppendSameLevelEntityHits(
-        List<PendingEntityHit> output,
+    private bool TryAppendSameLevelEntityHits(
+        ZLevelTraceBuffer buffer,
         in ZLevelTraceRequest request,
         ZLevelTracePoint start,
         ZLevelTracePoint end,
@@ -403,15 +423,15 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         {
             if (endDistance > startDistance)
             {
-                AppendPointEntityHits(
-                    output,
+                return TryAppendPointEntityHits(
+                    buffer,
                     request,
                     startWorld,
                     segmentSequence,
                     startDistance);
             }
 
-            return;
+            return true;
         }
 
         var ray = new CollisionRay(
@@ -426,7 +446,8 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             static (entity, state) => state.System.ShouldIgnoreEntity(entity, state),
             twoDimensionalLength,
             false);
-        var hits = new List<RayCastResults>();
+        var hits = buffer.PhysicsHits;
+        hits.Clear();
         foreach (var hit in physicsHits)
         {
             hits.Add(hit);
@@ -438,28 +459,40 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             return distance != 0 ? distance : left.HitEntity.CompareTo(right.HitEntity);
         });
 
+        if (buffer.MutableEntityHits.Count > _maxEntityHits - hits.Count)
+            return false;
+
         foreach (var hit in hits)
         {
             var interpolation = Math.Clamp(hit.Distance / twoDimensionalLength, 0f, 1f);
-            output.Add(new PendingEntityHit(
+            buffer.MutableEntityHits.Add(new ZLevelTraceEntityHit(
+                0,
                 hit.HitEntity,
                 new ZLevelMapCoordinates(hit.HitPos, startWorld.Z, startWorld.MapId),
                 segmentSequence,
                 Lerp(startDistance, endDistance, interpolation)));
         }
+
+        return true;
     }
 
-    private void AppendPointEntityHits(
-        List<PendingEntityHit> output,
+    private bool TryAppendPointEntityHits(
+        ZLevelTraceBuffer buffer,
         in ZLevelTraceRequest request,
         ZLevelMapCoordinates point,
         int segmentSequence,
         float distance)
     {
-        var candidates = _lookup.GetEntitiesIntersecting(
-            new MapCoordinates(point.Position, point.MapId),
+        var candidates = buffer.PointCandidates;
+        candidates.Clear();
+        _lookup.GetEntitiesInRange(
+            point.MapId,
+            point.Position,
+            EntityLookupSystem.LookupEpsilon,
+            candidates,
             LookupFlags.Dynamic | LookupFlags.Static);
-        var hits = new List<EntityUid>();
+        var hits = buffer.PointHits;
+        hits.Clear();
         foreach (var entity in candidates)
         {
             if (ShouldIgnoreEntity(entity, new EntityFilter(this, request.IgnoredEntity, point.Z)) ||
@@ -484,14 +517,20 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         }
 
         hits.Sort();
+        if (buffer.MutableEntityHits.Count > _maxEntityHits - hits.Count)
+            return false;
+
         foreach (var entity in hits)
         {
-            output.Add(new PendingEntityHit(
+            buffer.MutableEntityHits.Add(new ZLevelTraceEntityHit(
+                0,
                 entity,
                 point,
                 segmentSequence,
                 distance));
         }
+
+        return true;
     }
 
     private bool TryAppendSameFrameTiles(
@@ -654,25 +693,19 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         return float.IsFinite(value.X) && float.IsFinite(value.Y);
     }
 
-    private static ZLevelTraceResult EmptyResult(
+    private static ZLevelTraceBufferResult EmptyResult(
         ZLevelTraceTermination termination,
         ZLevelTracePoint finalPoint)
     {
-        return new ZLevelTraceResult(
-            termination,
-            finalPoint,
-            ImmutableArray<ZLevelTraceSegment>.Empty,
-            ImmutableArray<ZLevelTraceTileVisit>.Empty,
-            ImmutableArray<ZLevelTraceEntityHit>.Empty,
-            ImmutableArray<ZLevelTraceBoundaryCrossing>.Empty);
+        return new ZLevelTraceBufferResult(termination, finalPoint);
     }
 
-    private static ZLevelTraceResult BuildResult(
+    private static ZLevelTraceBufferResult BuildResult(
         ZLevelTraceTermination termination,
         ZLevelTracePoint finalPoint,
-        TraceAccumulator accumulator)
+        ZLevelTraceBuffer buffer)
     {
-        accumulator.EntityHits.Sort(static (left, right) =>
+        buffer.MutableEntityHits.Sort(static (left, right) =>
         {
             var distance = left.Distance.CompareTo(right.Distance);
             if (distance != 0)
@@ -681,25 +714,26 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             var entity = left.Entity.CompareTo(right.Entity);
             return entity != 0 ? entity : left.SegmentSequence.CompareTo(right.SegmentSequence);
         });
-        var entityHits = ImmutableArray.CreateBuilder<ZLevelTraceEntityHit>(accumulator.EntityHits.Count);
-        for (var i = 0; i < accumulator.EntityHits.Count; i++)
+        for (var i = 0; i < buffer.MutableEntityHits.Count; i++)
         {
-            var hit = accumulator.EntityHits[i];
-            entityHits.Add(new ZLevelTraceEntityHit(
-                i,
-                hit.Entity,
-                hit.Position,
-                hit.SegmentSequence,
-                hit.Distance));
+            var hit = buffer.MutableEntityHits[i];
+            buffer.MutableEntityHits[i] = hit with { Sequence = i };
         }
 
+        return new ZLevelTraceBufferResult(termination, finalPoint);
+    }
+
+    private static ZLevelTraceResult ToImmutableResult(
+        ZLevelTraceBufferResult result,
+        ZLevelTraceBuffer buffer)
+    {
         return new ZLevelTraceResult(
-            termination,
-            finalPoint,
-            accumulator.Segments.ToImmutableArray(),
-            accumulator.TileVisits.ToImmutableArray(),
-            entityHits.MoveToImmutable(),
-            accumulator.BoundaryCrossings.ToImmutableArray());
+            result.Termination,
+            result.FinalPoint,
+            buffer.MutableSegments.ToImmutableArray(),
+            buffer.MutableTileVisits.ToImmutableArray(),
+            buffer.MutableEntityHits.ToImmutableArray(),
+            buffer.MutableBoundaryCrossings.ToImmutableArray());
     }
 
     private readonly record struct EntityFilter(
@@ -707,17 +741,4 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         EntityUid? IgnoredEntity,
         int WorldZ);
 
-    private readonly record struct PendingEntityHit(
-        EntityUid Entity,
-        ZLevelMapCoordinates Position,
-        int SegmentSequence,
-        float Distance);
-
-    private sealed class TraceAccumulator
-    {
-        public readonly List<ZLevelTraceSegment> Segments = new();
-        public readonly List<ZLevelTraceTileVisit> TileVisits = new();
-        public readonly List<PendingEntityHit> EntityHits = new();
-        public readonly List<ZLevelTraceBoundaryCrossing> BoundaryCrossings = new();
-    }
 }
