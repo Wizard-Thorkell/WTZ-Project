@@ -111,16 +111,17 @@ namespace Content.MapRenderer.Painters
 
             while (query.MoveNext(out var uid, out var grid))
             {
-                // TODO this needs to use the client entity manager because the client
-                // actually has the correct z-indices for decals for some reason when the server doesn't,
-                // BUT can't do that yet because the client hasn't actually received everything yet
-                // for some reason decal moment i guess.
+                // The standalone renderer has no selected-floor input, so it keeps
+                // the legacy Z=0 view instead of overlapping every authored floor.
                 if (_sEntityManager.TryGetComponent<DecalGridComponent>(uid, out var comp))
                 {
                     foreach (var chunk in comp.ChunkCollection.ChunkCollection.Values)
                     {
                         foreach (var decal in chunk.Decals.Values)
                         {
+                            if (decal.ZLevel != 0)
+                                continue;
+
                             var (x, y) = TransformLocalPosition(decal.Coordinates, grid);
                             decals.GetOrNew(uid).Add(new DecalData(decal, x, y));
                         }

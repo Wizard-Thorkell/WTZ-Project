@@ -1,6 +1,8 @@
 using System.Numerics;
 using Content.Server.Decals;
 using Content.Server.Spawners.Components;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
@@ -15,6 +17,7 @@ public sealed class RandomDecalSpawnerSystem : EntitySystem
     [Dependency] private readonly IPrototypeManager _prototypes = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly ITileDefinitionManager _tileDefs = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -59,6 +62,7 @@ public sealed class RandomDecalSpawnerSystem : EntitySystem
         var xform = Transform(ent);
         if (!TryComp<MapGridComponent>(xform.GridUid, out var grid))
             return false;
+        var localZ = _zLevel.GetZLevel(ent.Owner);
 
         var addedDecals = new Dictionary<string, int>();
 
@@ -71,7 +75,11 @@ public sealed class RandomDecalSpawnerSystem : EntitySystem
             var localPos = xform.Coordinates.Position + _random.NextVector2(comp.Radius) + new Vector2(-0.5f, -0.5f);
             var position = new EntityCoordinates(xform.GridUid.Value, localPos);
 
-            var tileRef = _map.GetTileRef(xform.GridUid.Value, grid, position);
+            var tileIndices = _map.TileIndicesFor(xform.GridUid.Value, grid, position);
+            var tileRef = _map.GetZLevelTileRef(
+                xform.GridUid.Value,
+                grid,
+                new ZLevelTileIndices(tileIndices.X, tileIndices.Y, localZ));
 
             if (tileWhitelist.Count > 0)
             {
@@ -93,7 +101,8 @@ public sealed class RandomDecalSpawnerSystem : EntitySystem
             var snapPosition = comp.SnapPosition ?? decalProto.DefaultSnap;
             if (snapPosition)
             {
-                position = position.WithPosition(tileRef.GridIndices * grid.TileSize);
+                position = position.WithPosition(
+                    new Vector2(tileRef.GridIndices.X, tileRef.GridIndices.Y) * grid.TileSize);
             }
 
             var cleanable = comp.Cleanable ?? decalProto.DefaultCleanable;
@@ -118,7 +127,8 @@ public sealed class RandomDecalSpawnerSystem : EntitySystem
                 color,
                 rotation,
                 comp.ZIndex,
-                cleanable
+                cleanable,
+                localZ
             );
 
             if (comp.MaxDecalsPerTile is > 0)

@@ -7,9 +7,9 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/fire-atmos-heat`.
-- Active package: none; next is `P2.3c generated effect placement and
-  cross-floor presentation hardening`.
+- Active branch: `zlevel/generated-effects`.
+- Active package: `P2.3c2 generated entity/effect placement and cross-floor
+  camera-shake authority`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -826,7 +826,152 @@ presentation can each pass the completion gate independently:
 | --- | --- | --- |
 | P2.3a | Authoritative per-floor explosion topology and blast processing | Complete |
 | P2.3b | Z-aware fire and atmospheric heat propagation | Complete |
-| P2.3c | Generated effect placement and cross-floor presentation hardening | Pending |
+| P2.3c | Generated effect placement and cross-floor presentation hardening | In progress |
+
+P2.3c is split so persistent layered presentation and transient entity effects
+remain independently reviewable:
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P2.3c1 | Persistent decals, mapping operations, serialization, and rendering by floor | Complete |
+| P2.3c2 | Generated entity/effect stamping and floor-authoritative camera shake | Pending |
+
+## Completed Package: P2.3c1 Persistent Layered Decals
+
+### Scope
+
+- Give each decal an explicit grid-local Z level while keeping absent data and
+  existing APIs compatible with Z 0.
+- Carry decal layers through map serialization, component replication, mutation
+  helpers, queries, tile changes, and grid splitting.
+- Make fire scorching, crayons, spray painters, random decal spawners, mapping
+  placement/removal, and the `adddecal` command target an explicit local floor.
+- Remove decals only when their own floor tile is replaced, deconstructed, or
+  removed.
+- Render current-floor decals normally, lower decals only through open
+  `Visibility` boundaries, and adjacent floors with the established mapping
+  preview alpha convention.
+- Copy decals with mapping floor-copy operations and preserve both source and
+  target layers through save/load.
+- Keep the legacy static map renderer deterministic by rendering Z 0 only until
+  it gains an explicit floor-selection contract.
+
+### Acceptance Criteria
+
+- Equal XY positions can hold independent decals on multiple local floors.
+- Placement fails when the requested layer has no floor even if Z 0 is solid.
+- Removing or replacing a floor removes only that layer's decals.
+- Runtime placement tools derive local Z from the user's world Z and the target
+  grid frame; mapping tools use the explicitly selected local floor.
+- Component state and map serialization preserve layers, while version-two map
+  decals without a layer field load on Z 0.
+- Copying a mapping floor duplicates its decals without changing the source.
+- Current-floor presentation is opaque; lower floors require an open visibility
+  stack; higher floors stay hidden outside adjacent-floor mapping preview.
+- The package adds no per-tick server scan and preserves moving-grid frame
+  semantics.
+
+### Explicit Deferrals
+
+- P2.3c2 owns debris, destruction outputs, trigger/spawn-table entities,
+  despawn replacements, transient entity effects, grenade fragments, and
+  camera-shake recipient filtering.
+- P4 owns sound propagation, including upper-floor hotspot audio.
+- Chemical reactions without `IZLevelTileReaction` remain safely skipped above
+  Z 0; converting decal cleaning is part of later interaction/content work.
+- Decal PVS remains keyed by XY chunks and can replicate decals from multiple
+  floors in one visible chunk. P8 owns dense multi-floor bandwidth profiling
+  and any layer-aware network partitioning justified by that evidence.
+- The standalone map image renderer has no selected-floor input and therefore
+  emits only Z 0 decals. A multi-floor export UI is outside this package.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to persistent decal layer identity,
+      producers/consumers, mapping copy, presentation, tests, and this ledger.
+- [x] Invariant review: Z 0 compatibility, local/world conversion, frame origin
+      5, moving grids, server-authoritative placement, and `Visibility`
+      boundary checks were reviewed and covered where applicable.
+- [x] Automated verification: 4/4 dedicated decal tests, 5/5 map-format tests,
+      the complete 109/109 focused Z-level integration matrix, 2/2 structural unit
+      tests, and the 3/3 stress runner passed.
+- [x] Performance evidence: server mutation remains event-driven, measured
+      stress allocations remain 6,336 bytes at 3/6/10 floors, and the unrelated
+      stress fixture records no decal work; dense decal rendering/networking is
+      explicitly reserved for P8 profiling.
+- [x] Documentation: compatibility, ownership, mapping behavior, tests,
+      limitations, and next-package boundaries are recorded here.
+- [x] Dependency check: `RobustToolbox` is clean at
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea`; no WTZ Engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, generated baselines remain ignored, and the worktree contains
+      only declared P2.3c1 files.
+- [x] Mini review: findings, residual risks, and P2.3c2 ownership are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Layer decals across Z levels`
+      commit on `zlevel/generated-effects`; remote verification follows the
+      package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed with
+  zero errors. Its warnings are existing dependency, analyzer, and upstream
+  obsolescence warnings.
+- Dedicated integration coverage passes 4/4: floor-scoped validation/query and
+  removal, server-to-client state replication, version-three map round-trip,
+  and loading real version-two decals from `haunted.yml` as Z 0.
+- The mapping/format matrix passes 5/5, including copying one source decal to a
+  target floor and preserving both through save/load.
+- The complete focused Z-level integration matrix passes 109/109 with no regressions;
+  structural unit tests pass 2/2 and all generated stress cases pass 3/3.
+- The local Debug stress snapshots retained the fixed 6,336-byte measured
+  allocation profile:
+
+| Floors | Warm-up ms | Measured ms | Measured allocations | Boundary hit rate | Evictions |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 9.487 | 7.075 | 6,336 B | 100% | 0 |
+| 6 | 17.447 | 13.688 | 6,336 B | 100% | 0 |
+| 10 | 34.468 | 24.822 | 6,336 B | 100% | 0 |
+
+These timings are local comparison evidence, not release thresholds. The
+fixtures contain no decals, so they establish absence of unrelated server cost
+rather than GPU or dense decal-network throughput.
+
+### Decisions
+
+- Store local Z on each decal instead of cloning the entire existing chunk and
+  PVS model per floor. This preserves old map shape, IDs, chunk dirtiness, and
+  delta-state behavior while making layer identity explicit end to end.
+- Bump compact decal output to version three. Version-one and version-two input
+  continue through their existing paths; the missing `zLevel` field defaults
+  to zero.
+- Resolve world Z at the interaction/view boundary, then store grid-local Z.
+  This keeps saved maps portable when grids have non-zero frame origins.
+- Reuse `SharedZLevelVisibilitySystem` and its cached boundary decisions for
+  lower-floor rendering instead of creating decal-specific visibility policy.
+- Give mapping decal placement an explicit active-floor override so rapid floor
+  changes do not depend on the network delay before the mapper entity moves.
+- Snapshot source decals before clearing the target floor during mapping copy,
+  then recreate them only after target tiles exist.
+
+### Mini Review
+
+- Finding: persistent scorch marks and authored decals now retain one floor
+  from creation through query, mapping copy, replication, save/load, and draw.
+- Finding: the review caught two mapping-only gaps before commit: erase requests
+  still defaulted to Z 0, and floor copy omitted decals. Both now have direct
+  coverage.
+- Finding: version-two maps retain their prior Z 0 meaning, while new files
+  serialize distinct layers without duplicating XY chunk storage.
+- Residual risk: decal overlay filtering has deterministic authority/frame
+  tests but no automated pixel screenshot; a live pass should inspect holes,
+  mapping preview, remote eyes, and translated grids.
+- Residual risk: one visible XY network chunk currently carries all of its decal
+  layers. This is correct but may become bandwidth-heavy on decal-dense maps.
+- Next package: P2.3c2 will stamp generated entities and transient effects with
+  the source world floor, then make camera shake reject unrelated overlapping
+  floors without changing P4 sound policy.
 
 ## Completed Package: P2.3b Z-Aware Fire And Atmospheric Heat
 
@@ -1481,3 +1626,6 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.1 | `Migrate hitscan to Z-level traces` | 10 hitscan, 1 weapon, 78 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.2a | `Preserve Z-level projectile lifecycle` | 5 lifecycle, 12 regressions, 83 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.2b | `Add physical cross-level ballistic trajectories` | 18 trajectory, 12 regressions, 101 integration, 7 engine, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.3a | `Make explosions Z-level authoritative` | 14 explosion, 9 prototype, 120 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.3b | `Make fire and atmosphere overlays Z-aware` | 12 atmosphere, 14 explosion, 120 integration, 9 prototype, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.3c1 | `Layer decals across Z levels` | 4 decal, 5 map format, 109 integration, 2 unit, 3 baseline, diff check | Complete |

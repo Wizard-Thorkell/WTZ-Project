@@ -13,6 +13,7 @@ using Content.Shared.DoAfter;
 using Content.Shared.Interaction;
 using Content.Shared.SprayPainter;
 using Content.Shared.SprayPainter.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.Audio;
 using Robust.Server.GameObjects;
 using System.Linq;
@@ -32,6 +33,7 @@ public sealed class SprayPainterSystem : SharedSprayPainterSystem
     [Dependency] private readonly AudioSystem _audio = default!;
     [Dependency] private readonly ChargesSystem _charges = default!;
     [Dependency] private readonly TransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -76,24 +78,39 @@ public sealed class SprayPainterSystem : SharedSprayPainterSystem
         if (ent.Comp.SnapDecals)
             position = position.SnapToGrid(EntityManager);
 
+        if (_transform.GetGrid(args.ClickLocation) is not { } grid)
+            return;
+
+        var localZ = _transform.WorldToLocalZLevel(grid, _zLevel.GetWorldZLevel(args.User));
+
         if (ent.Comp.DecalMode == DecalPaintMode.Add)
         {
             // Offset painting for adding decals
             position = position.Offset(new(-0.5f));
 
-            if (!_decals.TryAddDecal(ent.Comp.SelectedDecal, position, out _, ent.Comp.SelectedDecalColor, Angle.FromDegrees(ent.Comp.SelectedDecalAngle), 0, false))
+            if (!_decals.TryAddDecal(
+                    ent.Comp.SelectedDecal,
+                    position,
+                    out _,
+                    ent.Comp.SelectedDecalColor,
+                    Angle.FromDegrees(ent.Comp.SelectedDecalAngle),
+                    cleanable: false,
+                    zLevel: localZ))
                 return;
         }
         else
         {
-            var gridUid = _transform.GetGrid(args.ClickLocation);
-            if (gridUid is not { } grid || !TryComp<DecalGridComponent>(grid, out var decalGridComp))
+            if (!TryComp<DecalGridComponent>(grid, out var decalGridComp))
             {
                 _popup.PopupEntity(Loc.GetString("spray-painter-interact-nothing-to-remove"), args.User, args.User);
                 return;
             }
 
-            var decals = _decals.GetDecalsInRange(grid, position.Position, validDelegate: IsDecalValid);
+            var decals = _decals.GetDecalsInRange(
+                grid,
+                position.Position,
+                validDelegate: IsDecalValid,
+                zLevel: localZ);
             if (decals.Count <= 0)
             {
                 _popup.PopupEntity(Loc.GetString("spray-painter-interact-nothing-to-remove"), args.User, args.User);
@@ -205,7 +222,12 @@ public sealed class SprayPainterSystem : SharedSprayPainterSystem
             return;
 
         var clickPos = args.ClickLocation.Position;
-        var decals = _decals.GetDecalsInRange(grid, clickPos, validDelegate: IsDecalValid);
+        var localZ = _transform.WorldToLocalZLevel(grid, _zLevel.GetWorldZLevel(args.User));
+        var decals = _decals.GetDecalsInRange(
+            grid,
+            clickPos,
+            validDelegate: IsDecalValid,
+            zLevel: localZ);
         if (decals.Count == 0)
         {
             _popup.PopupEntity(Loc.GetString("spray-painter-interact-no-color-pick"), args.User, args.User);

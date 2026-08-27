@@ -1,14 +1,17 @@
 using System.Numerics;
 using Content.Client.Actions;
 using Content.Client.Decals.Overlays;
+using Content.Client.ZLevel;
 using Content.Shared.Actions;
 using Content.Shared.Actions.Components;
 using Content.Shared.Decals;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.Input;
+using Robust.Client.Player;
 using Robust.Shared.Input;
 using Robust.Shared.Input.Binding;
+using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
 
 namespace Content.Client.Decals;
@@ -20,13 +23,18 @@ public sealed class DecalPlacementSystem : EntitySystem
     [Dependency] private readonly IInputManager _inputManager = default!;
     [Dependency] private readonly IOverlayManager _overlay = default!;
     [Dependency] private readonly IPrototypeManager _protoMan = default!;
+    [Dependency] private readonly IEyeManager _eyeManager = default!;
+    [Dependency] private readonly IPlayerManager _playerManager = default!;
     [Dependency] private readonly InputSystem _inputSystem = default!;
     [Dependency] private readonly MetaDataSystem _metaData = default!;
     [Dependency] private readonly SharedActionsSystem _actions = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SpriteSystem _sprite = default!;
+    [Dependency] private readonly ZLevelViewContextSystem _viewContext = default!;
 
     public static readonly EntProtoId DecalAction = "BaseMappingDecalAction";
+
+    public int? ActiveZLevelOverride { get; set; }
 
     private string? _decalId;
     private Color _decalColor = Color.White;
@@ -73,7 +81,15 @@ public sealed class DecalPlacementSystem : EntitySystem
                 if (!coords.IsValid(EntityManager))
                     return false;
 
-                var decal = new Decal(coords.Position, _decalId, _decalColor, _decalAngle, _zIndex, _cleanable);
+                var zLevel = GetViewedLocalZ(coords);
+                var decal = new Decal(
+                    coords.Position,
+                    _decalId,
+                    _decalColor,
+                    _decalAngle,
+                    _zIndex,
+                    _cleanable,
+                    zLevel);
                 RaiseNetworkEvent(new RequestDecalPlacementEvent(decal, GetNetCoordinates(coords)));
 
                 return true;
@@ -94,7 +110,7 @@ public sealed class DecalPlacementSystem : EntitySystem
 
                 _erasing = true;
 
-                RaiseNetworkEvent(new RequestDecalRemovalEvent(GetNetCoordinates(coords)));
+                RaiseNetworkEvent(new RequestDecalRemovalEvent(GetNetCoordinates(coords), GetViewedLocalZ(coords)));
 
                 return true;
             }, (session, coords, uid) =>
@@ -131,7 +147,14 @@ public sealed class DecalPlacementSystem : EntitySystem
 
         args.Target = args.Target.Offset(new Vector2(-0.5f, -0.5f));
 
-        var decal = new Decal(args.Target.Position, args.DecalId, args.Color, Angle.FromDegrees(args.Rotation), args.ZIndex, args.Cleanable);
+        var decal = new Decal(
+            args.Target.Position,
+            args.DecalId,
+            args.Color,
+            Angle.FromDegrees(args.Rotation),
+            args.ZIndex,
+            args.Cleanable,
+            GetViewedLocalZ(args.Target));
         RaiseNetworkEvent(new RequestDecalPlacementEvent(decal, GetNetCoordinates(args.Target)));
     }
 
@@ -193,5 +216,19 @@ public sealed class DecalPlacementSystem : EntitySystem
             _inputManager.Contexts.SetActiveContext("editor");
         else
             _inputSystem.SetEntityContextActive();
+    }
+
+    private int GetViewedLocalZ(EntityCoordinates coordinates)
+    {
+        if (ActiveZLevelOverride is { } activeZLevel)
+            return activeZLevel;
+
+        if (_transform.GetGrid(coordinates) is not { } grid ||
+            !_viewContext.TryGetViewContext(_eyeManager.CurrentEye, _playerManager.LocalEntity, out var view))
+        {
+            return 0;
+        }
+
+        return _transform.WorldToLocalZLevel(grid, view.WorldZLevel);
     }
 }

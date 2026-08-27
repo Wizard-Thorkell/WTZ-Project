@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Content.Server.Administration.Managers;
+using Content.Server.Decals;
 using Content.Shared.Administration;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
@@ -26,6 +27,7 @@ namespace Content.Server.ZLevel.Systems;
 public sealed class ZLevelMappingSystem : EntitySystem
 {
     [Dependency] private readonly IAdminManager _admin = default!;
+    [Dependency] private readonly DecalSystem _decals = default!;
     [Dependency] private readonly MapLoaderSystem _mapLoader = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
@@ -184,6 +186,12 @@ public sealed class ZLevelMappingSystem : EntitySystem
             .Where(tile => tile.GridIndices.Z == targetLevel)
             .Select(tile => tile.GridIndices)
             .ToArray();
+        var sourceDecals = _decals.GetDecalsIntersecting(
+                grid.Owner,
+                grid.Comp.LocalAABB,
+                zLevel: sourceLevel)
+            .Select(entry => entry.Decal)
+            .ToArray();
 
         foreach (var tile in targetTiles)
             _map.SetZLevelTile(grid.Owner, grid.Comp, tile, Tile.Empty);
@@ -195,6 +203,17 @@ public sealed class ZLevelMappingSystem : EntitySystem
         {
             var target = new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, targetLevel);
             _map.SetZLevelTile(grid.Owner, grid.Comp, target, tile.Tile);
+        }
+
+        foreach (var decal in sourceDecals)
+        {
+            if (!_decals.TryAddDecal(
+                    decal.WithZLevel(targetLevel),
+                    new EntityCoordinates(grid.Owner, decal.Coordinates),
+                    out _))
+            {
+                throw new InvalidOperationException($"Failed to copy decal '{decal.Id}' to Z level {targetLevel}.");
+            }
         }
 
         IncludeLevel(mapUid, config, targetLevel);

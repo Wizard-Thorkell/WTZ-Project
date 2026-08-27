@@ -1,9 +1,13 @@
 using System.Numerics;
+using Content.Client.ZLevel;
 using Content.Shared.Decals;
+using Content.Shared.ZLevel.Systems;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
+using Robust.Client.Player;
 using Robust.Shared.Enums;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Map.Enumerators;
 using Robust.Shared.Prototypes;
 
@@ -14,10 +18,15 @@ namespace Content.Client.Decals.Overlays
         private readonly SpriteSystem _sprites;
         private readonly IEntityManager _entManager;
         private readonly IPrototypeManager _prototypeManager;
+        private readonly IPlayerManager _playerManager;
+        private readonly SharedTransformSystem _transformSystem;
+        private readonly SharedZLevelVisibilitySystem _visibilitySystem;
+        private readonly ZLevelOverlaySystem _zLevelOverlaySystem;
+        private readonly ZLevelViewContextSystem _viewContextSystem;
 
         private readonly Dictionary<string, (Texture Texture, bool SnapCardinals)> _cachedTextures = new(64);
 
-        private readonly List<(uint Id, Decal Decal)> _decals = new();
+        private readonly List<(uint Id, Decal Decal, float Alpha)> _decals = new();
 
         public DecalOverlay(
             SpriteSystem sprites,
@@ -27,12 +36,23 @@ namespace Content.Client.Decals.Overlays
             _sprites = sprites;
             _entManager = entManager;
             _prototypeManager = prototypeManager;
+            _playerManager = IoCManager.Resolve<IPlayerManager>();
+            _transformSystem = entManager.System<SharedTransformSystem>();
+            _visibilitySystem = entManager.System<SharedZLevelVisibilitySystem>();
+            _zLevelOverlaySystem = entManager.System<ZLevelOverlaySystem>();
+            _viewContextSystem = entManager.System<ZLevelViewContextSystem>();
         }
 
         protected override void Draw(in OverlayDrawArgs args)
         {
             if (args.MapId == MapId.Nullspace)
                 return;
+
+            if (args.Viewport.Eye is not { } eye ||
+                !_viewContextSystem.TryGetViewContext(eye, _playerManager.LocalEntity, out var view))
+            {
+                return;
+            }
 
             var owner = Grid.Owner;
 
@@ -64,7 +84,11 @@ namespace Content.Client.Decals.Overlays
                     if (!gridAABB.Contains(decal.Coordinates))
                         continue;
 
-                    _decals.Add((id, decal));
+                    var targetWorldZ = _transformSystem.LocalToWorldZLevel(owner, decal.ZLevel);
+                    if (!TryGetLayerAlpha(owner, Grid.Comp, decal, view.WorldZLevel, targetWorldZ, out var alpha))
+                        continue;
+
+                    _decals.Add((id, decal, alpha));
                 }
             }
 
@@ -73,6 +97,10 @@ namespace Content.Client.Decals.Overlays
 
             _decals.Sort((x, y) =>
             {
+                var level = x.Decal.ZLevel.CompareTo(y.Decal.ZLevel);
+                if (level != 0)
+                    return level;
+
                 var zComp = x.Decal.ZIndex.CompareTo(y.Decal.ZIndex);
 
                 if (zComp != 0)
@@ -84,7 +112,7 @@ namespace Content.Client.Decals.Overlays
             var (_, worldRot, worldMatrix) = xformSystem.GetWorldPositionRotationMatrix(xform);
             handle.SetTransform(worldMatrix);
 
-            foreach (var (_, decal) in _decals)
+            foreach (var (_, decal, alpha) in _decals)
             {
                 if (!_cachedTextures.TryGetValue(decal.Id, out var cache))
                 {
@@ -107,14 +135,66 @@ namespace Content.Client.Decals.Overlays
                 }
 
                 var angle = decal.Angle - cardinal;
+                var color = decal.Color;
+                if (alpha < 1f)
+                {
+                    var resolvedColor = color ?? Color.White;
+                    color = resolvedColor.WithAlpha(resolvedColor.A * alpha);
+                }
 
                 if (angle.Equals(Angle.Zero))
-                    handle.DrawTexture(cache.Texture, decal.Coordinates, decal.Color);
+                    handle.DrawTexture(cache.Texture, decal.Coordinates, color);
                 else
-                    handle.DrawTexture(cache.Texture, decal.Coordinates, angle, decal.Color);
+                    handle.DrawTexture(cache.Texture, decal.Coordinates, angle, color);
             }
 
             handle.SetTransform(Matrix3x2.Identity);
+        }
+
+        private bool TryGetLayerAlpha(
+            EntityUid gridUid,
+            MapGridComponent grid,
+            Decal decal,
+            int viewerWorldZ,
+            int targetWorldZ,
+            out float alpha)
+        {
+            if (_zLevelOverlaySystem.MappingPreviewEnabled)
+            {
+                var delta = targetWorldZ - viewerWorldZ;
+                alpha = delta switch
+                {
+                    0 => 1f,
+                    -1 => 0.32f,
+                    1 => 0.22f,
+                    _ => 0f,
+                };
+                return alpha > 0f;
+            }
+
+            if (targetWorldZ == viewerWorldZ)
+            {
+                alpha = 1f;
+                return true;
+            }
+
+            if (targetWorldZ > viewerWorldZ)
+            {
+                alpha = 0f;
+                return false;
+            }
+
+            var tile = new Vector2i(
+                (int) Math.Floor(decal.Coordinates.X),
+                (int) Math.Floor(decal.Coordinates.Y));
+            if (!_visibilitySystem.IsTileVisibleFrom(gridUid, grid, tile, viewerWorldZ, decal.ZLevel))
+            {
+                alpha = 0f;
+                return false;
+            }
+
+            alpha = MathF.Max(0.16f, 1f - (viewerWorldZ - targetWorldZ) * 0.2f);
+            return true;
         }
     }
 }

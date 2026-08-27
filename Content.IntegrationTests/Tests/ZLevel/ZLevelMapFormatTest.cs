@@ -3,11 +3,13 @@
 
 using System.Linq;
 using System.Numerics;
+using Content.Server.Decals;
 using Content.Server.ZLevel.Systems;
 using Content.IntegrationTests.Fixtures;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
+using Content.Shared.Decals;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -125,6 +127,7 @@ public sealed class ZLevelMapFormatTest : GameTest
         var mapSystem = entMan.System<SharedMapSystem>();
         var format = entMan.System<SharedZLevelMapSystem>();
         var mapping = entMan.System<ZLevelMappingSystem>();
+        var decals = entMan.System<DecalSystem>();
         var transform = entMan.System<SharedTransformSystem>();
         var path = new ResPath("/Maps/Test/ZLevelMapFormat-copy-roundtrip.yml");
 
@@ -135,6 +138,11 @@ public sealed class ZLevelMapFormatTest : GameTest
             var map = entMan.GetComponent<MapComponent>(mapUid);
             var grid = mapManager.CreateGridEntity(mapId);
             mapSystem.SetTile(grid.Owner, grid.Comp, Vector2i.Zero, new Tile(1));
+            Assert.That(decals.TryAddDecal(
+                "burnt1",
+                new EntityCoordinates(grid.Owner, new Vector2(0.5f, 0.5f)),
+                out _,
+                zLevel: 0), Is.True);
 
             var marker = entMan.SpawnEntity("ZLevelSealedBoundaryMarker",
                 new EntityCoordinates(grid.Owner, new Vector2(0.5f, 0.5f)));
@@ -185,6 +193,10 @@ public sealed class ZLevelMapFormatTest : GameTest
                 Assert.That(markers.All(uid => entMan.GetComponent<TransformComponent>(uid).Anchored), Is.True);
                 Assert.That(markers.Select(uid => entMan.GetComponent<TransformComponent>(uid).LocalPosition),
                     Is.All.EqualTo(new Vector2(0.5f, 0.5f)));
+                Assert.That(decals.GetDecalsInRange(grid.Owner, new Vector2(0.5f, 0.5f), zLevel: 0),
+                    Has.Count.EqualTo(1));
+                Assert.That(decals.GetDecalsInRange(grid.Owner, new Vector2(0.5f, 0.5f), zLevel: 1),
+                    Has.Count.EqualTo(1));
             });
         }
     }

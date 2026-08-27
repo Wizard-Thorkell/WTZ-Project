@@ -8,6 +8,7 @@ using Content.Shared.Chunking;
 using Content.Shared.Database;
 using Content.Shared.Decals;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel;
 using Microsoft.Extensions.ObjectPool;
 using Robust.Server.GameObjects;
 using Robust.Server.Player;
@@ -67,6 +68,7 @@ namespace Content.Server.Decals
 
             _playerManager.PlayerStatusChanged += OnPlayerStatusChanged;
             SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
+            SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
 
             SubscribeNetworkEvent<RequestDecalPlacementEvent>(OnDecalPlacementRequest);
             SubscribeNetworkEvent<RequestDecalRemovalEvent>(OnDecalRemovalRequest);
@@ -163,42 +165,72 @@ namespace Content.Server.Decals
             if (!TryComp(args.Entity, out DecalGridComponent? grid))
                 return;
 
-            var toDelete = new HashSet<uint>();
-
+            var toDelete = new List<uint>();
             foreach (var change in args.Changes)
             {
                 if (!_turf.IsSpace(change.NewTile))
                     continue;
 
-                var indices = GetChunkIndices(change.GridIndices);
-
-                if (!grid.ChunkCollection.ChunkCollection.TryGetValue(indices, out var chunk))
-                    continue;
-
-                toDelete.Clear();
-
-                foreach (var (uid, decal) in chunk.Decals)
-                {
-                    if (new Vector2((int)Math.Floor(decal.Coordinates.X), (int)Math.Floor(decal.Coordinates.Y)) ==
-                        change.GridIndices)
-                    {
-                        toDelete.Add(uid);
-                    }
-                }
-
-                if (toDelete.Count == 0)
-                    continue;
-
-                foreach (var decalId in toDelete)
-                {
-                    grid.DecalIndex.Remove(decalId);
-                    chunk.Decals.Remove(decalId);
-                }
-
-                DirtyChunk(args.Entity, indices, chunk);
-                if (chunk.Decals.Count == 0)
-                    grid.ChunkCollection.ChunkCollection.Remove(indices);
+                RemoveDecalsOnTile(args.Entity, grid, change.GridIndices, 0, toDelete);
             }
+        }
+
+        private void OnZLevelTileChanged(ref ZLevelTileChangedEvent args)
+        {
+            if (!TryComp(args.Entity, out DecalGridComponent? grid))
+                return;
+
+            var toDelete = new List<uint>();
+            foreach (var change in args.Changes)
+            {
+                if (!_turf.IsSpace(change.NewTile))
+                    continue;
+
+                RemoveDecalsOnTile(
+                    args.Entity,
+                    grid,
+                    new Vector2i(change.GridIndices.X, change.GridIndices.Y),
+                    change.GridIndices.Z,
+                    toDelete);
+            }
+        }
+
+        private void RemoveDecalsOnTile(
+            EntityUid gridUid,
+            DecalGridComponent grid,
+            Vector2i tile,
+            int zLevel,
+            List<uint> toDelete)
+        {
+            var indices = GetChunkIndices(tile);
+            if (!grid.ChunkCollection.ChunkCollection.TryGetValue(indices, out var chunk))
+                return;
+
+            toDelete.Clear();
+            foreach (var (uid, decal) in chunk.Decals)
+            {
+                if (decal.ZLevel != zLevel)
+                    continue;
+
+                var decalTile = new Vector2i(
+                    (int) Math.Floor(decal.Coordinates.X),
+                    (int) Math.Floor(decal.Coordinates.Y));
+                if (decalTile == tile)
+                    toDelete.Add(uid);
+            }
+
+            if (toDelete.Count == 0)
+                return;
+
+            foreach (var decalId in toDelete)
+            {
+                grid.DecalIndex.Remove(decalId);
+                chunk.Decals.Remove(decalId);
+            }
+
+            DirtyChunk(gridUid, indices, chunk);
+            if (chunk.Decals.Count == 0)
+                grid.ChunkCollection.ChunkCollection.Remove(indices);
         }
 
         private void OnPlayerStatusChanged(object? sender, SessionStatusEventArgs e)
@@ -263,7 +295,10 @@ namespace Content.Server.Decals
                 return;
 
             // remove all decals on the same tile
-            foreach (var (decalId, decal) in GetDecalsInRange(gridId.Value, ev.Coordinates.Position))
+            foreach (var (decalId, decal) in GetDecalsInRange(
+                         gridId.Value,
+                         ev.Coordinates.Position,
+                         zLevel: ev.ZLevel))
             {
                 if (eventArgs.SenderSession.AttachedEntity != null)
                 {
@@ -289,10 +324,18 @@ namespace Content.Server.Decals
             _dirtyChunks[id].Add(chunkIndices);
         }
 
-        public bool TryAddDecal(string id, EntityCoordinates coordinates, out uint decalId, Color? color = null, Angle? rotation = null, int zIndex = 0, bool cleanable = false)
+        public bool TryAddDecal(
+            string id,
+            EntityCoordinates coordinates,
+            out uint decalId,
+            Color? color = null,
+            Angle? rotation = null,
+            int zIndex = 0,
+            bool cleanable = false,
+            int zLevel = 0)
         {
             rotation ??= Angle.Zero;
-            var decal = new Decal(coordinates.Position, id, color, rotation.Value, zIndex, cleanable);
+            var decal = new Decal(coordinates.Position, id, color, rotation.Value, zIndex, cleanable, zLevel);
 
             return TryAddDecal(decal, coordinates, out decalId);
         }
@@ -308,7 +351,12 @@ namespace Content.Server.Decals
             if (!TryComp(gridId, out MapGridComponent? grid))
                 return false;
 
-            if (_turf.IsSpace(_mapSystem.GetTileRef(gridId.Value, grid, coordinates)))
+            var tileIndices = _mapSystem.TileIndicesFor(gridId.Value, grid, coordinates);
+            var tile = _mapSystem.GetZLevelTileRef(
+                gridId.Value,
+                grid,
+                new ZLevelTileIndices(tileIndices.X, tileIndices.Y, decal.ZLevel));
+            if (_turf.IsSpace(tile.Tile))
                 return false;
 
             if (!TryComp(gridId, out DecalGridComponent? comp))
@@ -327,7 +375,12 @@ namespace Content.Server.Decals
         public override bool RemoveDecal(EntityUid gridId, uint decalId, DecalGridComponent? component = null)
             => RemoveDecalInternal(gridId, decalId, out _, component);
 
-        public override HashSet<(uint Index, Decal Decal)> GetDecalsInRange(EntityUid gridId, Vector2 position, float distance = 0.75f, Func<Decal, bool>? validDelegate = null)
+        public override HashSet<(uint Index, Decal Decal)> GetDecalsInRange(
+            EntityUid gridId,
+            Vector2 position,
+            float distance = 0.75f,
+            Func<Decal, bool>? validDelegate = null,
+            int zLevel = 0)
         {
             var decalIds = new HashSet<(uint, Decal)>();
             var chunkCollection = ChunkCollection(gridId);
@@ -337,6 +390,9 @@ namespace Content.Server.Decals
 
             foreach (var (uid, decal) in chunk.Decals)
             {
+                if (decal.ZLevel != zLevel)
+                    continue;
+
                 if ((position - decal.Coordinates - new Vector2(0.5f, 0.5f)).Length() > distance)
                     continue;
 
@@ -349,7 +405,11 @@ namespace Content.Server.Decals
             return decalIds;
         }
 
-        public HashSet<(uint Index, Decal Decal)> GetDecalsIntersecting(EntityUid gridUid, Box2 bounds, DecalGridComponent? component = null)
+        public HashSet<(uint Index, Decal Decal)> GetDecalsIntersecting(
+            EntityUid gridUid,
+            Box2 bounds,
+            DecalGridComponent? component = null,
+            int zLevel = 0)
         {
             var decalIds = new HashSet<(uint, Decal)>();
             var chunkCollection = ChunkCollection(gridUid, component);
@@ -366,6 +426,9 @@ namespace Content.Server.Decals
 
                 foreach (var (id, decal) in chunk.Decals)
                 {
+                    if (decal.ZLevel != zLevel)
+                        continue;
+
                     if (!bounds.Contains(decal.Coordinates))
                         continue;
 

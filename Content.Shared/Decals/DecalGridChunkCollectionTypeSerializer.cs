@@ -54,7 +54,14 @@ namespace Content.Shared.Decals
 
                         var chunkOrigin = SharedMapSystem.GetChunkIndices(coords, SharedDecalSystem.ChunkSize);
                         var chunk = dictionary.GetOrNew(chunkOrigin);
-                        var decal = new Decal(coords, data.Id, data.Color, data.Angle, data.ZIndex, data.Cleanable);
+                        var decal = new Decal(
+                            coords,
+                            data.Id,
+                            data.Color,
+                            data.Angle,
+                            data.ZIndex,
+                            data.Cleanable,
+                            data.ZLevel);
 
                         nextIndex = Math.Max(nextIndex, dUid);
 
@@ -139,7 +146,7 @@ namespace Content.Shared.Decals
                 nodes.Add(lookupNode);
             }
 
-            allData.Add("version", 2.ToString(CultureInfo.InvariantCulture));
+            allData.Add("version", 3.ToString(CultureInfo.InvariantCulture));
             allData.Add("nodes", nodes);
 
             return allData;
@@ -163,13 +170,17 @@ namespace Content.Shared.Decals
             [DataField("cleanable")]
             public bool Cleanable { get; init; }
 
-            public DecalData(string id, Color? color, Angle angle, int zIndex, bool cleanable)
+            [DataField("zLevel")]
+            public int ZLevel { get; init; }
+
+            public DecalData(string id, Color? color, Angle angle, int zIndex, bool cleanable, int zLevel = 0)
             {
                 Id = id;
                 Color = color;
                 Angle = angle;
                 ZIndex = zIndex;
                 Cleanable = cleanable;
+                ZLevel = zLevel;
             }
 
             public DecalData(Decal decal)
@@ -179,6 +190,7 @@ namespace Content.Shared.Decals
                 Angle = decal.Angle;
                 ZIndex = decal.ZIndex;
                 Cleanable = decal.Cleanable;
+                ZLevel = decal.ZLevel;
             }
 
             public bool Equals(DecalData other)
@@ -187,7 +199,8 @@ namespace Content.Shared.Decals
                        Nullable.Equals(Color, other.Color) &&
                        Angle.Equals(other.Angle) &&
                        ZIndex == other.ZIndex &&
-                       Cleanable == other.Cleanable;
+                       Cleanable == other.Cleanable &&
+                       ZLevel == other.ZLevel;
             }
 
             public override bool Equals(object? obj)
@@ -197,7 +210,7 @@ namespace Content.Shared.Decals
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(Id, Color, Angle, ZIndex, Cleanable);
+                return HashCode.Combine(Id, Color, Angle, ZIndex, Cleanable, ZLevel);
             }
 
             public int CompareTo(DecalData other)
@@ -220,7 +233,11 @@ namespace Content.Shared.Decals
                 if (zIndexComparison != 0)
                     return zIndexComparison;
 
-                return Cleanable.CompareTo(other.Cleanable);
+                var cleanableComparison = Cleanable.CompareTo(other.Cleanable);
+                if (cleanableComparison != 0)
+                    return cleanableComparison;
+
+                return ZLevel.CompareTo(other.ZLevel);
             }
         }
     }

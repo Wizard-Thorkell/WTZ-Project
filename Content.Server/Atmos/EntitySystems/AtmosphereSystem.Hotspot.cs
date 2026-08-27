@@ -106,30 +106,28 @@ public sealed partial class AtmosphereSystem
             var gridUid = ent.Owner;
             var tilePos = tile.GridIndices;
 
-            // Decals are still 2D and would otherwise appear on the base floor.
-            if (tile.ZLevel == 0)
+            var tileDecals = _decalSystem.GetDecalsInRange(gridUid, tilePos, zLevel: tile.ZLevel);
+            var tileBurntDecals = 0;
+
+            foreach (var set in tileDecals)
             {
-                var tileDecals = _decalSystem.GetDecalsInRange(gridUid, tilePos);
-                var tileBurntDecals = 0;
+                if (Array.IndexOf(_burntDecals, set.Decal.Id) == -1)
+                    continue;
 
-                foreach (var set in tileDecals)
-                {
-                    if (Array.IndexOf(_burntDecals, set.Decal.Id) == -1)
-                        continue;
+                tileBurntDecals++;
 
-                    tileBurntDecals++;
+                if (tileBurntDecals > 4)
+                    break;
+            }
 
-                    if (tileBurntDecals > 4)
-                        break;
-                }
-
-                if (tileBurntDecals < 4)
-                {
-                    _decalSystem.TryAddDecal(_burntDecals[_random.Next(_burntDecals.Length)],
-                        new EntityCoordinates(gridUid, tilePos),
-                        out _,
-                        cleanable: true);
-                }
+            if (tileBurntDecals < 4)
+            {
+                _decalSystem.TryAddDecal(
+                    _burntDecals[_random.Next(_burntDecals.Length)],
+                    new EntityCoordinates(gridUid, tilePos),
+                    out _,
+                    cleanable: true,
+                    zLevel: tile.ZLevel);
             }
 
             if (tile.Air.Temperature > Atmospherics.FireMinimumTemperatureToSpread)

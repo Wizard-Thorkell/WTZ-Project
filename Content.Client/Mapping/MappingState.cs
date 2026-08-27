@@ -203,6 +203,7 @@ public sealed class MappingState : GameplayStateBase
         Screen.ZLevelAdjacentPreview.OnToggled -= OnZLevelAdjacentPreviewToggled;
         _placement.PlacementChanged -= OnPlacementChanged;
         _placement.ActiveZLevelOverride = null;
+        _decal.ActiveZLevelOverride = null;
         _entityManager.System<ZLevelOverlaySystem>().SetMappingPreview(false);
         _prototypeManager.PrototypesReloaded -= OnPrototypesReloaded;
 
@@ -439,6 +440,7 @@ public sealed class MappingState : GameplayStateBase
     {
         _activeZLevel = zLevel;
         _placement.ActiveZLevelOverride = zLevel;
+        _decal.ActiveZLevelOverride = zLevel;
 
         if (Screen.ZLevelSpinBox.Value != zLevel)
             Screen.ZLevelSpinBox.Value = zLevel;
@@ -1059,7 +1061,9 @@ public sealed class MappingState : GameplayStateBase
         if (!Screen.EraseDecalButton.Pressed)
             return false;
 
-        _entityNetwork.SendSystemNetworkMessage(new RequestDecalRemovalEvent(_entityManager.GetNetCoordinates(coords)));
+        _entityNetwork.SendSystemNetworkMessage(new RequestDecalRemovalEvent(
+            _entityManager.GetNetCoordinates(coords),
+            _activeZLevel));
         return true;
     }
 

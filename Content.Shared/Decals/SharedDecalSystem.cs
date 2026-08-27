@@ -109,7 +109,12 @@ namespace Content.Shared.Decals
             // used by client-side overlay code
         }
 
-        public virtual HashSet<(uint Index, Decal Decal)> GetDecalsInRange(EntityUid gridId, Vector2 position, float distance = 0.75f, Func<Decal, bool>? validDelegate = null)
+        public virtual HashSet<(uint Index, Decal Decal)> GetDecalsInRange(
+            EntityUid gridId,
+            Vector2 position,
+            float distance = 0.75f,
+            Func<Decal, bool>? validDelegate = null,
+            int zLevel = 0)
         {
             // NOOP on client atm.
             return new HashSet<(uint Index, Decal Decal)>();
@@ -142,10 +147,12 @@ namespace Content.Shared.Decals
     public sealed class RequestDecalRemovalEvent : EntityEventArgs
     {
         public NetCoordinates Coordinates;
+        public int ZLevel;
 
-        public RequestDecalRemovalEvent(NetCoordinates coordinates)
+        public RequestDecalRemovalEvent(NetCoordinates coordinates, int zLevel = 0)
         {
             Coordinates = coordinates;
+            ZLevel = zLevel;
         }
     }
 }

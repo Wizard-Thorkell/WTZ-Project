@@ -338,6 +338,7 @@ public sealed class TileSystem : EntitySystem
         }
 
         variant ??= PickVariant(replacementTile);
+        RemoveZLevelDecals(tileRef);
         _maps.SetZLevelTile(
             grid,
             component,
@@ -482,9 +483,26 @@ public sealed class TileSystem : EntitySystem
             _zLevel.SetZLevelPosition(tileItem, tileRef.GridIndices.Z);
         }
 
+        RemoveZLevelDecals(tileRef);
         var previousDef = (ContentTileDefinition) _tileDefinitionManager[previousTileId];
         _maps.SetZLevelTile(gridUid, mapGrid, tileRef.GridIndices, new Tile(previousDef.TileId));
         return true;
+    }
+
+    private void RemoveZLevelDecals(ZLevelTileRef tileRef)
+    {
+        var tileCenter = new Vector2(
+            tileRef.GridIndices.X + 0.5f,
+            tileRef.GridIndices.Y + 0.5f);
+        var decals = _decal.GetDecalsInRange(
+            tileRef.GridUid,
+            tileCenter,
+            0.5f,
+            zLevel: tileRef.GridIndices.Z);
+        foreach (var (id, _) in decals)
+        {
+            _decal.RemoveDecal(tileRef.GridUid, id);
+        }
     }
 
     private void OnFloorTileAttempt(Entity<TileHistoryComponent> ent, ref FloorTileAttemptEvent args)

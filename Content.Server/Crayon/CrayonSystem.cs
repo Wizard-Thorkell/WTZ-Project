@@ -10,6 +10,7 @@ using Content.Shared.Decals;
 using Content.Shared.Interaction;
 using Content.Shared.Interaction.Events;
 using Content.Shared.Nutrition.EntitySystems;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.GameObjects;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.Systems;
@@ -25,7 +26,9 @@ public sealed class CrayonSystem : SharedCrayonSystem
     [Dependency] private readonly PopupSystem _popup = default!;
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly SharedChargesSystem _charges = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly UserInterfaceSystem _uiSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -71,7 +74,17 @@ public sealed class CrayonSystem : SharedCrayonSystem
             return;
         }
 
-        if (!_decals.TryAddDecal(component.SelectedState, args.ClickLocation.Offset(new Vector2(-0.5f, -0.5f)), out _, component.Color, cleanable: true))
+        if (_transform.GetGrid(args.ClickLocation) is not { } grid)
+            return;
+
+        var localZ = _transform.WorldToLocalZLevel(grid, _zLevel.GetWorldZLevel(args.User));
+        if (!_decals.TryAddDecal(
+                component.SelectedState,
+                args.ClickLocation.Offset(new Vector2(-0.5f, -0.5f)),
+                out _,
+                component.Color,
+                cleanable: true,
+                zLevel: localZ))
             return;
 
         if (component.UseSound != null)
