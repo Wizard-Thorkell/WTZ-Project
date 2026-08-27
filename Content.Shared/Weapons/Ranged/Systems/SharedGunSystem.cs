@@ -23,6 +23,7 @@ using Content.Shared.Weapons.Melee.Events;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Events;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
@@ -64,6 +65,7 @@ public abstract partial class SharedGunSystem : EntitySystem
     [Dependency] protected readonly SharedPopupSystem PopupSystem = default!;
     [Dependency] protected readonly SharedProjectileSystem Projectiles = default!;
     [Dependency] protected readonly SharedTransformSystem TransformSystem = default!;
+    [Dependency] protected readonly SharedZLevelSystem ZLevels = default!;
     [Dependency] protected readonly TagSystem TagSystem = default!;
     [Dependency] protected readonly ThrowingSystem ThrowingSystem = default!;
 
@@ -444,6 +446,10 @@ public abstract partial class SharedGunSystem : EntitySystem
 
     public void ShootProjectile(EntityUid uid, Vector2 direction, Vector2 gunVelocity, EntityUid? gunUid, EntityUid? user = null, float speed = ProjectileSpeed)
     {
+        var source = user ?? gunUid;
+        if (source is { } sourceUid && Exists(sourceUid))
+            ZLevels.StampWorldZLevelPosition(uid, ZLevels.GetWorldZLevel(sourceUid));
+
         var physics = EnsureComp<PhysicsComponent>(uid);
         Physics.SetBodyStatus(uid, physics, BodyStatus.InAir);
 

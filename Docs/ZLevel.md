@@ -15,6 +15,7 @@ Official repositories:
 - Shared trace contract: [ZLevelTrace.md](ZLevelTrace.md)
 - Trace benchmark report: [ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md)
 - Z-aware hitscan: [ZLevelHitscan.md](ZLevelHitscan.md)
+- Z-aware projectile lifecycle: [ZLevelProjectiles.md](ZLevelProjectiles.md)
 
 ## Product Goal
 
@@ -197,6 +198,20 @@ Implemented authoritative Z-aware hitscan:
   world Z on the client.
 - Upward targeting and empty-tile cross-floor aiming remain deferred until the
   viewport/FOV and network input contracts can represent them intentionally.
+
+Implemented Z-aware physical projectile lifecycle:
+
+- Fired projectiles inherit the authoritative world Z of their user or gun;
+  source-less projectiles preserve their explicitly authored floor.
+- Thrown entities inherit a valid thrower's world Z without changing Robust's
+  established horizontal throw timing and distance.
+- Cross-floor physics overlap cannot produce an impact, including on grids with
+  displaced vertical frame origins.
+- Impact effects carry world Z to the client, while embedded projectiles inherit
+  their target's floor and preserve it when detached.
+- Deliberate physical flight through deck openings remains the active P2.2b
+  package; lifecycle guarantees are documented in
+  [ZLevelProjectiles.md](ZLevelProjectiles.md).
 
 Implemented vertical boundary foundation:
 
@@ -433,8 +448,8 @@ Major unfinished areas:
 - Lighting and FOV are not native to floors.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
-- Projectiles, hitscan, explosions, fire, heat, and area effects are not
-  consistently Z-aware.
+- Hitscan and physical projectile lifecycle are Z-aware, but physical vertical
+  flight, explosions, fire, heat, and area effects remain incomplete.
 - Click priority and interaction semantics need more coverage.
 - Grid lookup still begins from a 2D `MapCoordinates` selection in several
   engine APIs. Once a destination grid is known, callers now convert world Z to

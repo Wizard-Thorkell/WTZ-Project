@@ -89,7 +89,12 @@ public sealed class ProjectileSystem : SharedProjectileSystem
 
         if (component.ImpactEffect != null && TryComp(uid, out TransformComponent? xform))
         {
-            RaiseNetworkEvent(new ImpactEffectEvent(component.ImpactEffect, GetNetCoordinates(xform.Coordinates)), Filter.Pvs(xform.Coordinates, entityMan: EntityManager));
+            RaiseNetworkEvent(
+                new ImpactEffectEvent(
+                    component.ImpactEffect,
+                    GetNetCoordinates(xform.Coordinates),
+                    ZLevels.GetWorldZLevel(uid)),
+                Filter.Pvs(xform.Coordinates, entityMan: EntityManager));
         }
     }
 

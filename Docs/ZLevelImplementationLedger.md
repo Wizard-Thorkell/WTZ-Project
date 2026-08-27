@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/projectile-traversal`.
-- Active package: `P2.2 Physical projectiles and thrown-entity traversal`.
+- Active package: `P2.2b Bounded physical vertical trajectory`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -811,6 +811,13 @@ treated as Debug-run noise.
 | P2.3 | Explosions, fire, heat, and generated effects | Pending |
 | P2.4 | Central direct and remote interaction validation | Pending |
 
+P2.2 is split into independently gated subpackages:
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P2.2a | Projectile/throw floor authority and lifecycle preservation | Complete |
+| P2.2b | Bounded physical vertical trajectory and crossing policy | In progress |
+
 ## Completed Package: P2.1 Hitscan Trace Migration
 
 ### Scope
@@ -924,18 +931,121 @@ allocation is inside Robust physics enumeration.
   continuous crossing state without tracing an unbounded future trajectory,
   and preserve collision/prediction behavior on Z 0.
 
-## Active Package: P2.2 Physical Projectiles And Thrown Traversal
+## Completed Package: P2.2a Projectile Floor Authority And Lifecycle
+
+### Scope
+
+- Stamp gun-spawned physical projectiles from a valid user or gun's world Z
+  before their flight begins while preserving source-less authored floors.
+- Apply the same source authority to normal throws without changing established
+  horizontal throw timing, distance, landing, or gravity behavior.
+- Keep impact presentation, embedding, and detaching on the projectile's
+  authoritative world floor across displaced grid frames.
+- Prove actual physics collision isolation between overlapping floors before
+  adding any new vertical trajectory integrator.
+
+### Acceptance Criteria
+
+- A projectile fired on a non-zero local floor of a displaced frame starts on
+  the source's effective world Z and cannot collide with an overlapping Z 0
+  target.
+- The same projectile collides normally when the target shares its world Z.
+- Calls without a source do not erase an explicitly authored projectile or
+  thrown-item floor.
+- User throws acquire the user's world Z and retain all existing throw-state
+  behavior.
+- An embedded projectile inherits target movement between floors; detaching
+  materializes the inherited world Z in the destination frame.
+- Networked impact effects carry and apply the collision floor on the client.
+
+### Evidence
+
+- `Content.IntegrationTests` builds with zero errors and 90 existing dependency,
+  analyzer, vulnerability, and upstream obsolescence warnings.
+- The five lifecycle cases pass 5/5, covering sourced and source-less firing,
+  real cross-floor/same-floor physics contacts, sourced and source-less throws,
+  and embedding/detaching on a frame whose local zero maps to world Z 5.
+- The combined projectile, weapon, embed, and item-throwing regression matrix
+  passes 12/12.
+- The complete focused Z-level integration matrix passes 83/83; structural unit
+  tests pass 2/2; all three generated stress baselines pass.
+- Client and server startup accept the extended impact event payload and report
+  matching serializer type hashes.
+
+### Decisions
+
+- Resolve launch authority once at the existing lifecycle boundary. Do not add
+  a per-tick floor copy or make projectile state depend on a later gun lookup.
+- Preserve the existing `user ?? gun` launch-source contract. Stamp from that
+  selected entity only when it exists; otherwise preserve the caller-authored
+  floor instead of guessing from overlapping 2D geometry.
+- Preserve vanilla throws as horizontal movement on one discrete floor. The
+  existing Z-level solver suspends vertical gravity while an item is actively
+  thrown and resumes it after landing; deliberate cross-floor throws belong to
+  the explicit P2.2b trajectory contract.
+- Clear an embedded projectile's explicit Z after parenting so target movement
+  is inherited rather than copied once. Capture world Z before detach and stamp
+  it only after the destination parent is known.
+- Carry world Z in the impact network event instead of inferring a floor from
+  client-side XY overlap.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only launch/throw authority, impact and
+      embed lifecycle preservation, focused tests, and related documentation.
+- [x] Invariant review: Z 0, local/world frame conversion, displaced grids,
+      server launch authority, same-floor parity, and collision isolation are
+      represented in implementation and tests.
+- [x] Automated verification: build, 5/5 lifecycle, 12/12 affected regression,
+      83/83 Z-level integration, 2/2 unit, and 3/3 baseline tests pass.
+- [x] Performance evidence: no per-frame or per-physics-substep path was added;
+      each stamp occurs once at an existing lifecycle transition, and all three
+      stress baselines remain green. A trajectory benchmark belongs to P2.2b.
+- [x] Documentation: authority, inheritance, limitations, tests, and the split
+      from vertical trajectory are recorded in `Docs/ZLevelProjectiles.md`.
+- [x] Dependency check: existing Robust transform, physics, parenting, and event
+      APIs are sufficient; no paired WTZ Engine revision is required.
+- [x] Git check: `git diff --check` passed apart from checkout line-ending
+      notices; final tree review contains the ten intended source, test, and
+      documentation files, while generated test and baseline artifacts remain
+      ignored.
+- [x] Mini review: findings, residual risks, and P2.2b are recorded below.
+- [x] Commit: save as `Preserve Z-level projectile lifecycle` on
+      `zlevel/projectile-traversal`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: physical projectiles and normal throws now have one authoritative
+  floor from launch through impact, embedding, and detach.
+- Finding: a real physics contact test proves that launch stamping composes with
+  the engine's world-Z collision filter instead of merely checking component
+  values.
+- Residual risk: visible lower-floor input is already available for hitscan, but
+  a physical projectile remains on the shooter's floor until P2.2b defines its
+  vertical trajectory. This temporary mismatch must not be presented as working
+  cross-floor ballistics.
+- Residual risk: impact payload serialization is automated, while exact visual
+  placement still needs a manual in-game pass.
+- Residual risk: source-less callers are responsible for authoring the intended
+  floor before launch; silently guessing from 2D overlap would be ambiguous.
+- Next package: define an explicit, bounded trajectory component and validate
+  boundary crossings at physics-substep geometry without introducing tunneling
+  or changing ordinary same-floor projectile behavior.
+
+## Active Package: P2.2b Bounded Physical Vertical Trajectory
 
 ### Planned Scope
 
-- Map authoritative projectile movement, CCD/contact handling, throw state,
-  landing, embedding, reflection, and client prediction paths.
-- Define bounded per-step vertical crossing checks using the `Projectile`
-  channel while keeping horizontal physics under the existing engine solver.
-- Preserve current grid-frame ownership and world Z when a projectile or thrown
-  entity crosses an opening, lands, embeds, enters storage, or is deleted.
-- Add focused Z 0, open/closed deck, fast crossing, diagonal moving-frame,
-  throw/landing, and budget/performance tests before migrating broader effects.
+- Define opt-in continuous vertical trajectory state separately from vanilla
+  same-floor throw and projectile components.
+- Validate every crossed half-level plane with the `Projectile` boundary channel
+  at the crossing's current grid-local XY.
+- Integrate with physics substeps so source-floor and destination-floor contacts
+  are not assigned to the wrong portion of a fast step.
+- Bound crossings and fail conservatively on invalid frames, closed decks, or
+  exhausted work without tracing an unbounded future trajectory.
+- Cover Z 0 parity, open/closed decks, fast diagonal crossings, moving frames,
+  prediction/reconciliation, landing, reflection, and allocation evidence.
 
 ## Package History
 
@@ -950,3 +1060,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P1.3b1 | `Add reusable Z-level trace buffers` | 8 trace, 7 budget, 64 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P1.3b2 | `Instrument and benchmark Z-level traces` | 17 trace/budget, 3 metrics/benchmark, 68 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.1 | `Migrate hitscan to Z-level traces` | 10 hitscan, 1 weapon, 78 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.2a | `Preserve Z-level projectile lifecycle` | 5 lifecycle, 12 regressions, 83 integration, 2 unit, 3 baseline, diff check | Complete |

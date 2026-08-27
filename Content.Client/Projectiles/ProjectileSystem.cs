@@ -25,6 +25,7 @@ public sealed class ProjectileSystem : SharedProjectileSystem
             return;
 
         var ent = Spawn(ev.Prototype, coords);
+        ZLevels.StampWorldZLevelPosition(ent, ev.WorldZ);
 
         if (TryComp<SpriteComponent>(ent, out var sprite))
         {

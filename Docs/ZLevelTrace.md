@@ -153,8 +153,10 @@ returns.
 - Authoritative basic hitscan is the first gameplay consumer. It uses the
   caller-owned buffer, `Projectile` boundaries, server-owned target validation,
   and consumer-specific hit selection described in
-  [ZLevelHitscan.md](ZLevelHitscan.md). Physical projectiles and throws remain
-  the next migration.
+  [ZLevelHitscan.md](ZLevelHitscan.md). Physical projectile and throw lifecycle
+  now preserve authoritative world Z as described in
+  [ZLevelProjectiles.md](ZLevelProjectiles.md); bounded vertical physical flight
+  remains the active migration.
 
 ## Verification
 

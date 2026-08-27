@@ -7,6 +7,7 @@ using Content.Shared.Construction.EntitySystems;
 using Content.Shared.Database;
 using Content.Shared.Friction;
 using Content.Shared.Projectiles;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Configuration;
 using Robust.Shared.Map;
 using Robust.Shared.Physics;
@@ -34,6 +35,7 @@ public sealed class ThrowingSystem : EntitySystem
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly ThrownItemSystem _thrownSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
     [Dependency] private readonly SharedCameraRecoilSystem _recoil = default!;
     [Dependency] private readonly ISharedAdminLogManager _adminLogger = default!;
     [Dependency] private readonly IConfigurationManager _configManager = default!;
@@ -153,6 +155,9 @@ public sealed class ThrowingSystem : EntitySystem
         // Allow throwing if this projectile only acts as a projectile when shot, otherwise disallow
         if (_projectileQuery.TryComp(uid, out var proj) && !proj.OnlyCollideWhenShot)
             return;
+
+        if (user is { } userUid && Exists(userUid))
+            _zLevels.StampWorldZLevelPosition(uid, _zLevels.GetWorldZLevel(userUid));
 
         var comp = new ThrownItemComponent
         {

@@ -5,6 +5,7 @@ using Content.Shared.Hands.EntitySystems;
 using Content.Shared.Interaction;
 using Content.Shared.Inventory;
 using Content.Shared.Throwing;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Network;
@@ -26,6 +27,7 @@ public abstract partial class SharedProjectileSystem : EntitySystem
     [Dependency] private readonly SharedHandsSystem _hands = default!;
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] protected readonly SharedZLevelSystem ZLevels = default!;
 
     public override void Initialize()
     {
@@ -104,6 +106,7 @@ public abstract partial class SharedProjectileSystem : EntitySystem
         _physics.SetBodyType(uid, BodyType.Static, body: physics);
         var xform = Transform(uid);
         _transform.SetParent(uid, xform, target);
+        ZLevels.ClearZLevelPosition(uid);
 
         if (component.Offset != Vector2.Zero)
         {
@@ -151,12 +154,14 @@ public abstract partial class SharedProjectileSystem : EntitySystem
             return;
         }
 
+        var worldZ = ZLevels.GetWorldZLevel(uid);
         var xform = Transform(uid);
         if (TerminatingOrDeleted(xform.GridUid) && TerminatingOrDeleted(xform.MapUid))
             return;
         TryComp<PhysicsComponent>(uid, out var physics);
         _physics.SetBodyType(uid, BodyType.Dynamic, body: physics, xform: xform);
         _transform.AttachToGridOrMap(uid, xform);
+        ZLevels.StampWorldZLevelPosition(uid, worldZ);
         component.EmbeddedIntoUid = null;
         Dirty(uid, component);
 
@@ -228,11 +233,13 @@ public sealed class ImpactEffectEvent : EntityEventArgs
 {
     public string Prototype;
     public NetCoordinates Coordinates;
+    public int WorldZ;
 
-    public ImpactEffectEvent(string prototype, NetCoordinates coordinates)
+    public ImpactEffectEvent(string prototype, NetCoordinates coordinates, int worldZ)
     {
         Prototype = prototype;
         Coordinates = coordinates;
+        WorldZ = worldZ;
     }
 }
 
