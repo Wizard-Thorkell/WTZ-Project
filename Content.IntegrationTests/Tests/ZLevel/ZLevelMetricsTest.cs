@@ -1,8 +1,13 @@
 // DragonStation Z-Level prototype.
 // Copyright (c) pedel and OpenAI Codex.
 
+using System.Numerics;
 using Content.IntegrationTests.Fixtures;
+using Content.IntegrationTests.Fixtures.Attributes;
+using Content.Shared.CCVar;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -65,6 +70,154 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.VisibilityTileQueries, Is.Zero);
                 Assert.That(resetSnapshot.GravityQueries, Is.Zero);
                 Assert.That(resetSnapshot.PvsRefreshes, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task TraceCountersCoverTerminationsOutputsAndReset()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelTraceMaxTileVisits, 1);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var zLevelMaps = SEntMan.System<SharedZLevelMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+
+            zLevelMaps.Configure(
+                testMap.MapUid,
+                0,
+                1,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+            for (var x = 0; x <= 3; x++)
+            {
+                map.SetZLevelTile(
+                    testMap.Grid,
+                    grid,
+                    new ZLevelTileIndices(x, 1, 0),
+                    new Tile(1));
+            }
+
+            map.SetZLevelTile(
+                testMap.Grid,
+                grid,
+                new ZLevelTileIndices(0, 0, 0),
+                new Tile(1));
+            map.SetZLevelTile(
+                testMap.Grid,
+                grid,
+                new ZLevelTileIndices(0, 0, 1),
+                new Tile(1));
+
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 1.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(3.5f, 1.5f),
+                0,
+                out var destination), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var lower), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                1,
+                out var upper), Is.True);
+
+            metrics.ResetCounters();
+            var completed = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.None));
+            var budget = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            var closed = trace.Trace(new ZLevelTraceRequest(
+                lower,
+                upper,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            var invalid = trace.Trace(new ZLevelTraceRequest(
+                ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    new Vector2(float.NaN, 0f),
+                    0,
+                    testMap.MapId)),
+                destination,
+                ZLevelBoundaryChannels.Effects));
+            var differentMaps = trace.Trace(new ZLevelTraceRequest(
+                ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    Vector2.Zero,
+                    0,
+                    testMap.MapId)),
+                ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    Vector2.One,
+                    0,
+                    new MapId(1_000_000))),
+                ZLevelBoundaryChannels.Effects));
+            var frameFailure = trace.Trace(new ZLevelTraceRequest(
+                ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    Vector2.Zero,
+                    0,
+                    testMap.MapId)),
+                ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                    Vector2.One,
+                    1,
+                    testMap.MapId)),
+                ZLevelBoundaryChannels.Effects));
+            var snapshot = metrics.Snapshot();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(completed.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(budget.Termination, Is.EqualTo(ZLevelTraceTermination.IterationBudgetExceeded));
+                Assert.That(closed.Termination, Is.EqualTo(ZLevelTraceTermination.ClosedBoundary));
+                Assert.That(invalid.Termination, Is.EqualTo(ZLevelTraceTermination.InvalidCoordinates));
+                Assert.That(differentMaps.Termination, Is.EqualTo(ZLevelTraceTermination.DifferentMaps));
+                Assert.That(frameFailure.Termination, Is.EqualTo(ZLevelTraceTermination.FrameResolutionRequired));
+                Assert.That(snapshot.TraceQueries, Is.EqualTo(6));
+                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
+                Assert.That(snapshot.TraceClosedBoundaries, Is.EqualTo(1));
+                Assert.That(snapshot.TraceInvalidCoordinates, Is.EqualTo(1));
+                Assert.That(snapshot.TraceDifferentMaps, Is.EqualTo(1));
+                Assert.That(snapshot.TraceFrameResolutionFailures, Is.EqualTo(1));
+                Assert.That(snapshot.TraceBudgetExhaustions, Is.EqualTo(1));
+                Assert.That(snapshot.TraceSegments, Is.EqualTo(2));
+                Assert.That(snapshot.TraceTileVisits, Is.EqualTo(1));
+                Assert.That(snapshot.TraceEntityHits, Is.Zero);
+                Assert.That(snapshot.TraceBoundaryCrossings, Is.EqualTo(1));
+                Assert.That(snapshot.TraceMilliseconds, Is.GreaterThanOrEqualTo(0d));
+                Assert.That(snapshot.TraceLastMilliseconds, Is.GreaterThanOrEqualTo(0d));
+                Assert.That(snapshot.TraceMaxMilliseconds, Is.GreaterThanOrEqualTo(snapshot.TraceLastMilliseconds));
+                Assert.That(snapshot.TraceAverageMilliseconds, Is.GreaterThanOrEqualTo(0d));
+            });
+
+            metrics.ResetCounters();
+            var reset = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(reset.TraceQueries, Is.Zero);
+                Assert.That(reset.TraceCompleted, Is.Zero);
+                Assert.That(reset.TraceClosedBoundaries, Is.Zero);
+                Assert.That(reset.TraceBudgetExhaustions, Is.Zero);
+                Assert.That(reset.TraceSegments, Is.Zero);
+                Assert.That(reset.TraceTileVisits, Is.Zero);
+                Assert.That(reset.TraceMilliseconds, Is.Zero);
+                Assert.That(reset.TraceLastMilliseconds, Is.Zero);
+                Assert.That(reset.TraceMaxMilliseconds, Is.Zero);
             });
         });
     }

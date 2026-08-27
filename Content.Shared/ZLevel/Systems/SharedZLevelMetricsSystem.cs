@@ -47,6 +47,21 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _pvsLastRefreshTimestampTicks;
     private long _pvsMaxRefreshTimestampTicks;
 
+    private long _traceQueries;
+    private long _traceCompleted;
+    private long _traceClosedBoundaries;
+    private long _traceInvalidCoordinates;
+    private long _traceDifferentMaps;
+    private long _traceFrameResolutionFailures;
+    private long _traceBudgetExhaustions;
+    private long _traceSegments;
+    private long _traceTileVisits;
+    private long _traceEntityHits;
+    private long _traceBoundaryCrossings;
+    private long _traceTimestampTicks;
+    private long _traceLastTimestampTicks;
+    private long _traceMaxTimestampTicks;
+
     public void RecordBoundaryQuery(bool cacheHit)
     {
         _boundaryQueries++;
@@ -152,6 +167,46 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _pvsMaxRefreshTimestampTicks = Math.Max(_pvsMaxRefreshTimestampTicks, elapsedTimestampTicks);
     }
 
+    public void RecordTrace(
+        ZLevelTraceTermination termination,
+        int segmentCount,
+        int tileVisitCount,
+        int entityHitCount,
+        int boundaryCrossingCount,
+        long elapsedTimestampTicks)
+    {
+        _traceQueries++;
+        switch (termination)
+        {
+            case ZLevelTraceTermination.Completed:
+                _traceCompleted++;
+                break;
+            case ZLevelTraceTermination.ClosedBoundary:
+                _traceClosedBoundaries++;
+                break;
+            case ZLevelTraceTermination.InvalidCoordinates:
+                _traceInvalidCoordinates++;
+                break;
+            case ZLevelTraceTermination.DifferentMaps:
+                _traceDifferentMaps++;
+                break;
+            case ZLevelTraceTermination.FrameResolutionRequired:
+                _traceFrameResolutionFailures++;
+                break;
+            case ZLevelTraceTermination.IterationBudgetExceeded:
+                _traceBudgetExhaustions++;
+                break;
+        }
+
+        _traceSegments += segmentCount;
+        _traceTileVisits += tileVisitCount;
+        _traceEntityHits += entityHitCount;
+        _traceBoundaryCrossings += boundaryCrossingCount;
+        _traceTimestampTicks += elapsedTimestampTicks;
+        _traceLastTimestampTicks = elapsedTimestampTicks;
+        _traceMaxTimestampTicks = Math.Max(_traceMaxTimestampTicks, elapsedTimestampTicks);
+    }
+
     public ZLevelMetricsSnapshot Snapshot()
     {
         return new ZLevelMetricsSnapshot(
@@ -186,7 +241,21 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _pvsFailOpenCandidates,
             TimestampTicksToMilliseconds(_pvsRefreshTimestampTicks),
             TimestampTicksToMilliseconds(_pvsLastRefreshTimestampTicks),
-            TimestampTicksToMilliseconds(_pvsMaxRefreshTimestampTicks));
+            TimestampTicksToMilliseconds(_pvsMaxRefreshTimestampTicks),
+            _traceQueries,
+            _traceCompleted,
+            _traceClosedBoundaries,
+            _traceInvalidCoordinates,
+            _traceDifferentMaps,
+            _traceFrameResolutionFailures,
+            _traceBudgetExhaustions,
+            _traceSegments,
+            _traceTileVisits,
+            _traceEntityHits,
+            _traceBoundaryCrossings,
+            TimestampTicksToMilliseconds(_traceTimestampTicks),
+            TimestampTicksToMilliseconds(_traceLastTimestampTicks),
+            TimestampTicksToMilliseconds(_traceMaxTimestampTicks));
     }
 
     public void ResetCounters()
@@ -223,6 +292,20 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _pvsRefreshTimestampTicks = 0;
         _pvsLastRefreshTimestampTicks = 0;
         _pvsMaxRefreshTimestampTicks = 0;
+        _traceQueries = 0;
+        _traceCompleted = 0;
+        _traceClosedBoundaries = 0;
+        _traceInvalidCoordinates = 0;
+        _traceDifferentMaps = 0;
+        _traceFrameResolutionFailures = 0;
+        _traceBudgetExhaustions = 0;
+        _traceSegments = 0;
+        _traceTileVisits = 0;
+        _traceEntityHits = 0;
+        _traceBoundaryCrossings = 0;
+        _traceTimestampTicks = 0;
+        _traceLastTimestampTicks = 0;
+        _traceMaxTimestampTicks = 0;
     }
 
     private static double TimestampTicksToMilliseconds(long ticks)
@@ -263,12 +346,27 @@ public readonly record struct ZLevelMetricsSnapshot(
     long PvsFailOpenCandidates,
     double PvsRefreshMilliseconds,
     double PvsLastRefreshMilliseconds,
-    double PvsMaxRefreshMilliseconds)
+    double PvsMaxRefreshMilliseconds,
+    long TraceQueries,
+    long TraceCompleted,
+    long TraceClosedBoundaries,
+    long TraceInvalidCoordinates,
+    long TraceDifferentMaps,
+    long TraceFrameResolutionFailures,
+    long TraceBudgetExhaustions,
+    long TraceSegments,
+    long TraceTileVisits,
+    long TraceEntityHits,
+    long TraceBoundaryCrossings,
+    double TraceMilliseconds,
+    double TraceLastMilliseconds,
+    double TraceMaxMilliseconds)
 {
     public double BoundaryCacheHitPercent => Percentage(BoundaryCacheHits, BoundaryQueries);
     public double GravityCacheHitPercent => Percentage(GravityCacheHits, GravityCacheHits + GravityCacheMisses);
     public double GravityAverageBuildMilliseconds => Average(GravityBuildMilliseconds, GravityBuilds);
     public double PvsAverageRefreshMilliseconds => Average(PvsRefreshMilliseconds, PvsRefreshes);
+    public double TraceAverageMilliseconds => Average(TraceMilliseconds, TraceQueries);
 
     private static double Percentage(long value, long total)
     {

@@ -134,6 +134,19 @@ public sealed class ZLevelDebugOverlay : Overlay
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 56f),
+            $"trace q:{metrics.TraceQueries} ok:{metrics.TraceCompleted} " +
+            $"closed:{metrics.TraceClosedBoundaries} budget:{metrics.TraceBudgetExhaustions} " +
+            $"avg/max:{metrics.TraceAverageMilliseconds:0.000}/{metrics.TraceMaxMilliseconds:0.000}ms",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 70f),
+            $"trace out segments:{metrics.TraceSegments} tiles:{metrics.TraceTileVisits} " +
+            $"hits:{metrics.TraceEntityHits} crossings:{metrics.TraceBoundaryCrossings}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 84f),
             $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
             $"tiles:{_traceSystem.MaxTileVisits} hits:{_traceSystem.MaxEntityHits}",
             metricsColor);

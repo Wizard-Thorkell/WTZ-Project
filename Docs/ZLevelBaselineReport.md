@@ -35,6 +35,8 @@ processors. Each case performs one cold warm-up and three measured iterations.
 Timing values are local comparison evidence, not portable pass/fail thresholds.
 
 P0.3 snapshots use schema version 2 and include the effective budget values.
+Current snapshots use schema version 3, which appends the P1.3b2 trace counters
+and timings without changing the fixture or workload method described here.
 
 ## Comparison
 

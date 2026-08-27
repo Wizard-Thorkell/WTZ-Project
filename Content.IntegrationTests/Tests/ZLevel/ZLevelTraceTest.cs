@@ -817,6 +817,96 @@ public sealed class ZLevelTraceTest : GameTest
         });
     }
 
+    [Test]
+    public async Task EqualDistanceEntityHitsUseUidTieBreak()
+    {
+        var testMap = await Pair.CreateTestMap();
+        ZLevelTracePoint origin = default;
+        ZLevelTracePoint destination = default;
+        EntityUid first = default;
+        EntityUid second = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            first = SEntMan.SpawnEntity(
+                "ZLevelTraceObstacle",
+                new EntityCoordinates(testMap.Grid, new Vector2(2.5f, 0.5f)));
+            second = SEntMan.SpawnEntity(
+                "ZLevelTraceObstacle",
+                new EntityCoordinates(testMap.Grid, new Vector2(2.5f, 0.5f)));
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(4.5f, 0.5f),
+                0,
+                out destination), Is.True);
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var result = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Projectile,
+                (int) CollisionGroup.BulletImpassable,
+                Options: ZLevelTraceOptions.IncludeEntityHits));
+            var expected = new[] { first, second }.OrderBy(uid => uid).ToArray();
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(result.EntityHits.Select(hit => hit.Entity), Is.EqualTo(expected));
+                Assert.That(result.EntityHits.Select(hit => hit.Sequence), Is.EqualTo(new[] { 0, 1 }));
+                Assert.That(result.EntityHits[0].Distance,
+                    Is.EqualTo(result.EntityHits[1].Distance).Within(0.0001f));
+            });
+        });
+    }
+
+    [Test]
+    public async Task FiniteEndpointsWithOverflowingDistanceAreRejected()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var origin = ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                new Vector2(float.MaxValue, 0f),
+                0,
+                testMap.MapId));
+            var destination = ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+                new Vector2(-float.MaxValue, 0f),
+                0,
+                testMap.MapId));
+            var request = new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.None);
+            var buffer = new ZLevelTraceBuffer();
+            var result = trace.Trace(request, buffer);
+            var stationary = trace.Trace(request with { Destination = origin });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.InvalidCoordinates));
+                Assert.That(buffer.Segments, Is.Empty);
+                Assert.That(buffer.TileVisits, Is.Empty);
+                Assert.That(stationary.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(stationary.Segments, Has.Length.EqualTo(1));
+                Assert.That(stationary.Segments[0].EndDistance, Is.Zero);
+            });
+        });
+    }
+
     private static IEqualityComparer<Vector2> Vector2Comparer { get; } =
         new ApproximateVector2Comparer(0.0001f);
 

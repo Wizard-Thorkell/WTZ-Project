@@ -69,6 +69,17 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"avg={metrics.PvsAverageRefreshMilliseconds:0.000}ms, " +
             $"last={metrics.PvsLastRefreshMilliseconds:0.000}ms, max={metrics.PvsMaxRefreshMilliseconds:0.000}ms");
         shell.WriteLine(
+            $"  trace: queries={metrics.TraceQueries}, completed={metrics.TraceCompleted}, " +
+            $"closed={metrics.TraceClosedBoundaries}, invalid={metrics.TraceInvalidCoordinates}, " +
+            $"different-maps={metrics.TraceDifferentMaps}, " +
+            $"frame-failures={metrics.TraceFrameResolutionFailures}, " +
+            $"budget-exhaustions={metrics.TraceBudgetExhaustions}, " +
+            $"avg={metrics.TraceAverageMilliseconds:0.000}ms, " +
+            $"last={metrics.TraceLastMilliseconds:0.000}ms, max={metrics.TraceMaxMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  trace output: segments={metrics.TraceSegments}, tiles={metrics.TraceTileVisits}, " +
+            $"hits={metrics.TraceEntityHits}, crossings={metrics.TraceBoundaryCrossings}");
+        shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");
     }

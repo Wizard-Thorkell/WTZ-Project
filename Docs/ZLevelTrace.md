@@ -102,9 +102,10 @@ snapshot independent of later traces.
 `Completed` is the only termination that sets `ReachedDestination`. A closed
 boundary returns coherent completed work up to that boundary. Invalid inputs,
 different maps, unresolved frames, and preflight crossing-budget failures return
-an empty result at the origin. If a tile budget is exhausted, the overflowing
-segment is rolled back while previously completed segments remain coherent. The
-same complete-segment rollback applies when the entity-hit budget is exhausted.
+an empty result at the origin. Finite endpoints whose derived distance overflows
+are also invalid. If a tile budget is exhausted, the overflowing segment is
+rolled back while previously completed segments remain coherent. The same
+complete-segment rollback applies when the entity-hit budget is exhausted.
 
 ## Options And Budgets
 
@@ -131,6 +132,14 @@ Effective values are visible through `zlevelmetrics` and the local Z-level debug
 overlay. `IterationBudgetExceeded` is deterministic and never silently skips a
 boundary or emits a truncated tile sequence.
 
+Every public trace call records one process-local metrics sample. Snapshots
+distinguish all six termination values, aggregate segments, tile visits, entity
+hits and crossings, and report total, average, last and maximum core time.
+`zlevelmetrics reset` clears trace data together with the other native Z-level
+counters. Core time includes normalization, geometry, boundaries and optional
+physics, but excludes immutable-array snapshot creation after the buffered core
+returns.
+
 ## Current Limits
 
 - A request can evaluate boundaries from one common or explicit grid frame.
@@ -138,8 +147,9 @@ boundary or emits a truncated tile sequence.
   modeled.
 - The immutable convenience overload allocates its snapshot by design. The
   buffered overload reuses WTZ-owned result and scratch collections, while the
-  engine physics ray can still allocate internally. P1.3b2 measures each
-  workload before any production consumer is migrated.
+  engine physics ray can still allocate internally. Warmed tile-only workloads
+  are enforced as allocation-free; hit-enabled consumers must be profiled
+  separately.
 - No gameplay system consumes this API yet. Hitscan is the first P2 migration
   after the complete P1 primitive is stable.
 
@@ -149,13 +159,17 @@ Focused reference tests:
 
 ```powershell
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --no-restore --filter "FullyQualifiedName~ZLevelTraceTest|FullyQualifiedName~ZLevelBudgetTest"
+dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --no-restore --filter "FullyQualifiedName~ZLevelMetricsTest|FullyQualifiedName~ZLevelTraceBenchmarkTest"
 ```
 
-The cumulative P1.3b1 matrix covers Z0 physics parity, world-Z filtering,
+The cumulative P1.3b2 matrix covers Z0 physics parity, world-Z filtering,
 translated and rotated frames, movement after endpoint creation, explicit map
 and cross-grid projection, overlapping-grid non-inference, matching client and
 server output, horizontal and perfect-diagonal tile order, upward and downward
 multi-floor traces, perfectly vertical fixture hits, channel-specific openings,
 closed-boundary truncation, unresolved frames, all three trace budgets,
-complete-segment hit rollback, and reusable-buffer equivalence with immutable
-results.
+complete-segment hit rollback, equal-distance UID ties, overflowing finite
+coordinates, reusable-buffer equivalence, metrics/reset behavior, and four
+machine-readable allocation workloads. See
+[ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md) for the captured
+method, results, and comparison limits.

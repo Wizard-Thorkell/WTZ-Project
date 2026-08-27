@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/trace-metrics-benchmark`.
-- Active package: `P1.3b2 Trace metrics and benchmark`.
+- Active branch: `zlevel/hitscan-trace`.
+- Active package: `P2.1 Hitscan trace migration`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -41,8 +41,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Phase | Responsibility | Status |
 | --- | --- | --- |
 | P0 | Baselines, stress fixtures, metrics, budgets, and observability | Complete |
-| P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | In progress |
-| P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Pending |
+| P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
+| P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | In progress |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Pending |
 | P4 | Vertical sound propagation through cached portals | Pending |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
@@ -336,7 +336,7 @@ treated as Debug-run noise.
 | P1.2 | Ordered vertical crossings and boundary-channel integration | Complete |
 | P1.3a | Current-frame normalization and explicit structural ownership | Complete |
 | P1.3b1 | Reusable buffers and bounded entity-hit output | Complete |
-| P1.3b2 | Trace metrics, allocation evidence, and reproducible benchmark | In progress |
+| P1.3b2 | Trace metrics, allocation evidence, and reproducible benchmark | Complete |
 
 ## Completed Package: P1.1 ZLevelTrace Contract And Reference Behavior
 
@@ -709,16 +709,121 @@ treated as Debug-run noise.
 - Next package: instrument trace counts, terminations, sizes, and timings, then
   capture repeatable allocation/performance workloads.
 
-## Active Package: P1.3b2 Trace Metrics And Benchmark
+## Completed Package: P1.3b2 Trace Metrics And Benchmark
+
+### Scope
+
+- Instrument every public trace with process-local query, termination, output,
+  and elapsed-core-time counters.
+- Expose trace metrics through the existing server command and client debug
+  overlay, including reset through `zlevelmetrics reset`.
+- Add reproducible same-level, diagonal multi-floor, closed-boundary, and
+  budget-exhaustion workloads for immutable and caller-buffered calls.
+- Lock down equal-distance entity ordering and finite endpoints whose derived
+  trace distance overflows.
+
+### Acceptance Criteria
+
+- Each public immutable or buffered request records exactly one trace sample.
+- All six termination values and all four output collections are distinguishable
+  in a snapshot and return to zero on reset.
+- Trace timing does not allocate on a warmed buffered tile-only path.
+- The benchmark writes versioned machine-readable metadata, budgets, structural
+  results, timings, allocations, and matching metric totals.
+- Timing remains comparison evidence rather than a hardware-dependent pass/fail
+  threshold.
+
+### Evidence
+
+- `Content.IntegrationTests` builds with zero errors; the 12 reported warnings
+  are the existing dependency and package-vulnerability warning set.
+- Trace and budget tests pass 17/17; metrics and trace benchmark tests pass 3/3;
+  the complete Z-level integration matrix passes 68/68.
+- The focused structural unit matrix passes 2/2 and all three stress baselines
+  pass with schema version 3 snapshots containing the new trace fields.
+- The standalone benchmark runner passes 1/1 and writes schema version 1 JSON
+  for all four workloads.
+- Across 512 measured calls per workload, the warmed buffered path allocates
+  zero managed bytes; immutable calls allocate between 1,480 and 6,896 bytes
+  per request in the first capture. No timing threshold is asserted.
+
+### Decisions
+
+- Measure only the shared buffered core in `TraceMilliseconds`; immutable-array
+  construction remains visible in the benchmark's outer elapsed and allocation
+  totals instead of being charged inconsistently to one overload.
+- Record metrics around one private core so immutable and buffered APIs cannot
+  double-count or drift semantically.
+- Reject a non-finite derived distance during preflight even when both endpoint
+  components are individually finite; a coincident extreme point remains valid.
+- Keep deterministic hit ordering as distance, entity UID, then segment, and
+  cover equal-distance entities explicitly.
+- Make zero allocation a tested invariant only for warmed tile-only workloads.
+  Robust physics enumeration remains outside that claim until a collision-enabled
+  gameplay consumer is profiled.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only trace instrumentation, benchmark and
+      edge-case coverage, observability presentation, and related documentation.
+- [x] Invariant review: Z 0 behavior, local/world frame normalization, moving
+      grids, server-owned budgets, channel boundaries, deterministic ordering,
+      and atomic rollback remain covered by the cumulative matrix.
+- [x] Automated verification: build, 17/17 trace plus budget, 3/3 metrics plus
+      benchmark, 68/68 Z-level integration, 2/2 unit, and 3/3 baseline tests pass.
+- [x] Performance evidence: schema version 1 benchmark JSON records four warmed
+      workloads and enforces zero buffered tile-only allocation without brittle
+      timing assertions; results are summarized in
+      `Docs/ZLevelTraceBenchmarkReport.md`.
+- [x] Documentation: metric semantics, overflow handling, benchmark method,
+      first results, limitations, and commands are recorded in the trace docs.
+- [x] Dependency check: existing Robust timing, transforms, lookup, and physics
+      APIs are sufficient; no paired WTZ Engine revision is required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and generated baseline/benchmark artifacts remain ignored.
+- [x] Mini review: findings, residual risks, and P2.1 are recorded below.
+- [x] Commit: save as `Instrument and benchmark Z-level traces` on
+      `zlevel/trace-metrics-benchmark`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: the caller-buffered geometric and boundary path now has measured,
+  repeatable evidence for zero WTZ-managed allocation after warm-up.
+- Finding: output totals and termination counters make future consumer cost and
+  failure modes observable without coupling policy to the trace primitive.
+- Finding: P1 now has one tested contract for geometry, frame ownership,
+  boundaries, output lifetime, budgets, deterministic ordering, and metrics.
+- Residual risk: entity-hit traces can still allocate inside Robust physics and
+  need consumer-specific profiling with realistic masks and candidate counts.
+- Residual risk: metrics are process-local; the client overlay does not represent
+  authoritative server traces, while `zlevelmetrics` does not include client work.
+- Residual risk: no gameplay path consumes `ZLevelTrace` yet, so P1 completion
+  establishes infrastructure rather than vertical combat behavior.
+- Next package: migrate the narrowest authoritative hitscan path with Z 0 parity,
+  closed-floor rejection, reusable buffers, and focused projectile-channel tests.
+
+## Phase P2 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P2.1 | Authoritative hitscan migration and Z 0 parity | In progress |
+| P2.2 | Physical projectiles and thrown-entity traversal | Pending |
+| P2.3 | Explosions, fire, heat, and generated effects | Pending |
+| P2.4 | Central direct and remote interaction validation | Pending |
+
+## Active Package: P2.1 Hitscan Trace Migration
 
 ### Planned Scope
 
-- Instrument query counts, terminations, output sizes, and elapsed time without
-  allocating on the buffered tile-only path.
-- Add repeatable same-level, diagonal multi-floor, closed-boundary, and
-  budget-exhaustion trace workloads with machine-readable measurements.
-- Cover equal-distance ties, extreme coordinates, metrics reset, and allocation
-  behavior in tests.
+- Identify the authoritative hitscan entry points and preserve their existing
+  same-level collision, penetration, damage, effects, and prediction behavior.
+- Route candidate geometry through a reusable `ZLevelTraceBuffer` with the
+  `Projectile` boundary channel and reject continuation through closed decks.
+- Add focused Z 0 parity, open/closed vertical, diagonal, deterministic-hit,
+  budget-failure, and moving-frame tests before broad integration verification.
+- Capture allocation and trace metrics with a representative collision mask;
+  document any unavoidable Robust-owned physics allocation before expanding to
+  physical projectiles.
 
 ## Package History
 
@@ -731,3 +836,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P1.2 | `Implement ordered vertical Z-level traces` | 5 trace, 11 trace/budget, 60 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P1.3a | `Normalize Z-level traces across moving frames` | 7 trace, 62 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.3b1 | `Add reusable Z-level trace buffers` | 8 trace, 7 budget, 64 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P1.3b2 | `Instrument and benchmark Z-level traces` | 17 trace/budget, 3 metrics/benchmark, 68 integration, 2 unit, 3 baseline, diff check | Complete |

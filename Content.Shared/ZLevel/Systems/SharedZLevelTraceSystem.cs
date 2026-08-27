@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Numerics;
 using Content.Shared.CCVar;
 using Robust.Shared.Configuration;
@@ -26,13 +27,14 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     public const int MaximumMaxVerticalCrossings = 1024;
     public const int DefaultMaxTileVisits = 8192;
     public const int MaximumMaxTileVisits = 1_000_000;
-    public const int DefaultMaxEntityHits = 4096;
+    public const int DefaultMaxEntityHits = 4_096;
     public const int MaximumMaxEntityHits = 1_000_000;
 
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly EntityLookupSystem _lookup = default!;
     [Dependency] private readonly FixtureSystem _fixtures = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
 
@@ -103,6 +105,22 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     public ZLevelTraceBufferResult Trace(in ZLevelTraceRequest request, ZLevelTraceBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
+        var started = Stopwatch.GetTimestamp();
+        var result = TraceCore(request, buffer);
+        _metrics.RecordTrace(
+            result.Termination,
+            buffer.MutableSegments.Count,
+            buffer.MutableTileVisits.Count,
+            buffer.MutableEntityHits.Count,
+            buffer.MutableBoundaryCrossings.Count,
+            Stopwatch.GetTimestamp() - started);
+        return result;
+    }
+
+    private ZLevelTraceBufferResult TraceCore(
+        in ZLevelTraceRequest request,
+        ZLevelTraceBuffer buffer)
+    {
         buffer.Clear();
 
         if (!TryNormalizePoint(request.Origin, out var normalizedOrigin) ||
@@ -116,7 +134,8 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         if (originWorld.MapId == MapId.Nullspace ||
             destinationWorld.MapId == MapId.Nullspace ||
             !IsFinite(originWorld.Position) ||
-            !IsFinite(destinationWorld.Position))
+            !IsFinite(destinationWorld.Position) ||
+            !float.IsFinite(GetTraceLength(originWorld, destinationWorld)))
         {
             return EmptyResult(ZLevelTraceTermination.InvalidCoordinates, request.Origin);
         }
