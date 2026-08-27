@@ -921,6 +921,11 @@ movement code.
 - Add tests for every cross-floor bug fixed.
 - Keep debug tools useful, but do not let the final feature depend on debug UI.
 
+The shared geometric request/result contract and its consumer boundaries are
+documented in `Docs/ZLevelTrace.md`. Keep damage, attenuation, target selection,
+and presentation in specialized systems rather than adding those policies to
+`SharedZLevelTraceSystem`.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

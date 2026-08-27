@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/baseline-budgets`.
-- Active package: `P1.1 ZLevelTrace contract and reference behavior`.
+- Active branch: `zlevel/trace-contract`.
+- Active package: `P1.2 Ordered vertical crossings and boundary integration`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -332,13 +332,13 @@ treated as Debug-run noise.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P1.1 | Trace request/result contract, channels, and 2D reference behavior | In progress |
-| P1.2 | Ordered vertical crossings and boundary-channel integration | Pending |
+| P1.1 | Trace request/result contract, channels, and 2D reference behavior | Complete |
+| P1.2 | Ordered vertical crossings and boundary-channel integration | In progress |
 | P1.3 | Moving-frame normalization, determinism, and allocation hardening | Pending |
 
-## Active Package: P1.1 ZLevelTrace Contract And Reference Behavior
+## Completed Package: P1.1 ZLevelTrace Contract And Reference Behavior
 
-### Planned Scope
+### Scope
 
 - Define request, segment, tile visit, entity hit, and boundary-crossing value
   types without coupling specialized consumer policy to the primitive.
@@ -349,6 +349,103 @@ treated as Debug-run noise.
   on the same world Z.
 - Add deterministic reference tests before implementing vertical crossing logic.
 
+### Acceptance Criteria
+
+- Endpoints capture map XY/world Z and optional grid-local XY/local Z without
+  inferring a layer from overlapping 2D geometry.
+- The request contains boundary semantics and output selection but no damage,
+  attenuation, penetration, or target-selection policy.
+- Results expose immutable ordered segments, tile visits, entity hits, and
+  boundary crossings with cumulative distances.
+- Same-world-Z entity hits reuse the engine physics query and ignore colliders
+  whose effective world Z differs.
+- Ordinary Z 0 hit order and distance remain compatible with the engine path.
+- A vertical request cannot silently execute as a same-floor ray before P1.2.
+
+### Evidence
+
+- `Content.Shared` and `Content.IntegrationTests` built with zero errors. The
+  reported warnings are the existing dependency, generator, and upstream set.
+- Four trace reference cases passed: translated/rotated frame coordinates and
+  world-Z filtering, Z 0 physics parity, explicit vertical deferral, and perfect
+  diagonal tile order.
+- The complete focused integration matrix passed 57/57 tests, including the P0
+  stress baselines and the existing mapping, atmosphere, movement, PVS, and
+  boundary suites.
+- Focused unit tests passed 2/2.
+- Projectile and explosion channel independence is exercised through the real
+  boundary resolver, including bits above the former byte range.
+
+### Decisions
+
+- Keep the primitive in WTZ Project `Content.Shared`; P1.1 needs no additional
+  WTZ Engine API because `SharedPhysicsSystem.IntersectRay` already supplies the
+  authoritative 2D entity geometry.
+- Represent one endpoint as a world coordinate plus an optional captured grid
+  frame and local coordinate. Grid points are created through
+  `TryCreateGridPoint`; map-only points use `ZLevelTracePoint.FromMap`.
+- Widen `ZLevelBoundaryChannels` from byte to unsigned 16-bit storage and add
+  independent `Projectile` and `Explosion` bits rather than aliasing `Effects`.
+- Use immutable result arrays while semantics are still evolving. No gameplay
+  hot path is migrated until the vertical path and caller-owned P1.3 buffer are
+  complete.
+- Sort entity hits by distance and then entity UID, making equal-distance ties
+  deterministic while preserving normal engine ordering.
+- Treat exact 2D corner crossings as one diagonal tile transition, matching the
+  existing pathfinding grid-cast convention.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only the trace contract/reference path,
+      two boundary channel bits, tests, and documentation.
+- [x] Invariant review: explicit local/world coordinates cover moving frame
+      origins; Z 0 physics parity is tested; shared code runs on client/server;
+      server authority and existing boundary behavior are unchanged.
+- [x] Automated verification: build, 4/4 trace references, 57/57 focused
+      integration tests, and 2/2 focused unit tests passed.
+- [x] Performance evidence: no production consumer uses P1.1, so throughput
+      claims do not apply. P0 baselines still pass; immutable allocation is
+      documented and assigned to P1.3 before consumer migration.
+- [x] Documentation: coordinate invariants, channels, ordering, options,
+      limitations, and verification are recorded in `Docs/ZLevelTrace.md`.
+- [x] Dependency check: no WTZ Engine change is required for P1.1.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices and the diff contains no generated benchmark artifacts.
+- [x] Mini review: findings, residual risks, and P1.2 are recorded below.
+- [x] Commit: saved as `Define the shared Z-level trace contract` on
+      `zlevel/trace-contract`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: the existing physics ray can remain authoritative when its candidates
+  are filtered by effective world Z; a parallel physical broadphase is not
+  needed for the shared trace.
+- Finding: endpoint frames and entity frames must remain independent. Tests use
+  explicit world-Z stamping because anchored fixtures may reparent when no grid
+  tile supports them.
+- Residual risk: tile visits are emitted only when both endpoints share one grid
+  frame and local Z. Cross-frame normalization remains P1.3 work.
+- Residual risk: immutable arrays and the engine query allocate; P1.1 is not yet
+  suitable for a migrated high-frequency consumer.
+- Next package: implement ordered world-Z crossings, resolve the requested
+  boundary channels at each crossing, and merge per-level segments and hits by
+  cumulative distance.
+
+## Active Package: P1.2 Ordered Vertical Crossings And Boundary Integration
+
+### Planned Scope
+
+- Traverse the continuous world XYZ line in deterministic order and split it at
+  every adjacent world-Z boundary.
+- Resolve each crossing to a grid-local tile and local Z pair, including holes
+  and translated or rotated origin frames supported by the current contract.
+- Query `SharedZLevelBoundarySystem` with the request's channels and stop at the
+  first closed crossing without evaluating geometry beyond it.
+- Raycast each open same-level segment through the existing physics path and
+  merge segments, tile visits, hits, and crossings by cumulative distance.
+- Add an explicit bounded-iteration failure result and tests for upward,
+  downward, diagonal, multi-floor, open, and closed traces.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -356,3 +453,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P0.1 | `Add native Z-level performance observability` | 46 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.2 | `Add deterministic Z-level stress baselines` | 3 baseline cases, 49 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.3 | `Add configurable Z-level performance budgets` | 4 budget, 3 baseline, 53 integration, 2 unit, diff check | Complete |
+| 2026-08-27 | P1.1 | `Define the shared Z-level trace contract` | 4 trace, 57 integration, 2 unit, diff check | Complete |

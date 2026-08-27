@@ -436,8 +436,10 @@ public sealed class ZLevelMovementTest : MovementTest
                 1,
                 ZLevelBoundaryChannels.TraversalUp |
                 ZLevelBoundaryChannels.Atmosphere |
-                ZLevelBoundaryChannels.Visibility,
-                ZLevelBoundaryChannels.Visibility);
+                ZLevelBoundaryChannels.Visibility |
+                ZLevelBoundaryChannels.Projectile,
+                ZLevelBoundaryChannels.Visibility |
+                ZLevelBoundaryChannels.Explosion);
             xform.AnchorEntity(marker, SEntMan.GetComponent<TransformComponent>(marker));
 
             Assert.That(boundaries.TryGetBoundary(MapData.Grid, grid, tile, 0, 1, out var explicitBoundary), Is.True);
@@ -448,6 +450,8 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.TraversalUp), Is.True);
                 Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.TraversalDown), Is.False);
                 Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Atmosphere), Is.True);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Projectile), Is.True);
+                Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Explosion), Is.False);
                 Assert.That(explicitBoundary.IsOpen(ZLevelBoundaryChannels.Visibility), Is.False,
                     "Forced-closed channels must win over forced-open channels.");
             });

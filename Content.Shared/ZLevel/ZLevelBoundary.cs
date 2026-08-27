@@ -10,7 +10,7 @@ using Robust.Shared.Maths;
 namespace Content.Shared.ZLevel;
 
 [Flags]
-public enum ZLevelBoundaryChannels : byte
+public enum ZLevelBoundaryChannels : ushort
 {
     None = 0,
     Body = 1 << 0,
@@ -21,8 +21,10 @@ public enum ZLevelBoundaryChannels : byte
     Interaction = 1 << 5,
     Sound = 1 << 6,
     Effects = 1 << 7,
+    Projectile = 1 << 8,
+    Explosion = 1 << 9,
     Traversal = TraversalUp | TraversalDown,
-    All = byte.MaxValue,
+    All = ushort.MaxValue,
 }
 
 /// <summary>
