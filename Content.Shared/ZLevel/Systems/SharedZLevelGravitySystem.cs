@@ -1,6 +1,7 @@
 // DragonStation Z-Level prototype.
 // Copyright (c) pedel and OpenAI Codex.
 
+using System.Diagnostics;
 using System.Linq;
 using Content.Shared.Gravity;
 using Content.Shared.ZLevel.Components;
@@ -19,6 +20,7 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 {
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelMapSystem _zLevelMaps = default!;
 
@@ -26,6 +28,9 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private EntityQuery<ZLevelPositionComponent> _positionQuery;
     private readonly Dictionary<EntityUid, GravityFieldCache> _caches = new();
     private readonly HashSet<EntityUid> _pendingWeightlessRefresh = new();
+
+    public int CachedGridCount => _caches.Count;
+    public int PendingRefreshGridCount => _pendingWeightlessRefresh.Count;
 
     public override void Initialize()
     {
@@ -91,6 +96,7 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
         float zLevel,
         out int targetLevel)
     {
+        _metrics.RecordGravityQuery();
         targetLevel = default;
         if (!_zLevelMaps.TryGetConfig(gridUid, out _))
             return false;
@@ -126,7 +132,13 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private GravityFieldCache GetCache(EntityUid gridUid, MapGridComponent grid)
     {
         if (_caches.TryGetValue(gridUid, out var cached))
+        {
+            _metrics.RecordGravityCacheAccess(true);
             return cached;
+        }
+
+        _metrics.RecordGravityCacheAccess(false);
+        var started = Stopwatch.GetTimestamp();
 
         var sources = GetSources(gridUid, grid);
         var liveTiles = _map.GetAllNonEmptyZLevelTiles(gridUid, grid)
@@ -152,6 +164,10 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
         cached = new GravityFieldCache(columns);
         _caches[gridUid] = cached;
+        _metrics.RecordGravityBuild(
+            liveTiles.Count,
+            sources.Count,
+            Stopwatch.GetTimestamp() - started);
         return cached;
     }
 
@@ -249,7 +265,8 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
     private void OnGridRemoved(GridRemovalEvent args)
     {
-        _caches.Remove(args.EntityUid);
+        if (_caches.Remove(args.EntityUid))
+            _metrics.RecordGravityInvalidation();
         _pendingWeightlessRefresh.Remove(args.EntityUid);
     }
 
@@ -261,8 +278,13 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
     private void InvalidateGrid(EntityUid gridUid)
     {
-        _caches.Remove(gridUid);
-        if (IsManagedGrid(gridUid))
+        var removed = _caches.Remove(gridUid);
+        var managed = IsManagedGrid(gridUid);
+        if (!removed && !managed)
+            return;
+
+        _metrics.RecordGravityInvalidation();
+        if (managed)
             _pendingWeightlessRefresh.Add(gridUid);
     }
 

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -28,6 +29,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
     [Dependency] private readonly EntityLookupSystem _lookup = default!;
     [Dependency] private readonly SharedPvsOverrideSystem _pvs = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
 
     private readonly List<ViewerContext> _viewers = new();
@@ -95,15 +97,18 @@ public sealed class ZLevelPvsSystem : EntitySystem
             return;
         }
 
+        var started = Stopwatch.GetTimestamp();
         CollectViewers(session);
+        _candidates.Clear();
+        _visible.Clear();
+        _culled.Clear();
         if (_viewers.Count == 0)
         {
             _pvs.ClearSessionCulling(session);
+            RecordRefresh(started);
             return;
         }
 
-        _candidates.Clear();
-        _visible.Clear();
         foreach (var viewer in _viewers)
         {
             _viewerCandidates.Clear();
@@ -127,10 +132,10 @@ public sealed class ZLevelPvsSystem : EntitySystem
             }
         }
 
-        _culled.Clear();
         _culled.UnionWith(_candidates);
         _culled.ExceptWith(_visible);
         _pvs.ReplaceSessionCulling(session, _culled);
+        RecordRefresh(started);
     }
 
     private void CollectViewers(ICommonSession session)
@@ -175,6 +180,16 @@ public sealed class ZLevelPvsSystem : EntitySystem
         var normal = _configuration.GetCVar(CVars.NetMaxUpdateRange);
         var priority = _configuration.GetCVar(CVars.NetPvsPriorityRange);
         _priorityViewSize = MathF.Max(8f, MathF.Max(normal, priority));
+    }
+
+    private void RecordRefresh(long started)
+    {
+        _metrics.RecordPvsRefresh(
+            _viewers.Count,
+            _candidates.Count,
+            _visible.Count,
+            _culled.Count,
+            Stopwatch.GetTimestamp() - started);
     }
 
     private readonly record struct ViewerContext(

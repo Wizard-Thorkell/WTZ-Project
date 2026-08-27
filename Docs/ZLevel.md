@@ -11,6 +11,7 @@ Official repositories:
 
 - Project and game content: https://github.com/Wizard-Thorkell/WTZ-Project
 - Engine fork: https://github.com/Wizard-Thorkell/WTZ-Engine
+- Active implementation ledger: [ZLevelImplementationLedger.md](ZLevelImplementationLedger.md)
 
 ## Product Goal
 

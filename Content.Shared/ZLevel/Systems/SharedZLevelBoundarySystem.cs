@@ -21,6 +21,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     public const int MaxCachedBoundaries = 4096;
 
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelMapSystem _zLevelMap = default!;
 
@@ -68,9 +69,12 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         var cacheKey = new BoundaryCacheKey(gridUid, tile, lowerZ);
         if (_boundaryCache.TryGetValue(cacheKey, out var cached))
         {
+            _metrics.RecordBoundaryQuery(true);
             boundary = cached.State;
             return true;
         }
+
+        _metrics.RecordBoundaryQuery(false);
 
         var lower = new ZLevelTileIndices(tile.X, tile.Y, lowerZ);
         var upper = new ZLevelTileIndices(tile.X, tile.Y, lowerZ + 1);
@@ -192,7 +196,8 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
 
     public void InvalidateBoundary(EntityUid gridUid, Vector2i tile, int lowerZ)
     {
-        _boundaryCache.Remove(new BoundaryCacheKey(gridUid, tile, lowerZ));
+        var removed = _boundaryCache.Remove(new BoundaryCacheKey(gridUid, tile, lowerZ));
+        _metrics.RecordBoundaryInvalidation(removed);
     }
 
     private void OnStartup(Entity<ZLevelBoundaryComponent> entity, ref ComponentStartup args)
@@ -256,6 +261,9 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         {
             _boundaryCache.Remove(key);
         }
+
+        if (remove.Count > 0)
+            _metrics.RecordBoundaryInvalidatedEntries(remove.Count);
     }
 
     private void OnQuery(Entity<ZLevelBoundaryComponent> entity, ref ZLevelBoundaryQueryEvent args)
@@ -363,6 +371,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
                 continue;
 
             _boundaryCache.Remove(oldest.Key);
+            _metrics.RecordBoundaryEviction();
         }
     }
 

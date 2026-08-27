@@ -33,6 +33,9 @@ public sealed class ZLevelDebugOverlay : Overlay
     [Dependency] private readonly IClydeTileDefinitionManager _tileDefinitionManager = default!;
 
     private readonly SharedMapSystem _mapSystem;
+    private readonly SharedZLevelBoundarySystem _boundarySystem;
+    private readonly SharedZLevelGravitySystem _gravitySystem;
+    private readonly SharedZLevelMetricsSystem _metricsSystem;
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
@@ -51,6 +54,9 @@ public sealed class ZLevelDebugOverlay : Overlay
         IoCManager.InjectDependencies(this);
 
         _mapSystem = _entityManager.System<SharedMapSystem>();
+        _boundarySystem = _entityManager.System<SharedZLevelBoundarySystem>();
+        _gravitySystem = _entityManager.System<SharedZLevelGravitySystem>();
+        _metricsSystem = _entityManager.System<SharedZLevelMetricsSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
@@ -94,6 +100,34 @@ public sealed class ZLevelDebugOverlay : Overlay
             var detail = $"Offset: {zLevel.LocalZOffset:0.00}";
             args.ScreenHandle.DrawString(_font, position + new Vector2(0f, 14f), detail, Color.White.WithAlpha(0.8f));
         }
+
+        var metrics = _metricsSystem.Snapshot();
+        var metricsPosition = new Vector2(args.ViewportBounds.Left + 12f, args.ViewportBounds.Top + 18f);
+        var metricsColor = Color.White.WithAlpha(0.82f);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition,
+            $"Z metrics (local)  boundary q:{metrics.BoundaryQueries} hit:{metrics.BoundaryCacheHitPercent:0.0}% " +
+            $"cache:{_boundarySystem.CachedBoundaryCount}/{SharedZLevelBoundarySystem.MaxCachedBoundaries}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 14f),
+            $"visibility entity:{metrics.VisibilityEntityQueries} tile:{metrics.VisibilityTileQueries} " +
+            $"cross:{metrics.VisibilityBoundaryChecks} reject:{metrics.VisibilityEarlyRejections}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 28f),
+            $"gravity q:{metrics.GravityQueries} hit:{metrics.GravityCacheHitPercent:0.0}% " +
+            $"grids:{_gravitySystem.CachedGridCount} pending:{_gravitySystem.PendingRefreshGridCount}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 42f),
+            $"gravity build count:{metrics.GravityBuilds} " +
+            $"avg/max:{metrics.GravityAverageBuildMilliseconds:0.000}/{metrics.GravityMaxBuildMilliseconds:0.000}ms",
+            metricsColor);
     }
 
     private void DrawWorld(in OverlayDrawArgs args, int playerWorldZ, MapId mapId)

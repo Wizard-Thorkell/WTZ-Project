@@ -19,6 +19,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
 
     [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
 
@@ -38,19 +39,29 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         int viewerWorldZ,
         bool allowAbove = false)
     {
+        _metrics.RecordVisibilityEntityQuery();
         if (!_transformQuery.TryComp(entity, out var transform) ||
             transform.MapID == MapId.Nullspace ||
             transform.MapID != viewerMap)
+        {
+            _metrics.RecordVisibilityEarlyRejection();
             return false;
+        }
 
         var entityLocalZ = _transform.GetZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity)));
         var entityWorldZ = _transform.GetWorldZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity)));
         if (entityWorldZ == viewerWorldZ)
+        {
+            _metrics.RecordVisibilitySameLevel();
             return true;
+        }
 
         if ((entityWorldZ > viewerWorldZ && !allowAbove) ||
             Math.Abs(entityWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
+        {
+            _metrics.RecordVisibilityEarlyRejection();
             return false;
+        }
 
         var mapCoordinates = _transform.GetMapCoordinates((entity, transform));
         EntityUid gridUid;
@@ -62,6 +73,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         }
         else if (!_mapManager.TryFindGridAt(mapCoordinates, out gridUid, out var foundGrid))
         {
+            _metrics.RecordVisibilityEarlyRejection();
             return false;
         }
         else
@@ -81,15 +93,23 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         int targetLocalZ,
         bool allowAbove = false)
     {
+        _metrics.RecordVisibilityTileQuery();
         var viewerLocalZ = _transform.WorldToLocalZLevel(gridUid, viewerWorldZ);
         var targetWorldZ = _transform.LocalToWorldZLevel(gridUid, targetLocalZ);
         if (targetWorldZ == viewerWorldZ)
+        {
+            _metrics.RecordVisibilitySameLevel();
             return true;
+        }
 
         if ((targetWorldZ > viewerWorldZ && !allowAbove) ||
             Math.Abs(targetWorldZ - viewerWorldZ) > MaxVisibleLevelDistance)
+        {
+            _metrics.RecordVisibilityEarlyRejection();
             return false;
+        }
 
+        _metrics.RecordVisibilityBoundaryCheck();
         return _boundaries.IsStackOpen(
             gridUid,
             grid,
