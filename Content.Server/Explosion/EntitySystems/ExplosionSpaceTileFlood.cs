@@ -23,9 +23,12 @@ public sealed class ExplosionSpaceTileFlood : ExplosionTileFlood
 
     public ushort TileSize = ExplosionSystem.DefaultTileSize;
 
-    public ExplosionSpaceTileFlood(ExplosionSystem system, MapCoordinates epicentre, EntityUid? referenceGrid, List<EntityUid> localGrids, float maxDistance)
+    public readonly int WorldZ;
+
+    public ExplosionSpaceTileFlood(ExplosionSystem system, MapCoordinates epicentre, int worldZ, EntityUid? referenceGrid, List<EntityUid> localGrids, float maxDistance)
     {
-        (_gridBlockMap, TileSize) = system.TransformGridEdges(epicentre, referenceGrid, localGrids, maxDistance);
+        WorldZ = worldZ;
+        (_gridBlockMap, TileSize) = system.TransformGridEdges(epicentre, worldZ, referenceGrid, localGrids, maxDistance);
         system.GetUnblockedDirections(_gridBlockMap, TileSize);
     }
 

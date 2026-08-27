@@ -3,8 +3,10 @@ using Content.Server.EUI;
 using Content.Server.Explosion.EntitySystems;
 using Content.Shared.Administration;
 using Content.Shared.Explosion;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Console;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
 using System.Linq;
 using System.Numerics;
@@ -39,6 +41,8 @@ public sealed class ExplosionCommand : LocalizedEntityCommands
     [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
     [Dependency] private readonly ExplosionSystem _explosion = default!;
     [Dependency] private readonly TransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
+    [Dependency] private readonly SharedMapSystem _map = default!;
 
     public override string Command => "explosion";
 
@@ -46,7 +50,7 @@ public sealed class ExplosionCommand : LocalizedEntityCommands
     // uses this command.
     public override void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        if (args.Length == 0 || args.Length == 4 || args.Length > 7)
+        if (args.Length == 0 || args.Length == 4 || args.Length > 8)
         {
             shell.WriteError(Loc.GetString($"shell-wrong-arguments-number"));
             return;
@@ -130,6 +134,43 @@ public sealed class ExplosionCommand : LocalizedEntityCommands
             }
         }
 
-        _explosion.QueueExplosion(coords, type.ID, intensity, slope, maxIntensity, null);
+        var worldZ = 0;
+        EntityUid? frameGrid = null;
+        TransformComponent? attachedTransform = null;
+        if (shell.Player?.AttachedEntity is { } attached &&
+            EntityManager.TryGetComponent(attached, out TransformComponent? playerTransform) &&
+            playerTransform.MapID == coords.MapId)
+        {
+            attachedTransform = playerTransform;
+            worldZ = _zLevels.GetWorldZLevel(attached);
+        }
+
+        if (args.Length > 7 && !int.TryParse(args[7], out worldZ))
+        {
+            shell.WriteError(Loc.GetString($"cmd-explosion-failed-to-parse-world-z", ("value", args[7])));
+            return;
+        }
+
+        if (attachedTransform?.GridUid is { } attachedGrid &&
+            EntityManager.TryGetComponent(attachedGrid, out MapGridComponent? grid))
+        {
+            var localZ = _transform.WorldToLocalZLevel(attachedGrid, worldZ);
+            var xy = _map.WorldToTile(attachedGrid, grid, coords.Position);
+            if (args.Length <= 3 ||
+                !_map.GetZLevelTileRef(attachedGrid, grid, new ZLevelTileIndices(xy.X, xy.Y, localZ)).Tile.IsEmpty)
+            {
+                frameGrid = attachedGrid;
+            }
+        }
+
+        _explosion.QueueExplosion(
+            coords,
+            type.ID,
+            intensity,
+            slope,
+            maxIntensity,
+            null,
+            worldZ: worldZ,
+            frameGrid: frameGrid);
     }
 }

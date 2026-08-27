@@ -438,8 +438,8 @@ Major unfinished areas:
 - ZLevel tile persistence and network replication support sparse Z-only chunks,
   but the normal mapper workflow still needs more validation.
 - Atmos simulation and common entity-facing machinery are Z-aware, but legacy
-  `TileRef` consumers such as chemistry tile reactions, explosions, station
-  event targets, and admin tile commands still address only the base layer.
+  `TileRef` consumers such as chemistry tile reactions, station event targets,
+  and some admin tile commands still address only the base layer.
 - Atmos monitoring-console pipe visualization is still a 2D projection and can
   visually merge different-floor networks even though their simulation groups
   are isolated.
@@ -448,8 +448,9 @@ Major unfinished areas:
 - Lighting and FOV are not native to floors.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
-- Hitscan and physical projectile lifecycle are Z-aware, but physical vertical
-  flight, explosions, fire, heat, and area effects remain incomplete.
+- Hitscan, physical projectile lifecycle, and authoritative explosion topology
+  are Z-aware. Fire, atmospheric heat, physical vertical flight, and other area
+  effects remain incomplete.
 - Click priority and interaction semantics need more coverage.
 - Grid lookup still begins from a 2D `MapCoordinates` selection in several
   engine APIs. Once a destination grid is known, callers now convert world Z to
@@ -472,6 +473,32 @@ Major unfinished areas:
   core-strength and wall-support defaults.
 - Collapse audio and tile-item debris are intentionally absent until their
   presentation and destination use explicit world-Z semantics.
+
+## Explosion Floor Contract
+
+- Entity-backed explosions capture map position, world Z, structural frame,
+  frame-local position, and frame-local Z when queued. Deleting the source or
+  translating/rotating its grid before processing does not move the blast to an
+  unrelated floor or world position.
+- Grid flood state is keyed by `(grid, local Z)` and space flood state by world
+  Z. Airtight caches, grid edges, broadphase candidates, anchored blockers,
+  turf damage, and visual payloads retain the same floor identity.
+- Vertical propagation uses `ZLevelTrace` with the independent `Explosion`
+  boundary channel. One vertical crossing has the same intensity cost as one
+  cardinal tile; closed or invalid crossings fail conservatively.
+- Prefer `QueueExplosion(EntityUid, ...)`. The `MapCoordinates` overload has no
+  implicit floor data, so callers must pass `worldZ` and should pass
+  `frameGrid` when structural ownership is known. Omitting both is the explicit
+  compatibility path for world Z 0.
+- The admin command accepts an optional final floor argument:
+  `explosion intensity slope maxIntensity x y mapId prototypeId worldZ`.
+  The explosion UI derives the attached administrator's world Z on the same map
+  and previews only the matching local layers.
+- `zlevelmetrics` reports topology builds, reached layers and tiles, vertical
+  traces/cache hits/outcomes, build timings, and area/iteration budget hits.
+- Non-zero local atmospheric heat, vertical sound propagation, camera-shake
+  filtering, and generated debris/effect stamping are intentionally assigned to
+  P2.3b, P4, and P2.3c rather than approximated inside blast topology.
 
 ## Roadmap Phases
 

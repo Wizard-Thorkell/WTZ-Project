@@ -71,6 +71,22 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _ballisticInvalidCancellations;
     private long _ballisticContactFlushes;
 
+    private long _explosionTopologyBuilds;
+    private long _explosionGridLayers;
+    private long _explosionSpaceLayers;
+    private long _explosionTiles;
+    private long _explosionVerticalQueries;
+    private long _explosionVerticalCacheHits;
+    private long _explosionVerticalTraces;
+    private long _explosionVerticalOpen;
+    private long _explosionVerticalClosed;
+    private long _explosionVerticalRejected;
+    private long _explosionAreaBudgetExhaustions;
+    private long _explosionIterationBudgetExhaustions;
+    private long _explosionTopologyTimestampTicks;
+    private long _explosionLastTopologyTimestampTicks;
+    private long _explosionMaxTopologyTimestampTicks;
+
     public void RecordBoundaryQuery(bool cacheHit)
     {
         _boundaryQueries++;
@@ -256,6 +272,41 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _ballisticContactFlushes++;
     }
 
+    public void RecordExplosionTopology(
+        int gridLayers,
+        int spaceLayers,
+        int tiles,
+        int verticalQueries,
+        int verticalCacheHits,
+        int verticalTraces,
+        int verticalOpen,
+        int verticalClosed,
+        int verticalRejected,
+        bool areaBudgetExhausted,
+        bool iterationBudgetExhausted,
+        long elapsedTimestampTicks)
+    {
+        _explosionTopologyBuilds++;
+        _explosionGridLayers += gridLayers;
+        _explosionSpaceLayers += spaceLayers;
+        _explosionTiles += tiles;
+        _explosionVerticalQueries += verticalQueries;
+        _explosionVerticalCacheHits += verticalCacheHits;
+        _explosionVerticalTraces += verticalTraces;
+        _explosionVerticalOpen += verticalOpen;
+        _explosionVerticalClosed += verticalClosed;
+        _explosionVerticalRejected += verticalRejected;
+        if (areaBudgetExhausted)
+            _explosionAreaBudgetExhaustions++;
+        if (iterationBudgetExhausted)
+            _explosionIterationBudgetExhaustions++;
+        _explosionTopologyTimestampTicks += elapsedTimestampTicks;
+        _explosionLastTopologyTimestampTicks = elapsedTimestampTicks;
+        _explosionMaxTopologyTimestampTicks = Math.Max(
+            _explosionMaxTopologyTimestampTicks,
+            elapsedTimestampTicks);
+    }
+
     public ZLevelMetricsSnapshot Snapshot()
     {
         return new ZLevelMetricsSnapshot(
@@ -312,7 +363,22 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _ballisticClosedBoundaries,
             _ballisticCollisionCancellations,
             _ballisticInvalidCancellations,
-            _ballisticContactFlushes);
+            _ballisticContactFlushes,
+            _explosionTopologyBuilds,
+            _explosionGridLayers,
+            _explosionSpaceLayers,
+            _explosionTiles,
+            _explosionVerticalQueries,
+            _explosionVerticalCacheHits,
+            _explosionVerticalTraces,
+            _explosionVerticalOpen,
+            _explosionVerticalClosed,
+            _explosionVerticalRejected,
+            _explosionAreaBudgetExhaustions,
+            _explosionIterationBudgetExhaustions,
+            TimestampTicksToMilliseconds(_explosionTopologyTimestampTicks),
+            TimestampTicksToMilliseconds(_explosionLastTopologyTimestampTicks),
+            TimestampTicksToMilliseconds(_explosionMaxTopologyTimestampTicks));
     }
 
     public void ResetCounters()
@@ -371,6 +437,21 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _ballisticCollisionCancellations = 0;
         _ballisticInvalidCancellations = 0;
         _ballisticContactFlushes = 0;
+        _explosionTopologyBuilds = 0;
+        _explosionGridLayers = 0;
+        _explosionSpaceLayers = 0;
+        _explosionTiles = 0;
+        _explosionVerticalQueries = 0;
+        _explosionVerticalCacheHits = 0;
+        _explosionVerticalTraces = 0;
+        _explosionVerticalOpen = 0;
+        _explosionVerticalClosed = 0;
+        _explosionVerticalRejected = 0;
+        _explosionAreaBudgetExhaustions = 0;
+        _explosionIterationBudgetExhaustions = 0;
+        _explosionTopologyTimestampTicks = 0;
+        _explosionLastTopologyTimestampTicks = 0;
+        _explosionMaxTopologyTimestampTicks = 0;
     }
 
     private static double TimestampTicksToMilliseconds(long ticks)
@@ -433,7 +514,22 @@ public readonly record struct ZLevelMetricsSnapshot(
     long BallisticClosedBoundaries,
     long BallisticCollisionCancellations,
     long BallisticInvalidCancellations,
-    long BallisticContactFlushes)
+    long BallisticContactFlushes,
+    long ExplosionTopologyBuilds,
+    long ExplosionGridLayers,
+    long ExplosionSpaceLayers,
+    long ExplosionTiles,
+    long ExplosionVerticalQueries,
+    long ExplosionVerticalCacheHits,
+    long ExplosionVerticalTraces,
+    long ExplosionVerticalOpen,
+    long ExplosionVerticalClosed,
+    long ExplosionVerticalRejected,
+    long ExplosionAreaBudgetExhaustions,
+    long ExplosionIterationBudgetExhaustions,
+    double ExplosionTopologyMilliseconds,
+    double ExplosionLastTopologyMilliseconds,
+    double ExplosionMaxTopologyMilliseconds)
 {
     public double BoundaryCacheHitPercent => Percentage(BoundaryCacheHits, BoundaryQueries);
     public double GravityCacheHitPercent => Percentage(GravityCacheHits, GravityCacheHits + GravityCacheMisses);
@@ -441,6 +537,12 @@ public readonly record struct ZLevelMetricsSnapshot(
     public double PvsAverageRefreshMilliseconds => Average(PvsRefreshMilliseconds, PvsRefreshes);
     public double TraceAverageMilliseconds => Average(TraceMilliseconds, TraceQueries);
     public long BallisticRoutesRejected => BallisticRouteAttempts - BallisticRoutesStarted;
+    public double ExplosionVerticalCacheHitPercent => Percentage(
+        ExplosionVerticalCacheHits,
+        ExplosionVerticalQueries);
+    public double ExplosionAverageTopologyMilliseconds => Average(
+        ExplosionTopologyMilliseconds,
+        ExplosionTopologyBuilds);
 
     private static double Percentage(long value, long total)
     {

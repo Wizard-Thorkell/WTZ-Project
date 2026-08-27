@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Linq;
 using Content.Shared.Explosion;
 using Content.Shared.Explosion.Components;
 using Content.Shared.Explosion.EntitySystems;
@@ -18,7 +19,7 @@ public sealed partial class ExplosionSystem
 
     private void OnGetState(EntityUid uid, ExplosionVisualsComponent component, ref ComponentGetState args)
     {
-        Dictionary<NetEntity, Dictionary<int, List<Vector2i>>> tileLists = new();
+        Dictionary<NetEntity, Dictionary<int, Dictionary<int, List<Vector2i>>>> tileLists = new();
         foreach (var (grid, data) in component.Tiles)
         {
             tileLists.Add(GetNetEntity(grid), data);
@@ -26,6 +27,7 @@ public sealed partial class ExplosionSystem
 
         args.State = new ExplosionVisualsState(
             component.Epicenter,
+            component.EpicenterWorldZ,
             component.ExplosionType,
             component.Intensity,
             component.SpaceTiles,
@@ -37,22 +39,40 @@ public sealed partial class ExplosionSystem
     /// <summary>
     ///     Constructor for the shared <see cref="ExplosionEvent"/> using the server-exclusive explosion classes.
     /// </summary>
-    private EntityUid CreateExplosionVisualEntity(MapCoordinates epicenter, string prototype, Matrix3x2 spaceMatrix, ExplosionSpaceTileFlood? spaceData, IEnumerable<ExplosionGridTileFlood> gridData, List<float> iterationIntensity)
+    private EntityUid CreateExplosionVisualEntity(
+        MapCoordinates epicenter,
+        int epicenterWorldZ,
+        string prototype,
+        Matrix3x2 spaceMatrix,
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData,
+        IEnumerable<ExplosionGridTileFlood> gridData,
+        List<float> iterationIntensity)
     {
         var explosionEntity = Spawn(null, MapCoordinates.Nullspace);
         var comp = AddComp<ExplosionVisualsComponent>(explosionEntity);
 
         foreach (var grid in gridData)
         {
-            comp.Tiles.Add(grid.Grid.Owner, grid.TileLists);
+            if (!comp.Tiles.TryGetValue(grid.Grid.Owner, out var layers))
+            {
+                layers = new();
+                comp.Tiles[grid.Grid.Owner] = layers;
+            }
+
+            layers[grid.LocalZ] = grid.TileLists;
         }
 
-        comp.SpaceTiles = spaceData?.TileLists;
+        foreach (var (worldZ, data) in spaceData)
+        {
+            comp.SpaceTiles[worldZ] = data.TileLists;
+        }
+
         comp.Epicenter = epicenter;
+        comp.EpicenterWorldZ = epicenterWorldZ;
         comp.ExplosionType = prototype;
         comp.Intensity = iterationIntensity;
         comp.SpaceMatrix = spaceMatrix;
-        comp.SpaceTileSize = spaceData?.TileSize ?? DefaultTileSize;
+        comp.SpaceTileSize = spaceData.Values.FirstOrDefault()?.TileSize ?? DefaultTileSize;
         Dirty(explosionEntity, comp);
 
         // Light, sound & visuals may extend well beyond normal PVS range. In principle, this should probably still be

@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/projectile-vertical-trajectory`.
-- Active package: `P2.2b Bounded physical vertical trajectory`.
+- Active branch: `zlevel/explosion-topology`.
+- Active package: none; next is `P2.3b Z-aware fire and atmospheric heat`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -808,7 +808,7 @@ treated as Debug-run noise.
 | --- | --- | --- |
 | P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
 | P2.2 | Physical projectiles and thrown-entity traversal | Complete |
-| P2.3 | Explosions, fire, heat, and generated effects | Pending |
+| P2.3 | Explosions, fire, heat, and generated effects | In progress |
 | P2.4 | Central direct and remote interaction validation | Pending |
 
 P2.2 is split into independently gated subpackages:
@@ -817,6 +817,152 @@ P2.2 is split into independently gated subpackages:
 | --- | --- | --- |
 | P2.2a | Projectile/throw floor authority and lifecycle preservation | Complete |
 | P2.2b | Bounded physical vertical trajectory and crossing policy | Complete |
+
+P2.3 is split so blast topology, atmospheric consequences, and generated
+presentation can each pass the completion gate independently:
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P2.3a | Authoritative per-floor explosion topology and blast processing | Complete |
+| P2.3b | Z-aware fire and atmospheric heat propagation | Pending |
+| P2.3c | Generated effect placement and cross-floor presentation hardening | Pending |
+
+## Completed Package: P2.3a Authoritative Explosion Topology
+
+### Scope
+
+- Capture the authoritative world Z and structural frame before an explosive
+  source can be deleted, and include both in queue-combination identity.
+- Preserve the existing explosion flood's resistance, diagonal, grid/space, and
+  intensity rules while indexing grid waves by local Z and space waves by world Z.
+- Resolve vertical neighbors through reusable `ZLevelTrace` output and the
+  independently authored `Explosion` boundary channel.
+- Make airtight caches, grid edges, entity lookup, turf blocking, floor damage,
+  and explosion overlay data address the floor actually reached by the wave.
+- Add low-cost topology counters and focused integration coverage without moving
+  damage, attenuation, tile breaking, or presentation policy into `ZLevelTrace`.
+
+### Acceptance Criteria
+
+- Z 0 explosions retain their established radius, resistance, tile damage, and
+  queue-combination behavior.
+- Overlapping entities, anchored blockers, airtight structures, and tiles on an
+  unreached floor cannot affect or be affected by the explosion.
+- Nearby explosions combine only when map, world Z, structural frame, prototype,
+  and distance are compatible.
+- An open `Explosion` boundary propagates the wave in deterministic vertical
+  order with the same one-tile cost as a cardinal step; a closed boundary does
+  not leak damage or topology.
+- Translated, initially rotated, and world-Z-offset grids resolve local layers
+  from the captured frame without trusting client-provided floor data.
+- Work remains bounded by the existing explosion area/iteration limits and the
+  shared trace budgets, with reusable crossing buffers and observable counters.
+- Server blast visuals identify their grid-local or space-world floor so clients
+  never draw reached tiles on an unrelated viewed floor.
+
+### Explicit Deferrals
+
+- P2.3b owns hotspot/atmospheric heat semantics and persistent fire propagation;
+  P2.3a must prevent wrong-floor mutation but does not define a new fire model.
+- P2.3c owns spawned debris/effect stamping and final in-game presentation
+  polish beyond the authoritative explosion overlay payload.
+- P4 owns audible vertical portal propagation; this package does not invent a
+  temporary competing sound model.
+
+### Evidence
+
+- `dotnet build Content.IntegrationTests/Content.IntegrationTests.csproj
+  --no-restore -consoleloggerparameters:ErrorsOnly` passed with zero errors.
+  A non-incremental warning audit found no new analyzer warning after replacing
+  direct entity-manager and generic transform access with the recommended
+  proxies. Existing dependency, vulnerability, and upstream obsolescence
+  warnings remain.
+- The dedicated explosion topology matrix passed 14/14 with no skipped or
+  dirty-disposed cases. It covers closed/open/unrelated boundary channels,
+  two ordered crossings, Z 0 parity, different-floor queue identity, explicit
+  map-coordinate Z, translated/rotated moving frames, deleted sources,
+  wrong-floor airtight and turf blockers, non-zero tile damage, budget metrics,
+  and floor-separated visual payloads.
+- The complete focused Z-level integration matrix passed 115/115. Explosion
+  prototype validation passed 9/9, focused structural unit tests passed 2/2,
+  and the generated 3/6/10-floor stress runner passed 3/3 and wrote all three
+  schema-versioned JSON artifacts.
+- Client and server startup accepted the expanded admin-preview and explosion
+  visual states with matching serializer hash
+  `E4E5457AA5E12116377EEEACB700FB7983C1DF8991686FD371B8C6F8110F367B`.
+- The local Debug three-floor blast fixture reached 3 grid layers, 3 space
+  layers, and 87 tiles in 1.464 ms. It made 94 vertical queries, executed 76
+  shared traces, and reused 18 per-explosion cached boundary results. This is
+  comparison evidence on the existing Windows test host, not a release limit.
+- `RobustToolbox` remained clean and its pinned revision did not change; P2.3a
+  requires no WTZ Engine commit.
+
+### Decisions
+
+- Preserve vanilla explosion geometry: cardinal and vertical movement both cost
+  two half-slope flood iterations, while diagonals retain their existing three
+  half-step approximation.
+- Key structural waves by `(grid, local Z)` and space waves by world Z. Convert
+  only at explicit frame boundaries, and cache each normalized vertical boundary
+  result for the lifetime of one topology build.
+- Keep wrong-floor broadphase candidates out of the global processed set so a
+  later reached floor can still process the same overlapping XY entity.
+- Capture frame-local queue state before an explosive source can be deleted.
+  A dead frame falls back to the captured map/world snapshot rather than
+  preventing another valid grid lookup.
+- Keep the coordinate overload as an explicit Z 0 compatibility API, but audit
+  all server callers. Admin command/UI, smites, and bluespace lockers now supply
+  entity or world-Z/frame authority.
+- Carry every reached layer in the network visual payload and let the client
+  select the current view's local/world layer. The explosion light is stamped at
+  the epicenter world Z.
+- Suppress atmosphere heating on non-zero local layers until P2.3b provides a
+  real Z-aware hotspot contract; mutating the base atmosphere would be worse
+  than an explicit temporary omission.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to authoritative explosion topology,
+      its admin callers, metrics, tests, and documentation.
+- [x] Invariant review: Z 0 parity, local/world frames, translated and rotated
+      grids, deleted sources, server authority, independent boundary channels,
+      overlapping entities, and upper-floor tile history are covered.
+- [x] Automated verification: 14/14 package, 115/115 focused integration, 9/9
+      explosion prototype, 2/2 unit, and 3/3 stress cases passed.
+- [x] Performance evidence: topology timing/output counters and local boundary
+      cache reuse are captured above; budget exhaustion has a deterministic test.
+- [x] Documentation: API authority, metrics, decisions, limitations, commands,
+      and results are recorded here and in `Docs/ZLevel.md`.
+- [x] Dependency check: no WTZ Engine change or submodule pointer update is
+      required; the engine worktree is clean.
+- [x] Git check: `git diff --check` passes; generated test artifacts remain
+      ignored and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risks, and P2.3b ownership are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Make explosions Z-level
+      authoritative` commit on `zlevel/explosion-topology`; remote verification
+      is recorded by the branch push that follows this commit.
+
+### Mini Review
+
+- Finding: the blast wave now has one authoritative floor identity from queue
+  through caches, topology, damage, tile mutation, and visual replication.
+- Finding: a per-explosion normalized-boundary cache removed 18 of 94 trace
+  executions in the representative three-floor fixture without bypassing
+  `ZLevelTrace` policy.
+- Finding: the audit removed the last production `MapCoordinates` explosion
+  callers that silently defaulted entity-backed events to Z 0.
+- Residual risk: non-zero tile updates currently use individual sparse-layer
+  writes because the engine has no batch Z-tile API; very large upper-deck turf
+  destruction needs profiling during P8 hardening.
+- Residual risk: topology construction is still synchronous, matching vanilla.
+  Extreme multi-floor blasts remain bounded but may need resumable generation if
+  production profiles exceed the existing tick-time policy.
+- Residual risk: upper-layer atmospheric heat is deliberately omitted, and
+  sound, camera shake, generated debris, and other presentation consumers still
+  need their owned vertical policies.
+- Next package: P2.3b will define Z-aware hotspot/fire state and atmospheric heat
+  propagation without reusing base-layer gas cells or inventing sound behavior.
 
 ## Completed Package: P2.1 Hitscan Trace Migration
 

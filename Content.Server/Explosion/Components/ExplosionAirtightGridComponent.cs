@@ -1,6 +1,7 @@
 ﻿using Content.Server.Explosion.EntitySystems;
 using Content.Shared.Atmos;
 using Content.Shared.FixedPoint;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Utility;
 
@@ -21,7 +22,7 @@ public sealed partial class ExplosionAirtightGridComponent : Component
     /// Intentionally not saved.
     /// </remarks>
     [ViewVariables]
-    public readonly Dictionary<Vector2i, TileData> Tiles = new();
+    public readonly Dictionary<ZLevelTileIndices, TileData> Tiles = new();
 
     /// <summary>
     ///     Data struct that describes the explosion-blocking airtight entities on a tile.

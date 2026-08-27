@@ -1,6 +1,5 @@
 using System.Linq;
 using System.Numerics;
-using System.Threading;
 using Content.Server.Atmos.EntitySystems;
 using Content.Server.Body.Systems;
 using Content.Server.Electrocution;
@@ -59,7 +58,6 @@ using Robust.Shared.Prototypes;
 using Robust.Shared.Random;
 using Robust.Shared.Spawners;
 using Robust.Shared.Utility;
-using Timer = Robust.Shared.Timing.Timer;
 
 namespace Content.Server.Administration.Systems;
 
@@ -126,11 +124,13 @@ public sealed partial class AdminVerbSystem
             Icon = new SpriteSpecifier.Texture(new("/Textures/Interface/VerbIcons/smite.svg.192dpi.png")),
             Act = () =>
             {
-                var coords = _transformSystem.GetMapCoordinates(args.Target);
-                Timer.Spawn(_gameTiming.TickPeriod,
-                    () => _explosionSystem.QueueExplosion(coords, ExplosionSystem.DefaultExplosionPrototypeId,
-                        4, 1, 2, args.Target, maxTileBreak: 0), // it gibs, damage doesn't need to be high.
-                    CancellationToken.None);
+                _explosionSystem.QueueExplosion(
+                    args.Target,
+                    ExplosionSystem.DefaultExplosionPrototypeId,
+                    4,
+                    1,
+                    2,
+                    maxTileBreak: 0); // It gibs, so damage does not need to be high.
 
                 _gibbing.Gib(args.Target);
             },

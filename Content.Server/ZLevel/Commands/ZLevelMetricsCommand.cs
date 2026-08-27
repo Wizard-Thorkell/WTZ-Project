@@ -2,6 +2,7 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using Content.Server.Administration;
+using Content.Server.Explosion.EntitySystems;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Administration;
 using Content.Shared.ZLevel.Systems;
@@ -37,6 +38,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var metrics = metricsSystem.Snapshot();
         var boundaries = _entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
+        var explosion = _entityManager.System<ExplosionSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
         var trace = _entityManager.System<SharedZLevelTraceSystem>();
         var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
@@ -88,6 +90,23 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"collision-cancellations={metrics.BallisticCollisionCancellations}, " +
             $"invalid-cancellations={metrics.BallisticInvalidCancellations}, " +
             $"contact-flushes={metrics.BallisticContactFlushes}");
+        shell.WriteLine(
+            $"  explosion topology: builds={metrics.ExplosionTopologyBuilds}, " +
+            $"grid-layers={metrics.ExplosionGridLayers}, space-layers={metrics.ExplosionSpaceLayers}, " +
+            $"tiles={metrics.ExplosionTiles}, " +
+            $"avg={metrics.ExplosionAverageTopologyMilliseconds:0.000}ms, " +
+            $"last={metrics.ExplosionLastTopologyMilliseconds:0.000}ms, " +
+            $"max={metrics.ExplosionMaxTopologyMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  explosion vertical: queries={metrics.ExplosionVerticalQueries}, " +
+            $"traces={metrics.ExplosionVerticalTraces}, cache-hits={metrics.ExplosionVerticalCacheHits} " +
+            $"({metrics.ExplosionVerticalCacheHitPercent:0.00}%), " +
+            $"open={metrics.ExplosionVerticalOpen}, closed={metrics.ExplosionVerticalClosed}, " +
+            $"rejected={metrics.ExplosionVerticalRejected}");
+        shell.WriteLine(
+            $"  explosion budgets: area={metrics.ExplosionAreaBudgetExhaustions}, " +
+            $"iterations={metrics.ExplosionIterationBudgetExhaustions}, " +
+            $"limits={explosion.MaxArea} tiles/{explosion.MaxIterations} iterations");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

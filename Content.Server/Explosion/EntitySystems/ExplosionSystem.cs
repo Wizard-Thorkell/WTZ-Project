@@ -20,11 +20,15 @@ using Content.Shared.Inventory;
 using Content.Shared.Maps;
 using Content.Shared.Projectiles;
 using Content.Shared.Throwing;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
+using Content.Shared.ZLevel;
 using Robust.Server.GameStates;
 using Robust.Server.Player;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Configuration;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
@@ -58,6 +62,11 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
     [Dependency] private readonly FlammableSystem _flammableSystem = default!;
     [Dependency] private readonly DestructibleSystem _destructibleSystem = default!;
     [Dependency] private readonly AtmosphereSystem _atmosphere = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
+    [Dependency] private readonly SharedZLevelTraceSystem _zLevelTrace = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _zLevelMetrics = default!;
+
+    private readonly ZLevelTraceBuffer _explosionTraceBuffer = new();
 
     private EntityQuery<FlammableComponent> _flammableQuery;
     private EntityQuery<PhysicsComponent> _physicsQuery;
@@ -90,6 +99,7 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
         SubscribeLocalEvent<ExplosionResistanceComponent, InventoryRelayedEvent<GetExplosionResistanceEvent>>(RelayedResistance);
 
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
+        SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
 
         SubscribeLocalEvent<RoundRestartCleanupEvent>(OnReset);
 
@@ -247,10 +257,32 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
         var pos = Transform(uid);
 
         var mapPos = _transformSystem.GetMapCoordinates(pos);
+        var worldZ = _transformSystem.GetWorldZLevel((uid, pos, CompOrNull<ZLevelPositionComponent>(uid)));
+        Vector2? frameLocalPosition = null;
+        int? frameLocalZ = null;
+        if (pos.GridUid is { } frameGrid)
+        {
+            frameLocalPosition = _transformSystem.ToCoordinates(frameGrid, mapPos).Position;
+            frameLocalZ = _transformSystem.WorldToLocalZLevel(frameGrid, worldZ);
+        }
 
         var posFound = _transformSystem.TryGetMapOrGridCoordinates(uid, out var gridPos, pos);
 
-        QueueExplosion(mapPos, typeId, totalIntensity, slope, maxTileIntensity, uid, tileBreakScale, maxTileBreak, canCreateVacuum, addLog: false);
+        QueueExplosion(
+            mapPos,
+            typeId,
+            totalIntensity,
+            slope,
+            maxTileIntensity,
+            uid,
+            tileBreakScale,
+            maxTileBreak,
+            canCreateVacuum,
+            addLog: false,
+            worldZ: worldZ,
+            frameGrid: pos.GridUid,
+            frameLocalPosition: frameLocalPosition,
+            frameLocalZ: frameLocalZ);
 
         if (!addLog)
             return;
@@ -277,6 +309,11 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
     /// <summary>
     ///     Queue an explosion, with a specified epicenter and set of starting tiles.
     /// </summary>
+    /// <remarks>
+    ///     <see cref="MapCoordinates"/> has no floor identity. Entity-backed callers should prefer the entity overload;
+    ///     coordinate-only callers must pass <paramref name="worldZ"/> and, when known, <paramref name="frameGrid"/>.
+    ///     Omitting both preserves the legacy world-Z-zero behavior.
+    /// </remarks>
     public void QueueExplosion(MapCoordinates epicenter,
         string typeId,
         float totalIntensity,
@@ -286,7 +323,11 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
         float tileBreakScale = 1f,
         int maxTileBreak = int.MaxValue,
         bool canCreateVacuum = true,
-        bool addLog = true)
+        bool addLog = true,
+        int worldZ = 0,
+        EntityUid? frameGrid = null,
+        Vector2? frameLocalPosition = null,
+        int? frameLocalZ = null)
     {
         if (totalIntensity <= 0 || slope <= 0)
             return;
@@ -300,15 +341,38 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
         if (addLog) // dont log if already created a separate, more detailed, log.
             _adminLogger.Add(LogType.Explosion, LogImpact.High, $"Explosion ({typeId}) spawned at {epicenter:coordinates} with intensity {totalIntensity} slope {slope}");
 
+        if (frameGrid is { } grid &&
+            TryComp<MapGridComponent>(grid, out _) &&
+            TryComp(grid, out TransformComponent? gridTransform) &&
+            gridTransform.MapID == epicenter.MapId)
+        {
+            frameLocalPosition ??= _transformSystem.ToCoordinates(grid, epicenter).Position;
+            frameLocalZ ??= _transformSystem.WorldToLocalZLevel(grid, worldZ);
+        }
+        else
+        {
+            frameGrid = null;
+            frameLocalPosition = null;
+            frameLocalZ = null;
+        }
+
         // try to combine explosions on the same tile if they are the same type
         foreach (var queued in _queuedExplosions)
         {
             // ignore different types or those on different maps
-            if (queued.Proto.ID != type.ID || queued.Epicenter.MapId != epicenter.MapId)
+            if (queued.Proto.ID != type.ID ||
+                queued.Epicenter.MapId != epicenter.MapId ||
+                queued.WorldZ != worldZ ||
+                queued.FrameGrid != frameGrid ||
+                queued.FrameLocalZ != frameLocalZ)
                 continue;
 
             var dst2 = queued.Proto.MaxCombineDistance * queued.Proto.MaxCombineDistance;
-            var direction = queued.Epicenter.Position - epicenter.Position;
+            var direction = frameGrid is not null &&
+                            queued.FrameLocalPosition is { } queuedLocal &&
+                            frameLocalPosition is { } currentLocal
+                ? queuedLocal - currentLocal
+                : queued.Epicenter.Position - epicenter.Position;
             if (direction.LengthSquared() > dst2)
                 continue;
 
@@ -320,6 +384,10 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
         var boom = new QueuedExplosion(type)
         {
             Epicenter = epicenter,
+            WorldZ = worldZ,
+            FrameGrid = frameGrid,
+            FrameLocalPosition = frameLocalPosition,
+            FrameLocalZ = frameLocalZ,
             TotalIntensity = totalIntensity,
             Slope = slope,
             MaxTileIntensity = maxTileIntensity,
@@ -340,17 +408,45 @@ public sealed partial class ExplosionSystem : SharedExplosionSystem
     private Explosion? SpawnExplosion(QueuedExplosion queued)
     {
         var pos = queued.Epicenter;
+        var worldZ = queued.WorldZ;
+        var frameGrid = queued.FrameGrid;
+        if (frameGrid is { } resolvedFrameGrid &&
+            queued.FrameLocalPosition is { } frameLocalPosition &&
+            queued.FrameLocalZ is { } frameLocalZ &&
+            TryComp(resolvedFrameGrid, out TransformComponent? frameTransform) &&
+            frameTransform.MapID != MapId.Nullspace)
+        {
+            pos = _transformSystem.ToMapCoordinates(new EntityCoordinates(resolvedFrameGrid, frameLocalPosition));
+            worldZ = _transformSystem.LocalToWorldZLevel(resolvedFrameGrid, frameLocalZ);
+        }
+        else
+            frameGrid = null;
+
         if (!_map.MapExists(pos.MapId))
             return null;
 
-        var results = GetExplosionTiles(pos, queued.Proto.ID, queued.TotalIntensity, queued.Slope, queued.MaxTileIntensity);
+        var results = GetExplosionTiles(
+            pos,
+            worldZ,
+            frameGrid,
+            queued.Proto.ID,
+            queued.TotalIntensity,
+            queued.Slope,
+            queued.MaxTileIntensity);
 
         if (results == null)
             return null;
 
         var (area, iterationIntensity, spaceData, gridData, spaceMatrix) = results.Value;
 
-        var visualEnt = CreateExplosionVisualEntity(pos, queued.Proto.ID, spaceMatrix, spaceData, gridData.Values, iterationIntensity);
+        var visualEnt = CreateExplosionVisualEntity(
+            pos,
+            worldZ,
+            queued.Proto.ID,
+            spaceMatrix,
+            spaceData,
+            gridData.Values,
+            iterationIntensity);
 
         // camera shake
         CameraShake(iterationIntensity.Count * 4f, pos, queued.TotalIntensity);

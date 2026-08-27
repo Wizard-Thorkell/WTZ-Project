@@ -62,6 +62,34 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(visibilitySnapshot.BoundaryCacheHits, Is.EqualTo(1));
             });
 
+            metrics.RecordExplosionTopology(
+                gridLayers: 3,
+                spaceLayers: 1,
+                tiles: 42,
+                verticalQueries: 10,
+                verticalCacheHits: 4,
+                verticalTraces: 6,
+                verticalOpen: 2,
+                verticalClosed: 3,
+                verticalRejected: 1,
+                areaBudgetExhausted: true,
+                iterationBudgetExhausted: false,
+                elapsedTimestampTicks: 0);
+            var explosionSnapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(explosionSnapshot.ExplosionTopologyBuilds, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.ExplosionGridLayers, Is.EqualTo(3));
+                Assert.That(explosionSnapshot.ExplosionSpaceLayers, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.ExplosionTiles, Is.EqualTo(42));
+                Assert.That(explosionSnapshot.ExplosionVerticalCacheHitPercent, Is.EqualTo(40d));
+                Assert.That(explosionSnapshot.ExplosionVerticalOpen, Is.EqualTo(2));
+                Assert.That(explosionSnapshot.ExplosionVerticalClosed, Is.EqualTo(3));
+                Assert.That(explosionSnapshot.ExplosionVerticalRejected, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.ExplosionAreaBudgetExhaustions, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.ExplosionIterationBudgetExhaustions, Is.Zero);
+            });
+
             metrics.ResetCounters();
             var resetSnapshot = metrics.Snapshot();
             Assert.Multiple(() =>
@@ -79,6 +107,21 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.BallisticCollisionCancellations, Is.Zero);
                 Assert.That(resetSnapshot.BallisticInvalidCancellations, Is.Zero);
                 Assert.That(resetSnapshot.BallisticContactFlushes, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionTopologyBuilds, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionGridLayers, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionSpaceLayers, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionTiles, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalQueries, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalCacheHits, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalTraces, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalOpen, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalClosed, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionVerticalRejected, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionAreaBudgetExhaustions, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionIterationBudgetExhaustions, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionTopologyMilliseconds, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionLastTopologyMilliseconds, Is.Zero);
+                Assert.That(resetSnapshot.ExplosionMaxTopologyMilliseconds, Is.Zero);
             });
         });
     }

@@ -160,8 +160,7 @@ namespace Content.Server.Atmos.EntitySystems
 
         public void InvalidatePosition(Entity<MapGridComponent?> grid, ZLevelTileIndices pos)
         {
-            if (pos.Z == 0)
-                _explosionSystem.UpdateAirtightMap(grid, new Vector2i(pos.X, pos.Y), grid);
+            _explosionSystem.UpdateAirtightMap(grid, pos, grid);
 
             _atmosphereSystem.InvalidateTile(grid.Owner, pos);
         }

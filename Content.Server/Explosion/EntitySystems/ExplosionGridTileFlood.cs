@@ -1,6 +1,7 @@
 using System.Numerics;
 using Content.Shared.Atmos;
 using Content.Shared.FixedPoint;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using static Content.Server.Explosion.Components.ExplosionAirtightGridComponent;
 using static Content.Server.Explosion.EntitySystems.ExplosionSystem;
@@ -13,8 +14,11 @@ namespace Content.Server.Explosion.EntitySystems;
 public sealed class ExplosionGridTileFlood : ExplosionTileFlood
 {
     private readonly ExplosionSystem _explosionSystem;
+    private readonly SharedMapSystem _mapSystem;
 
     public Entity<MapGridComponent> Grid;
+    public readonly int LocalZ;
+    public readonly int WorldZ;
     private bool _needToTransform = false;
 
     private Matrix3x2 _matrix = Matrix3x2.Identity;
@@ -26,7 +30,7 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
     // destroy the airtight entity.
     private Dictionary<int, List<(Vector2i, AtmosDirection)>> _delayedNeighbors = new();
 
-    private Dictionary<Vector2i, TileData> _airtightMap;
+    private Dictionary<ZLevelTileIndices, TileData> _airtightMap;
 
     private float _maxIntensity;
     private float _intensityStepSize;
@@ -37,36 +41,49 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
 
     public HashSet<Vector2i> SpaceJump = new();
 
-    private Dictionary<Vector2i, NeighborFlag> _edgeTiles;
+    private readonly Dictionary<int, List<Vector2i>> _verticalSourceLists = new();
+    private readonly UniqueVector2iSet _reachedVoidTiles = new();
+
+    private Dictionary<ZLevelTileIndices, NeighborFlag> _edgeTiles;
 
     public ExplosionGridTileFlood(
         Entity<MapGridComponent> grid,
-        Dictionary<Vector2i, TileData> airtightMap,
+        int localZ,
+        int worldZ,
+        Dictionary<ZLevelTileIndices, TileData> airtightMap,
         float maxIntensity,
         float intensityStepSize,
         int typeIndex,
-        Dictionary<Vector2i, NeighborFlag> edgeTiles,
+        Dictionary<ZLevelTileIndices, NeighborFlag> edgeTiles,
         EntityUid? referenceGrid,
         Matrix3x2 spaceMatrix,
         Angle spaceAngle,
         ExplosionSystem explosionSystem)
     {
         Grid = grid;
+        LocalZ = localZ;
+        WorldZ = worldZ;
         _airtightMap = airtightMap;
         _maxIntensity = maxIntensity;
         _intensityStepSize = intensityStepSize;
         _typeIndex = typeIndex;
         _edgeTiles = edgeTiles;
         _explosionSystem = explosionSystem;
+        var entityManager = IoCManager.Resolve<IEntityManager>();
+        _mapSystem = entityManager.System<SharedMapSystem>();
 
         // initialise SpaceTiles
         foreach (var (tile, spaceNeighbors) in _edgeTiles)
         {
+            if (tile.Z != LocalZ)
+                continue;
+
+            var tileXY = new Vector2i(tile.X, tile.Y);
             for (var i = 0; i < NeighbourVectors.Length; i++)
             {
                 var dir = (NeighborFlag) (1 << i);
                 if ((spaceNeighbors & dir) != NeighborFlag.Invalid)
-                    _spaceTiles.Add(tile + NeighbourVectors[i]);
+                    _spaceTiles.Add(tileXY + NeighbourVectors[i]);
             }
         }
 
@@ -74,8 +91,6 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
             return;
 
         _needToTransform = true;
-        var entityManager = IoCManager.Resolve<IEntityManager>();
-
         var transformSystem = entityManager.System<SharedTransformSystem>();
         var transform = entityManager.GetComponent<TransformComponent>(Grid.Owner);
         var size = (float)Grid.Comp.TileSize;
@@ -93,13 +108,16 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
     {
         TileLists[0] = new() { initialTile };
 
-        if (_airtightMap.ContainsKey(initialTile))
+        if (_airtightMap.ContainsKey(ToZLevelTile(initialTile)))
             EnteredBlockedTiles.Add(initialTile);
         else
             ProcessedTiles.Add(initialTile);
     }
 
-    public int AddNewTiles(int iteration, HashSet<Vector2i>? gridJump)
+    public int AddNewTiles(
+        int iteration,
+        HashSet<Vector2i>? gridJump,
+        HashSet<Vector2i>? verticalJump)
     {
         SpaceJump = new();
         NewTiles = new();
@@ -148,6 +166,14 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
             }
         }
 
+        if (verticalJump != null)
+        {
+            foreach (var tile in verticalJump)
+            {
+                ProcessVerticalEntry(iteration, tile);
+            }
+        }
+
         // Store new tiles
         if (NewTiles.Count != 0)
             TileLists[iteration] = NewTiles;
@@ -157,14 +183,59 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
         return NewTiles.Count + NewBlockedTiles.Count;
     }
 
+    public void GetVerticalSources(
+        int iteration,
+        out List<Vector2i>? tiles,
+        out HashSet<Vector2i>? freedTiles,
+        out List<Vector2i>? voidTiles)
+    {
+        TileLists.TryGetValue(iteration, out tiles);
+        FreedTileLists.TryGetValue(iteration, out freedTiles);
+        _verticalSourceLists.TryGetValue(iteration, out voidTiles);
+    }
+
+    private void ProcessVerticalEntry(int iteration, Vector2i tile)
+    {
+        if (IsEmpty(tile))
+        {
+            if (!_reachedVoidTiles.Add(tile))
+                return;
+
+            if (!_verticalSourceLists.TryGetValue(iteration, out var sources))
+            {
+                sources = new();
+                _verticalSourceLists[iteration] = sources;
+            }
+
+            sources.Add(tile);
+            JumpToSpace(tile);
+            return;
+        }
+
+        if (ProcessedTiles.Contains(tile) ||
+            EnteredBlockedTiles.Contains(tile) ||
+            UnenteredBlockedTiles.Contains(tile))
+        {
+            return;
+        }
+
+        var zTile = ToZLevelTile(tile);
+        if (_airtightMap.ContainsKey(zTile))
+            EnteredBlockedTiles.Add(tile);
+        else
+            ProcessedTiles.Add(tile);
+
+        NewTiles.Add(tile);
+    }
+
     protected override void ProcessNewTile(int iteration, Vector2i tile, AtmosDirection entryDirections)
     {
         // Is there an airtight blocker on this tile?
-        if (!_airtightMap.TryGetValue(tile, out var tileData))
+        if (!_airtightMap.TryGetValue(ToZLevelTile(tile), out var tileData))
         {
             // No blocker. Ezy. Though maybe this a space tile?
 
-            if (_spaceTiles.Contains(tile))
+            if (IsEmpty(tile) || _spaceTiles.Contains(tile))
                 JumpToSpace(tile);
             else if (ProcessedTiles.Add(tile))
                 NewTiles.Add(tile);
@@ -180,7 +251,7 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
         var blockedDirections = tileData.BlockedDirections;
         if (entryDirections == AtmosDirection.Invalid) // is coming from space?
         {
-            blocked = AnyNeighborBlocked(_edgeTiles[tile], blockedDirections); // at least one space direction is blocked.
+            blocked = TryGetEdge(tile, out var edge) && AnyNeighborBlocked(edge, blockedDirections); // at least one space direction is blocked.
         }
         else
             blocked = (blockedDirections & entryDirections) == entryDirections;// **ALL** entry directions are blocked
@@ -269,7 +340,7 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
             FixedPoint2 sealIntegrity = 0;
 
             // Note that if (grid, tile) is not a valid key, then airtight.BlockedDirections will default to 0 (no blocked directions)
-            if (_airtightMap.TryGetValue(tile, out var tileData))
+            if (_airtightMap.TryGetValue(ToZLevelTile(tile), out var tileData))
             {
                 blockedDirections = tileData.BlockedDirections;
                 sealIntegrity = _explosionSystem.GetToleranceValues(tileData.ToleranceCacheIndex).Values[_typeIndex];
@@ -318,6 +389,21 @@ public sealed class ExplosionGridTileFlood : ExplosionTileFlood
 
     protected override AtmosDirection GetUnblockedDirectionOrAll(Vector2i tile)
     {
-        return ~_airtightMap.GetValueOrDefault(tile).BlockedDirections;
+        return ~_airtightMap.GetValueOrDefault(ToZLevelTile(tile)).BlockedDirections;
+    }
+
+    private ZLevelTileIndices ToZLevelTile(Vector2i tile)
+    {
+        return new ZLevelTileIndices(tile.X, tile.Y, LocalZ);
+    }
+
+    private bool TryGetEdge(Vector2i tile, out NeighborFlag edge)
+    {
+        return _edgeTiles.TryGetValue(ToZLevelTile(tile), out edge);
+    }
+
+    private bool IsEmpty(Vector2i tile)
+    {
+        return _mapSystem.GetZLevelTileRef(Grid.Owner, Grid.Comp, ToZLevelTile(tile)).Tile.IsEmpty;
     }
 }

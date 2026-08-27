@@ -19,14 +19,22 @@ public static class SpawnExplosionEuiMsg
         public readonly float TotalIntensity;
         public readonly float IntensitySlope;
         public readonly float MaxIntensity;
+        public readonly int WorldZ;
 
-        public PreviewRequest(MapCoordinates epicenter, string typeId, float totalIntensity, float intensitySlope, float maxIntensity)
+        public PreviewRequest(
+            MapCoordinates epicenter,
+            string typeId,
+            float totalIntensity,
+            float intensitySlope,
+            float maxIntensity,
+            int worldZ)
         {
             Epicenter = epicenter;
             TypeId = typeId;
             TotalIntensity = totalIntensity;
             IntensitySlope = intensitySlope;
             MaxIntensity = maxIntensity;
+            WorldZ = worldZ;
         }
     }
 

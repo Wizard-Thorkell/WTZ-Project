@@ -198,6 +198,8 @@ public sealed partial class ExplosionSystem
     internal bool ExplodeTile(BroadphaseComponent lookup,
         Entity<MapGridComponent> grid,
         Vector2i tile,
+        int worldZ,
+        int localZ,
         float throwForce,
         DamageSpecifier damage,
         MapCoordinates epicenter,
@@ -225,6 +227,9 @@ public sealed partial class ExplosionSystem
         // process those entities
         foreach (var (uid, xform) in list)
         {
+            if (_zLevel.GetWorldZLevel(uid) != worldZ || !processed.Add(uid))
+                continue;
+
             ProcessEntity(uid, epicenter, damage, throwForce, id, xform, fireStacks, cause);
         }
 
@@ -234,12 +239,14 @@ public sealed partial class ExplosionSystem
         _map.GetAnchoredEntities(grid, tile, _anchored);
         foreach (var entity in _anchored)
         {
-            processed.Add(entity);
+            if (_zLevel.GetWorldZLevel(entity) != worldZ || !processed.Add(entity))
+                continue;
+
             ProcessEntity(entity, epicenter, damage, throwForce, id, null, fireStacks, cause);
         }
 
         // heat the atmosphere
-        if (temperature != null)
+        if (temperature != null && localZ == 0)
         {
             _atmosphere.HotspotExpose(grid.Owner, tile, temperature.Value, currentIntensity, cause, true);
         }
@@ -254,6 +261,9 @@ public sealed partial class ExplosionSystem
             _map.GetAnchoredEntities(grid, tile, _anchored);
             foreach (var entity in _anchored)
             {
+                if (_zLevel.GetWorldZLevel(entity) != worldZ)
+                    continue;
+
                 tileBlocked |= IsBlockingTurf(entity);
             }
         }
@@ -275,6 +285,9 @@ public sealed partial class ExplosionSystem
 
         foreach (var (uid, xform) in list)
         {
+            if (_zLevel.GetWorldZLevel(uid) != worldZ || !processed.Add(uid))
+                continue;
+
             // Here we only throw, no dealing damage. Containers n such might drop their entities after being destroyed, but
             // they should handle their own damage pass-through, with their own damage reduction calculation.
             ProcessEntity(uid, epicenter, null, throwForce, id, xform, null, cause);
@@ -287,7 +300,7 @@ public sealed partial class ExplosionSystem
         ref (List<(EntityUid, TransformComponent)> List, HashSet<EntityUid> Processed, EntityQuery<TransformComponent> XformQuery) state,
         in EntityUid uid)
     {
-        if (state.Processed.Add(uid) && state.XformQuery.TryGetComponent(uid, out var xform))
+        if (!state.Processed.Contains(uid) && state.XformQuery.TryGetComponent(uid, out var xform))
             state.List.Add((uid, xform));
 
         return true;
@@ -308,6 +321,7 @@ public sealed partial class ExplosionSystem
         Matrix3x2 spaceMatrix,
         Matrix3x2 invSpaceMatrix,
         Vector2i tile,
+        int worldZ,
         float throwForce,
         DamageSpecifier damage,
         MapCoordinates epicenter,
@@ -329,7 +343,9 @@ public sealed partial class ExplosionSystem
 
         foreach (var (uid, xform) in state.Item1)
         {
-            processed.Add(uid);
+            if (_zLevel.GetWorldZLevel(uid) != worldZ || !processed.Add(uid))
+                continue;
+
             ProcessEntity(uid, epicenter, damage, throwForce, id, xform, fireStacks, cause);
         }
 
@@ -344,6 +360,9 @@ public sealed partial class ExplosionSystem
 
         foreach (var (uid, xform) in list)
         {
+            if (_zLevel.GetWorldZLevel(uid) != worldZ || !processed.Add(uid))
+                continue;
+
             ProcessEntity(uid, epicenter, null, throwForce, id, xform, fireStacks, cause);
         }
     }
@@ -546,6 +565,45 @@ public sealed partial class ExplosionSystem
         damagedTiles.Add((tileRef.GridIndices, new Tile(tileDef.TileId)));
     }
 
+    public void DamageZLevelFloorTile(
+        ZLevelTileRef tileRef,
+        float effectiveIntensity,
+        int maxTileBreak,
+        bool canCreateVacuum,
+        List<(ZLevelTileIndices GridIndices, Tile Tile)> damagedTiles,
+        ExplosionPrototype type,
+        TileHistoryComponent? history)
+    {
+        if (_tileDefinitionManager[tileRef.Tile.TypeId] is not ContentTileDefinition tileDef || tileDef.Indestructible)
+            return;
+
+        if (!CanCreateVacuum)
+            canCreateVacuum = false;
+        else if (tileDef.MapAtmosphere)
+            canCreateVacuum = true;
+
+        var tileBreakages = 0;
+        while (maxTileBreak > tileBreakages && _robustRandom.Prob(type.TileBreakChance(effectiveIntensity)))
+        {
+            tileBreakages++;
+            effectiveIntensity -= type.TileBreakRerollReduction;
+
+            if (GetNextZLevelTile((tileDef, tileRef.GridIndices), history) is not { } newId)
+                break;
+
+            var newDef = (ContentTileDefinition) _tileDefinitionManager[newId];
+            if (newDef.MapAtmosphere && !canCreateVacuum)
+                break;
+
+            tileDef = newDef;
+            if (newDef.Indestructible)
+                break;
+        }
+
+        if (tileDef.TileId != tileRef.Tile.TypeId)
+            damagedTiles.Add((tileRef.GridIndices, new Tile(tileDef.TileId)));
+    }
+
     private ProtoId<ContentTileDefinition>? GetNextTile((ContentTileDefinition tileDef, Vector2i gridIndices) tile,
         TileHistoryComponent? history,
         ref (TileHistoryChunk? Chunk, Vector2i Indices)? chunk)
@@ -574,6 +632,29 @@ public sealed partial class ExplosionSystem
         }
 
         return stack[0]; // If the stack is somehow empty, this will throw, but we will have at least removed it from dict first!
+    }
+
+    private ProtoId<ContentTileDefinition>? GetNextZLevelTile(
+        (ContentTileDefinition TileDef, ZLevelTileIndices GridIndices) tile,
+        TileHistoryComponent? history)
+    {
+        if (history == null ||
+            !history.ZLevelHistory.TryGetValue(tile.GridIndices, out var zHistory) ||
+            zHistory.History.Count == 0)
+        {
+            return tile.TileDef.BaseTurf;
+        }
+
+        zHistory.LastModified = _timing.CurTick;
+        if (zHistory.History.Count > 1)
+        {
+            var newId = zHistory.History[^1];
+            zHistory.History.RemoveAt(zHistory.History.Count - 1);
+            return newId;
+        }
+
+        history.ZLevelHistory.Remove(tile.GridIndices);
+        return zHistory.History[0];
     }
 
     public void DirtyHistory(EntityUid grid)
@@ -616,11 +697,16 @@ sealed class Explosion
         ///     The actual grid that this corresponds to. If null, this implies space.
         /// </summary>
         public Entity<MapGridComponent, TileHistoryComponent?>? MapGrid;
+
+        public int LocalZ;
+        public int WorldZ;
     }
 
     private readonly List<ExplosionData> _explosionData = new();
 
     private Entity<MapGridComponent, TileHistoryComponent?>? _currentGrid;
+    private int _currentLocalZ;
+    private int _currentWorldZ;
     private (TileHistoryChunk? Chunk, Vector2i Indices)? _currentChunk;
 
     /// <summary>
@@ -680,6 +766,7 @@ sealed class Explosion
     ///     the explosion trigger chunk regeneration & shuttle-system processing every tick.
     /// </summary>
     private readonly Dictionary<Entity<MapGridComponent>, List<(Vector2i, Tile)>> _tileUpdateDict = new();
+    private readonly Dictionary<Entity<MapGridComponent>, List<(ZLevelTileIndices, Tile)>> _zLevelTileUpdateDict = new();
 
     // Entity Queries
     private readonly EntityQuery<TransformComponent> _xformQuery;
@@ -722,7 +809,7 @@ sealed class Explosion
     /// </summary>
     public Explosion(ExplosionSystem system,
         ExplosionPrototype explosionType,
-        ExplosionSpaceTileFlood? spaceData,
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData,
         List<ExplosionGridTileFlood> gridData,
         List<float> tileSetIntensity,
         MapCoordinates epicenter,
@@ -759,19 +846,21 @@ sealed class Explosion
         _tagQuery = entMan.GetEntityQuery<TagComponent>();
         _projectileQuery = entMan.GetEntityQuery<ProjectileComponent>();
 
-        if (spaceData != null)
+        _spaceMatrix = spaceMatrix;
+        Matrix3x2.Invert(spaceMatrix, out _invSpaceMatrix);
+
+        foreach (var space in spaceData.Values)
         {
             var mapUid = mapSystem.GetMap(epicenter.MapId);
 
             _explosionData.Add(new()
             {
-                TileLists = spaceData.TileLists,
+                TileLists = space.TileLists,
                 Lookup = (mapUid, entMan.GetComponent<BroadphaseComponent>(mapUid)),
                 MapGrid = null,
+                LocalZ = space.WorldZ,
+                WorldZ = space.WorldZ,
             });
-
-            _spaceMatrix = spaceMatrix;
-            Matrix3x2.Invert(spaceMatrix, out _invSpaceMatrix);
         }
 
         foreach (var grid in gridData)
@@ -782,6 +871,8 @@ sealed class Explosion
                 TileLists = grid.TileLists,
                 Lookup = (grid.Grid, entMan.GetComponent<BroadphaseComponent>(grid.Grid)),
                 MapGrid = (grid.Grid, entMan.GetComponent<MapGridComponent>(grid.Grid), history),
+                LocalZ = grid.LocalZ,
+                WorldZ = grid.WorldZ,
             });
         }
 
@@ -830,6 +921,8 @@ sealed class Explosion
                 _currentEnumerator = tileList.GetEnumerator();
                 _currentLookup = _explosionData[_currentDataIndex].Lookup;
                 _currentGrid = _explosionData[_currentDataIndex].MapGrid;
+                _currentLocalZ = _explosionData[_currentDataIndex].LocalZ;
+                _currentWorldZ = _explosionData[_currentDataIndex].WorldZ;
                 _currentChunk = null;
                 _currentDataIndex++;
 
@@ -890,20 +983,20 @@ sealed class Explosion
 
             // Is the current tile on a grid (instead of in space)?
             if (_currentGrid is { } currentGrid &&
-                _mapSystem.TryGetTileRef(currentGrid.Owner, currentGrid.Comp1, _currentEnumerator.Current, out var tileRef) &&
+                _mapSystem.TryGetZLevelTileRef(
+                    currentGrid.Owner,
+                    currentGrid.Comp1,
+                    new ZLevelTileIndices(_currentEnumerator.Current.X, _currentEnumerator.Current.Y, _currentLocalZ),
+                    out var tileRef) &&
                 !tileRef.Tile.IsEmpty)
             {
-                if (!_tileUpdateDict.TryGetValue((currentGrid.Owner, currentGrid.Comp1), out var tileUpdateList))
-                {
-                    tileUpdateList = new();
-                    _tileUpdateDict[(currentGrid.Owner, currentGrid.Comp1)] = tileUpdateList;
-                }
-
                 // damage entities on the tile. Also figures out whether there are any solid entities blocking the floor
                 // from being destroyed.
                 var canDamageFloor = _system.ExplodeTile(_currentLookup,
                     (currentGrid.Owner, currentGrid.Comp1),
                     _currentEnumerator.Current,
+                    _currentWorldZ,
+                    _currentLocalZ,
                     _currentThrowForce,
                     _currentDamage,
                     Epicenter,
@@ -917,22 +1010,51 @@ sealed class Explosion
                 // If the floor is not blocked by some dense object, damage the floor tiles.
                 if (canDamageFloor)
                 {
-                    var tileIndices = _currentEnumerator.Current;
-                    var chunkIndices = SharedMapSystem.GetChunkIndices(tileIndices, TileSystem.ChunkSize);
-                    if (_currentChunk?.Indices != chunkIndices)
+                    if (_currentLocalZ == 0)
                     {
-                        var chunk = currentGrid.Comp2?.ChunkHistory.GetValueOrDefault(chunkIndices);
-                        _currentChunk = (chunk, chunkIndices);
-                    }
+                        if (!_tileUpdateDict.TryGetValue((currentGrid.Owner, currentGrid.Comp1), out var tileUpdateList))
+                        {
+                            tileUpdateList = new();
+                            _tileUpdateDict[(currentGrid.Owner, currentGrid.Comp1)] = tileUpdateList;
+                        }
 
-                    _system.DamageFloorTile(tileRef,
-                        _currentIntensity * _tileBreakScale,
-                        _maxTileBreak,
-                        _canCreateVacuum,
-                        tileUpdateList,
-                        ExplosionType,
-                        currentGrid.Comp2,
-                        ref _currentChunk);
+                        var tileIndices = _currentEnumerator.Current;
+                        var chunkIndices = SharedMapSystem.GetChunkIndices(tileIndices, TileSystem.ChunkSize);
+                        if (_currentChunk?.Indices != chunkIndices)
+                        {
+                            var chunk = currentGrid.Comp2?.ChunkHistory.GetValueOrDefault(chunkIndices);
+                            _currentChunk = (chunk, chunkIndices);
+                        }
+
+                        var baseTile = _mapSystem.GetTileRef(
+                            currentGrid.Owner,
+                            currentGrid.Comp1,
+                            _currentEnumerator.Current);
+                        _system.DamageFloorTile(baseTile,
+                            _currentIntensity * _tileBreakScale,
+                            _maxTileBreak,
+                            _canCreateVacuum,
+                            tileUpdateList,
+                            ExplosionType,
+                            currentGrid.Comp2,
+                            ref _currentChunk);
+                    }
+                    else
+                    {
+                        if (!_zLevelTileUpdateDict.TryGetValue((currentGrid.Owner, currentGrid.Comp1), out var tileUpdateList))
+                        {
+                            tileUpdateList = new();
+                            _zLevelTileUpdateDict[(currentGrid.Owner, currentGrid.Comp1)] = tileUpdateList;
+                        }
+
+                        _system.DamageZLevelFloorTile(tileRef,
+                            _currentIntensity * _tileBreakScale,
+                            _maxTileBreak,
+                            _canCreateVacuum,
+                            tileUpdateList,
+                            ExplosionType,
+                            currentGrid.Comp2);
+                    }
                 }
             }
             else
@@ -942,6 +1064,7 @@ sealed class Explosion
                     _spaceMatrix,
                     _invSpaceMatrix,
                     _currentEnumerator.Current,
+                    _currentWorldZ,
                     _currentThrowForce,
                     _currentDamage,
                     Epicenter,
@@ -978,6 +1101,21 @@ sealed class Explosion
             }
         }
         _tileUpdateDict.Clear();
+
+        foreach (var (grid, list) in _zLevelTileUpdateDict)
+        {
+            if (!_entMan.EntityExists(grid.Owner))
+                continue;
+
+            foreach (var (indices, tile) in list)
+            {
+                _mapSystem.SetZLevelTile(grid.Owner, grid.Comp, indices, tile);
+            }
+
+            if (list.Count > 0)
+                _system.DirtyHistory(grid.Owner);
+        }
+        _zLevelTileUpdateDict.Clear();
     }
 }
 
@@ -987,6 +1125,10 @@ sealed class Explosion
 public sealed class QueuedExplosion(ExplosionPrototype proto)
 {
     public MapCoordinates Epicenter;
+    public int WorldZ;
+    public EntityUid? FrameGrid;
+    public Vector2? FrameLocalPosition;
+    public int? FrameLocalZ;
     public ExplosionPrototype Proto = proto;
     public float TotalIntensity, Slope, MaxTileIntensity, TileBreakScale;
     public int MaxTileBreak;

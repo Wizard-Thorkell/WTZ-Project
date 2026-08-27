@@ -14,11 +14,13 @@ public sealed class SpawnExplosionEui : BaseEui
     [Dependency] private readonly IOverlayManager _overlayManager = default!;
 
     private readonly SpawnExplosionWindow _window;
+    private readonly SharedTransformSystem _transformSystem;
     private ExplosionDebugOverlay? _debugOverlay;
 
     public SpawnExplosionEui()
     {
         IoCManager.InjectDependencies(this);
+        _transformSystem = _entManager.System<SharedTransformSystem>();
         _window = new SpawnExplosionWindow(this);
         _window.OnClose += SendClosedMessage;
     }
@@ -49,9 +51,21 @@ public sealed class SpawnExplosionEui : BaseEui
         _debugOverlay = null;
     }
 
-    public void RequestPreviewData(MapCoordinates epicenter, string typeId, float totalIntensity, float intensitySlope, float maxIntensity)
+    public void RequestPreviewData(
+        MapCoordinates epicenter,
+        string typeId,
+        float totalIntensity,
+        float intensitySlope,
+        float maxIntensity,
+        int worldZ)
     {
-        var msg = new SpawnExplosionEuiMsg.PreviewRequest(epicenter, typeId, totalIntensity, intensitySlope, maxIntensity);
+        var msg = new SpawnExplosionEuiMsg.PreviewRequest(
+            epicenter,
+            typeId,
+            totalIntensity,
+            intensitySlope,
+            maxIntensity,
+            worldZ);
         SendMessage(msg);
     }
 
@@ -73,13 +87,16 @@ public sealed class SpawnExplosionEui : BaseEui
         var tiles = new Dictionary<EntityUid, Dictionary<int, List<Vector2i>>>();
         _debugOverlay.Tiles.Clear();
 
-        foreach (var (nent, det) in data.Explosion.Tiles)
+        foreach (var (nent, layers) in data.Explosion.Tiles)
         {
-            tiles[_entManager.GetEntity(nent)] = det;
+            var grid = _entManager.GetEntity(nent);
+            var localZ = _transformSystem.WorldToLocalZLevel(grid, data.Explosion.EpicenterWorldZ);
+            if (layers.TryGetValue(localZ, out var det))
+                tiles[grid] = det;
         }
 
         _debugOverlay.Tiles = tiles;
-        _debugOverlay.SpaceTiles = data.Explosion.SpaceTiles;
+        _debugOverlay.SpaceTiles = data.Explosion.SpaceTiles.GetValueOrDefault(data.Explosion.EpicenterWorldZ);
         _debugOverlay.Intensity = data.Explosion.Intensity;
         _debugOverlay.Slope = data.Slope;
         _debugOverlay.TotalIntensity = data.TotalIntensity;

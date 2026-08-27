@@ -17,7 +17,7 @@ public sealed partial class ExplosionSystem
     /// <summary>
     ///     Set of tiles of each grid that are directly adjacent to space, along with the directions that face space.
     /// </summary>
-    private Dictionary<EntityUid, Dictionary<Vector2i, NeighborFlag>> _gridEdges = new();
+    private Dictionary<EntityUid, Dictionary<ZLevelTileIndices, NeighborFlag>> _gridEdges = new();
 
     /// <summary>
     ///     On grid startup, prepare a map of grid edges.
@@ -26,10 +26,10 @@ public sealed partial class ExplosionSystem
     {
         var grid = Comp<MapGridComponent>(ev.EntityUid);
 
-        Dictionary<Vector2i, NeighborFlag> edges = new();
+        Dictionary<ZLevelTileIndices, NeighborFlag> edges = new();
         _gridEdges[ev.EntityUid] = edges;
 
-        foreach (var tileRef in _map.GetAllTiles(ev.EntityUid, grid))
+        foreach (var tileRef in _map.GetAllNonEmptyZLevelTiles(ev.EntityUid, grid))
         {
             if (IsEdge((ev.EntityUid, grid), tileRef.GridIndices, out var dir))
                 edges.Add(tileRef.GridIndices, dir);
@@ -55,6 +55,7 @@ public sealed partial class ExplosionSystem
     /// </summary>
     public (Dictionary<Vector2i, BlockedSpaceTile>, ushort) TransformGridEdges(
         MapCoordinates epicentre,
+        int worldZ,
         EntityUid? referenceGrid,
         List<EntityUid> localGrids,
         float maxDistance)
@@ -104,6 +105,7 @@ public sealed partial class ExplosionSystem
 
             var xforms = GetEntityQuery<TransformComponent>();
             var xform = xforms.GetComponent(gridToTransform);
+            var localZ = _transformSystem.WorldToLocalZLevel(gridToTransform, worldZ);
             var  (_, gridWorldRotation, gridWorldMatrix, invGridWorldMatrid) = _transformSystem.GetWorldPositionRotationMatrixWithInv(xform, xforms);
 
             var localEpicentre = (Vector2i) Vector2.Transform(epicentre.Position, invGridWorldMatrid);
@@ -114,12 +116,17 @@ public sealed partial class ExplosionSystem
 
             foreach (var (tile, dir) in edges)
             {
+                if (tile.Z != localZ)
+                    continue;
+
+                var tileXY = new Vector2i(tile.X, tile.Y);
+
                 // if a tile is further than max distance from the epicentre, we just ignore it.
-                var delta = tile - localEpicentre;
+                var delta = tileXY - localEpicentre;
                 if (delta.X * delta.X + delta.Y * delta.Y > maxDistanceSq) // no Vector2.Length???
                     continue;
 
-                var center = Vector2.Transform(tile, matrix);
+                var center = Vector2.Transform(tileXY, matrix);
 
                 if ((dir & NeighborFlag.Cardinal) == 0)
                 {
@@ -154,7 +161,7 @@ public sealed partial class ExplosionSystem
                         data = new();
                         transformedEdges[newIndices] = data;
                     }
-                    data.BlockingGridEdges.Add(new(tile, gridToTransform, center, angle, tileSize));
+                    data.BlockingGridEdges.Add(new(tileXY, gridToTransform, center, angle, tileSize));
                 }
             }
         }
@@ -166,19 +173,25 @@ public sealed partial class ExplosionSystem
 
         if (_gridEdges.TryGetValue(referenceGrid.Value, out var localEdges))
         {
+            var localZ = _transformSystem.WorldToLocalZLevel(referenceGrid.Value, worldZ);
             foreach (var (tile, dir) in localEdges)
             {
+                if (tile.Z != localZ)
+                    continue;
+
+                var tileXY = new Vector2i(tile.X, tile.Y);
+
                 // grids cannot overlap, so tile should never be an existing entry.
                 // if this ever changes, this needs to do a try-get.
                 var data = new BlockedSpaceTile();
-                transformedEdges[tile] = data;
+                transformedEdges[tileXY] = data;
 
                 data.UnblockedDirections = AtmosDirection.Invalid; // all directions are blocked automatically.
 
                 if ((dir & NeighborFlag.Cardinal) == 0)
-                    data.BlockingGridEdges.Add(new(default, null, (tile + Vector2Helpers.Half) * tileSize, 0, tileSize));
+                    data.BlockingGridEdges.Add(new(default, null, (tileXY + Vector2Helpers.Half) * tileSize, 0, tileSize));
                 else
-                    data.BlockingGridEdges.Add(new(tile, referenceGrid.Value, (tile + Vector2Helpers.Half) * tileSize, 0, tileSize));
+                    data.BlockingGridEdges.Add(new(tileXY, referenceGrid.Value, (tileXY + Vector2Helpers.Half) * tileSize, 0, tileSize));
             }
         }
 
@@ -238,61 +251,75 @@ public sealed partial class ExplosionSystem
 
         foreach (var change in ev.Changes)
         {
-            // only need to update the grid-edge map if a tile was added or removed from the grid.
-            if (!change.NewTile.IsEmpty && !change.OldTile.IsEmpty)
-                continue;
+            UpdateGridEdge(
+                (ev.Entity, grid),
+                new ZLevelTileIndices(change.GridIndices.X, change.GridIndices.Y, 0),
+                change.OldTile,
+                change.NewTile);
+        }
+    }
 
-            if (!_gridEdges.TryGetValue(ev.Entity, out var edges))
-            {
-                edges = new();
-                _gridEdges[ev.Entity] = edges;
-            }
+    private void OnZLevelTileChanged(ref ZLevelTileChangedEvent ev)
+    {
+        if (!TryComp(ev.Entity, out MapGridComponent? grid))
+            return;
 
-            if (change.NewTile.IsEmpty)
-            {
-                // if the tile is empty, it cannot itself be an edge tile.
-                edges.Remove(change.GridIndices);
+        foreach (var change in ev.Changes)
+        {
+            UpdateGridEdge((ev.Entity, grid), change.GridIndices, change.OldTile, change.NewTile);
+        }
+    }
 
-                // add any valid neighbours to the list of edge-tiles
-                for (var i = 0; i < NeighbourVectors.Length; i++)
-                {
-                    var neighbourIndex = change.GridIndices + NeighbourVectors[i];
+    private void UpdateGridEdge(
+        Entity<MapGridComponent> grid,
+        ZLevelTileIndices indices,
+        Tile oldTile,
+        Tile newTile)
+    {
+        if (!newTile.IsEmpty && !oldTile.IsEmpty)
+            return;
 
-                    if (_map.TryGetTileRef(ev.Entity, grid, neighbourIndex, out var neighbourTile) && !neighbourTile.Tile.IsEmpty)
-                    {
-                        var oppositeDirection = (NeighborFlag)(1 << ((i + 4) % 8));
-                        edges[neighbourIndex] = edges.GetValueOrDefault(neighbourIndex) | oppositeDirection;
-                    }
-                }
+        if (!_gridEdges.TryGetValue(grid.Owner, out var edges))
+        {
+            edges = new();
+            _gridEdges[grid.Owner] = edges;
+        }
 
-                continue;
-            }
+        if (newTile.IsEmpty)
+        {
+            edges.Remove(indices);
 
-            // the tile is not empty space, but was previously. So update directly adjacent neighbours, which may no longer
-            // be edge tiles.
             for (var i = 0; i < NeighbourVectors.Length; i++)
             {
-                var neighbourIndex = change.GridIndices + NeighbourVectors[i];
+                var offset = NeighbourVectors[i];
+                var neighbourIndex = new ZLevelTileIndices(indices.X + offset.X, indices.Y + offset.Y, indices.Z);
+                if (_map.GetZLevelTileRef(grid.Owner, grid.Comp, neighbourIndex).Tile.IsEmpty)
+                    continue;
 
-                if (edges.TryGetValue(neighbourIndex, out var neighborSpaceDir))
-                {
-                    var oppositeDirection = (NeighborFlag)(1 << ((i + 4) % 8));
-                    neighborSpaceDir &= ~oppositeDirection;
-                    if (neighborSpaceDir == NeighborFlag.Invalid)
-                    {
-                        // no longer an edge tile
-                        edges.Remove(neighbourIndex);
-                        continue;
-                    }
-
-                    edges[neighbourIndex] = neighborSpaceDir;
-                }
+                var oppositeDirection = (NeighborFlag)(1 << ((i + 4) % 8));
+                edges[neighbourIndex] = edges.GetValueOrDefault(neighbourIndex) | oppositeDirection;
             }
 
-            // finally check if the new tile is itself an edge tile
-            if (IsEdge((ev.Entity, grid), change.GridIndices, out var spaceDir))
-                edges.Add(change.GridIndices, spaceDir);
+            return;
         }
+
+        for (var i = 0; i < NeighbourVectors.Length; i++)
+        {
+            var offset = NeighbourVectors[i];
+            var neighbourIndex = new ZLevelTileIndices(indices.X + offset.X, indices.Y + offset.Y, indices.Z);
+            if (!edges.TryGetValue(neighbourIndex, out var neighborSpaceDir))
+                continue;
+
+            var oppositeDirection = (NeighborFlag)(1 << ((i + 4) % 8));
+            neighborSpaceDir &= ~oppositeDirection;
+            if (neighborSpaceDir == NeighborFlag.Invalid)
+                edges.Remove(neighbourIndex);
+            else
+                edges[neighbourIndex] = neighborSpaceDir;
+        }
+
+        if (IsEdge(grid, indices, out var spaceDir))
+            edges[indices] = spaceDir;
     }
 
     /// <summary>
@@ -302,12 +329,14 @@ public sealed partial class ExplosionSystem
     ///     Optionally ignore a specific Vector2i. Used by <see cref="OnTileChanged"/> when we already know that a
     ///     given tile is not space. This avoids unnecessary TryGetTileRef calls.
     /// </remarks>
-    private bool IsEdge(Entity<MapGridComponent> grid, Vector2i index, out NeighborFlag spaceDirections)
+    private bool IsEdge(Entity<MapGridComponent> grid, ZLevelTileIndices index, out NeighborFlag spaceDirections)
     {
         spaceDirections = NeighborFlag.Invalid;
         for (var i = 0; i < NeighbourVectors.Length; i++)
         {
-            if (!_map.TryGetTileRef(grid, grid.Comp, index + NeighbourVectors[i], out var neighborTile) || neighborTile.Tile.IsEmpty)
+            var offset = NeighbourVectors[i];
+            var neighbor = new ZLevelTileIndices(index.X + offset.X, index.Y + offset.Y, index.Z);
+            if (_map.GetZLevelTileRef(grid.Owner, grid.Comp, neighbor).Tile.IsEmpty)
                 spaceDirections |= (NeighborFlag) (1 << i);
         }
 

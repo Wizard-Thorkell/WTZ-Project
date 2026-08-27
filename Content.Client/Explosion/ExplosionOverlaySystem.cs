@@ -1,5 +1,6 @@
 using Content.Shared.Explosion;
 using Content.Shared.Explosion.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
 using Robust.Shared.GameStates;
@@ -20,6 +21,7 @@ public sealed class ExplosionOverlaySystem : EntitySystem
     [Dependency] private readonly SharedPointLightSystem _lights = default!;
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly SharedAppearanceSystem _appearance = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -37,6 +39,7 @@ public sealed class ExplosionOverlaySystem : EntitySystem
             return;
 
         component.Epicenter = state.Epicenter;
+        component.EpicenterWorldZ = state.EpicenterWorldZ;
         component.SpaceTiles = state.SpaceTiles;
         component.Tiles.Clear();
 
@@ -72,6 +75,7 @@ public sealed class ExplosionOverlaySystem : EntitySystem
         {
             // spawn in a client-side light source at the epicenter
             var lightEntity = Spawn("ExplosionLight", component.Epicenter);
+            _zLevel.StampWorldZLevelPosition(lightEntity, component.EpicenterWorldZ);
             var light = _lights.EnsureLight(lightEntity);
 
             _lights.SetRadius(lightEntity, component.Intensity.Count, light);

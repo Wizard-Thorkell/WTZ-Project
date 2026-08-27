@@ -12,8 +12,9 @@ namespace Content.Shared.Explosion.Components;
 public sealed partial class ExplosionVisualsComponent : Component
 {
     public MapCoordinates Epicenter;
-    public Dictionary<int, List<Vector2i>>? SpaceTiles;
-    public Dictionary<EntityUid, Dictionary<int, List<Vector2i>>> Tiles = new();
+    public int EpicenterWorldZ;
+    public Dictionary<int, Dictionary<int, List<Vector2i>>> SpaceTiles = new();
+    public Dictionary<EntityUid, Dictionary<int, Dictionary<int, List<Vector2i>>>> Tiles = new();
     public List<float> Intensity = new();
     public string ExplosionType = string.Empty;
     public Matrix3x2 SpaceMatrix;
@@ -24,8 +25,9 @@ public sealed partial class ExplosionVisualsComponent : Component
 public sealed class ExplosionVisualsState : ComponentState
 {
     public MapCoordinates Epicenter;
-    public Dictionary<int, List<Vector2i>>? SpaceTiles;
-    public Dictionary<NetEntity, Dictionary<int, List<Vector2i>>> Tiles;
+    public int EpicenterWorldZ;
+    public Dictionary<int, Dictionary<int, List<Vector2i>>> SpaceTiles;
+    public Dictionary<NetEntity, Dictionary<int, Dictionary<int, List<Vector2i>>>> Tiles;
     public List<float> Intensity;
     public string ExplosionType = string.Empty;
     public Matrix3x2 SpaceMatrix;
@@ -33,14 +35,16 @@ public sealed class ExplosionVisualsState : ComponentState
 
     public ExplosionVisualsState(
         MapCoordinates epicenter,
+        int epicenterWorldZ,
         string typeID,
         List<float> intensity,
-        Dictionary<int, List<Vector2i>>? spaceTiles,
-        Dictionary<NetEntity, Dictionary<int, List<Vector2i>>> tiles,
+        Dictionary<int, Dictionary<int, List<Vector2i>>> spaceTiles,
+        Dictionary<NetEntity, Dictionary<int, Dictionary<int, List<Vector2i>>>> tiles,
         Matrix3x2 spaceMatrix,
         ushort spaceTileSize)
     {
         Epicenter = epicenter;
+        EpicenterWorldZ = epicenterWorldZ;
         SpaceTiles = spaceTiles;
         Tiles = tiles;
         Intensity = intensity;

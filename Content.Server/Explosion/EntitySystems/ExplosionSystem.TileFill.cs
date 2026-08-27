@@ -3,10 +3,12 @@ using System.Numerics;
 using Content.Server.Explosion.Components;
 using Content.Shared.Administration;
 using Content.Shared.Explosion.Components;
+using Content.Shared.ZLevel;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Timing;
+using DiagnosticStopwatch = System.Diagnostics.Stopwatch;
 
 namespace Content.Server.Explosion.EntitySystems;
 
@@ -19,6 +21,7 @@ public sealed partial class ExplosionSystem
     /// A list of grids to be reused by <see cref="GetLocalGrids"/> to avoid allocating twice for each call.
     /// </summary>
     private List<Entity<MapGridComponent>> _grids = [];
+    private static readonly HashSet<Vector2i> EmptyExplosionTiles = [];
 
     /// <summary>
     ///     This is the main explosion generating function.
@@ -31,8 +34,10 @@ public sealed partial class ExplosionSystem
     /// <param name="maxIntensity">The maximum intensity that the explosion can have at any given tile. This
     /// effectively caps the damage that this explosion can do.</param>
     /// <returns>A list of tile-sets and a list of intensity values which describe the explosion.</returns>
-    private (int, List<float>, ExplosionSpaceTileFlood?, Dictionary<EntityUid, ExplosionGridTileFlood>, Matrix3x2)? GetExplosionTiles(
+    private (int, List<float>, Dictionary<int, ExplosionSpaceTileFlood>, Dictionary<ExplosionGridLayer, ExplosionGridTileFlood>, Matrix3x2)? GetExplosionTiles(
         MapCoordinates epicenter,
+        int worldZ,
+        EntityUid? frameGrid,
         string typeID,
         float totalIntensity,
         float slope,
@@ -41,19 +46,22 @@ public sealed partial class ExplosionSystem
         if (totalIntensity <= 0 || slope <= 0)
             return null;
 
+        var topologyStarted = DiagnosticStopwatch.GetTimestamp();
+        var topologyCounters = new ExplosionTopologyCounters();
+        Dictionary<ExplosionVerticalBoundaryKey, ExplosionVerticalBoundaryResult> verticalBoundaries = new();
         var typeIndex = _explosionTypes[typeID];
 
         Vector2i initialTile;
         EntityUid? epicentreGrid = null;
-        var (localGrids, referenceGrid, maxDistance) = GetLocalGrids(epicenter, totalIntensity, slope, maxIntensity);
+        var epicentreLocalZ = worldZ;
+        var (localGrids, referenceGrid, maxDistance) = GetLocalGrids(epicenter, worldZ, frameGrid, totalIntensity, slope, maxIntensity);
 
         // get the epicenter tile indices
-        if (_mapManager.TryFindGridAt(epicenter, out var gridUid, out var candidateGrid) &&
-            _map.TryGetTileRef(gridUid, candidateGrid, _map.WorldToTile(gridUid, candidateGrid, epicenter.Position), out var tileRef) &&
-            !tileRef.Tile.IsEmpty)
+        if (TryFindExplosionGridAt(epicenter, worldZ, frameGrid, localGrids, out var gridUid, out var candidateGrid, out var zTileRef))
         {
             epicentreGrid = gridUid;
-            initialTile = tileRef.GridIndices;
+            epicentreLocalZ = zTileRef.GridIndices.Z;
+            initialTile = new Vector2i(zTileRef.GridIndices.X, zTileRef.GridIndices.Y);
         }
         else if (referenceGrid != null)
         {
@@ -70,20 +78,19 @@ public sealed partial class ExplosionSystem
         }
 
         // Main data for the exploding tiles in space and on various grids
-        Dictionary<EntityUid, ExplosionGridTileFlood> gridData = new();
-        ExplosionSpaceTileFlood? spaceData = null;
+        Dictionary<ExplosionGridLayer, ExplosionGridTileFlood> gridData = new();
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData = new();
 
         // The intensity slope is how much the intensity drop over a one-tile distance. The actual algorithm step-size is half of thhat.
         var stepSize = slope / 2;
 
         // Hashsets used for when grid-based explosion propagate into space. Basically: used to move data between
         // `gridData` and `spaceData` in-between neighbor finding iterations.
-        HashSet<Vector2i> spaceJump = new();
-        HashSet<Vector2i> previousSpaceJump;
+        Dictionary<int, HashSet<Vector2i>> spaceJump = new();
+        Dictionary<int, HashSet<Vector2i>> previousSpaceJump;
 
         // As above, but for space-based explosion propagating from space onto grids.
-        HashSet<EntityUid> encounteredGrids = new();
-        Dictionary<EntityUid, HashSet<Vector2i>>? previousGridJump;
+        HashSet<ExplosionGridLayer> encounteredGridLayers = new();
 
         // variables for transforming between grid and space-coordinates
         var spaceMatrix = Matrix3x2.Identity;
@@ -98,12 +105,14 @@ public sealed partial class ExplosionSystem
         if (epicentreGrid != null)
         {
             // set up the initial `gridData` instance
-            encounteredGrids.Add(epicentreGrid.Value);
+            encounteredGridLayers.Add(new ExplosionGridLayer(epicentreGrid.Value, epicentreLocalZ));
 
             var airtightMap = CompOrNull<ExplosionAirtightGridComponent>(epicentreGrid)?.Tiles ?? new();
 
             var initialGridData = new ExplosionGridTileFlood(
                 (epicentreGrid.Value, Comp<MapGridComponent>(epicentreGrid.Value)),
+                epicentreLocalZ,
+                worldZ,
                 airtightMap,
                 maxIntensity,
                 stepSize,
@@ -114,21 +123,31 @@ public sealed partial class ExplosionSystem
                 spaceAngle,
                 this);
 
-            gridData[epicentreGrid.Value] = initialGridData;
+            gridData[new ExplosionGridLayer(epicentreGrid.Value, epicentreLocalZ)] = initialGridData;
 
             initialGridData.InitTile(initialTile);
         }
         else
         {
             // set up the space explosion data
-            spaceData = new ExplosionSpaceTileFlood(this, epicenter, referenceGrid, localGrids, maxDistance);
-            spaceData.InitTile(initialTile);
+            var initialSpaceData = new ExplosionSpaceTileFlood(this, epicenter, worldZ, referenceGrid, localGrids, maxDistance);
+            initialSpaceData.InitTile(initialTile);
+            spaceData[worldZ] = initialSpaceData;
         }
 
         // Is this even a multi-tile explosion?
         if (totalIntensity < stepSize)
+        {
             // Bit anticlimactic. All that set up for nothing....
+            RecordExplosionTopology(
+                gridData,
+                spaceData,
+                topologyCounters,
+                areaBudgetExhausted: false,
+                iterationBudgetExhausted: false,
+                topologyStarted);
             return (1, new List<float> { totalIntensity }, spaceData, gridData, spaceMatrix);
+        }
 
         // These variables keep track of the total intensity we have distributed
         List<int> tilesInIteration = new() { 1 };
@@ -176,48 +195,73 @@ public sealed partial class ExplosionSystem
 
             // In order to treat "cost" of moving off a grid on the same level as moving onto a grid, both space -> grid and grid -> space have to be delayed by one iteration.
             previousSpaceJump = spaceJump;
-            previousGridJump = spaceData?.GridJump;
+            var previousGridJump = CollectGridJumps(spaceData);
             spaceJump = new();
+            var verticalJump = CollectVerticalJumps(
+                gridData,
+                iteration - 2,
+                verticalBoundaries,
+                ref topologyCounters);
 
             var newTileCount = 0;
 
-            if (previousGridJump != null)
-                encounteredGrids.UnionWith(previousGridJump.Keys);
+            encounteredGridLayers.UnionWith(previousGridJump.Keys);
+            encounteredGridLayers.UnionWith(verticalJump.Keys);
 
-            foreach (var grid in encounteredGrids)
+            foreach (var layer in encounteredGridLayers)
             {
                 // is this a new grid, for which we must create a new explosion data set
-                if (!gridData.TryGetValue(grid, out var data))
+                if (!gridData.TryGetValue(layer, out var data))
                 {
-                    var airtightMap = CompOrNull<ExplosionAirtightGridComponent>(grid)?.Tiles ?? new();
+                    var airtightMap = CompOrNull<ExplosionAirtightGridComponent>(layer.GridUid)?.Tiles ?? new();
+                    var layerWorldZ = _transformSystem.LocalToWorldZLevel(layer.GridUid, layer.LocalZ);
 
                     data = new ExplosionGridTileFlood(
-                        (grid, Comp<MapGridComponent>(grid)),
+                        (layer.GridUid, Comp<MapGridComponent>(layer.GridUid)),
+                        layer.LocalZ,
+                        layerWorldZ,
                         airtightMap,
                         maxIntensity,
                         stepSize,
                         typeIndex,
-                        _gridEdges[grid],
+                        _gridEdges[layer.GridUid],
                         referenceGrid,
                         spaceMatrix,
                         spaceAngle,
                         this);
 
-                    gridData[grid] = data;
+                    gridData[layer] = data;
                 }
 
                 // get the new neighbours, and populate gridToSpaceTiles in the process.
-                newTileCount += data.AddNewTiles(iteration, previousGridJump?.GetValueOrDefault(grid));
-                spaceJump.UnionWith(data.SpaceJump);
+                newTileCount += data.AddNewTiles(
+                    iteration,
+                    previousGridJump.GetValueOrDefault(layer),
+                    verticalJump.GetValueOrDefault(layer));
+                MergeJump(spaceJump, data.WorldZ, data.SpaceJump);
             }
 
-            // if space-data is null, but some grid-based explosion reached space, we need to initialize it.
-            if (spaceData == null && previousSpaceJump.Count != 0)
-                spaceData = new ExplosionSpaceTileFlood(this, epicenter, referenceGrid, localGrids, maxDistance);
+            foreach (var jumpWorldZ in previousSpaceJump.Keys)
+            {
+                if (!spaceData.ContainsKey(jumpWorldZ))
+                {
+                    spaceData[jumpWorldZ] = new ExplosionSpaceTileFlood(
+                        this,
+                        epicenter,
+                        jumpWorldZ,
+                        referenceGrid,
+                        localGrids,
+                        maxDistance);
+                }
+            }
 
             // If the explosion has reached space, do that neighbors finding step as well.
-            if (spaceData != null)
-                newTileCount += spaceData.AddNewTiles(iteration, previousSpaceJump);
+            foreach (var (spaceWorldZ, data) in spaceData)
+            {
+                newTileCount += data.AddNewTiles(
+                    iteration,
+                    previousSpaceJump.GetValueOrDefault(spaceWorldZ) ?? EmptyExplosionTiles);
+            }
 
             // Does adding these tiles bring us above the total target intensity?
             tilesInIteration.Add(newTileCount);
@@ -247,9 +291,225 @@ public sealed partial class ExplosionSystem
         {
             grid.CleanUp();
         }
-        spaceData?.CleanUp();
+        foreach (var space in spaceData.Values)
+        {
+            space.CleanUp();
+        }
+
+        RecordExplosionTopology(
+            gridData,
+            spaceData,
+            topologyCounters,
+            areaBudgetExhausted: remainingIntensity > 0 && totalTiles >= MaxArea,
+            iterationBudgetExhausted: remainingIntensity > 0 && iteration > MaxIterations,
+            topologyStarted);
 
         return (totalTiles, iterationIntensity, spaceData, gridData, spaceMatrix);
+    }
+
+    private Dictionary<ExplosionGridLayer, HashSet<Vector2i>> CollectGridJumps(
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData)
+    {
+        Dictionary<ExplosionGridLayer, HashSet<Vector2i>> jumps = new();
+        foreach (var (worldZ, data) in spaceData)
+        {
+            foreach (var (grid, tiles) in data.GridJump)
+            {
+                if (!Exists(grid))
+                    continue;
+
+                var layer = new ExplosionGridLayer(grid, _transformSystem.WorldToLocalZLevel(grid, worldZ));
+                MergeJump(jumps, layer, tiles);
+            }
+        }
+
+        return jumps;
+    }
+
+    private Dictionary<ExplosionGridLayer, HashSet<Vector2i>> CollectVerticalJumps(
+        Dictionary<ExplosionGridLayer, ExplosionGridTileFlood> gridData,
+        int sourceIteration,
+        Dictionary<ExplosionVerticalBoundaryKey, ExplosionVerticalBoundaryResult> verticalBoundaries,
+        ref ExplosionTopologyCounters counters)
+    {
+        Dictionary<ExplosionGridLayer, HashSet<Vector2i>> jumps = new();
+        if (sourceIteration < 0)
+            return jumps;
+
+        foreach (var data in gridData.Values)
+        {
+            data.GetVerticalSources(sourceIteration, out var tiles, out var freedTiles, out var voidTiles);
+            AddVerticalJumps(data, tiles, jumps, verticalBoundaries, ref counters);
+            AddVerticalJumps(data, freedTiles, jumps, verticalBoundaries, ref counters);
+            AddVerticalJumps(data, voidTiles, jumps, verticalBoundaries, ref counters);
+        }
+
+        return jumps;
+    }
+
+    private void AddVerticalJumps(
+        ExplosionGridTileFlood source,
+        IEnumerable<Vector2i>? tiles,
+        Dictionary<ExplosionGridLayer, HashSet<Vector2i>> jumps,
+        Dictionary<ExplosionVerticalBoundaryKey, ExplosionVerticalBoundaryResult> verticalBoundaries,
+        ref ExplosionTopologyCounters counters)
+    {
+        if (tiles == null)
+            return;
+
+        foreach (var tile in tiles)
+        {
+            TryAddVerticalJump(source, tile, source.LocalZ - 1, jumps, verticalBoundaries, ref counters);
+            TryAddVerticalJump(source, tile, source.LocalZ + 1, jumps, verticalBoundaries, ref counters);
+        }
+    }
+
+    private void TryAddVerticalJump(
+        ExplosionGridTileFlood source,
+        Vector2i tile,
+        int targetLocalZ,
+        Dictionary<ExplosionGridLayer, HashSet<Vector2i>> jumps,
+        Dictionary<ExplosionVerticalBoundaryKey, ExplosionVerticalBoundaryResult> verticalBoundaries,
+        ref ExplosionTopologyCounters counters)
+    {
+        if (!CanExplosionCross(
+                source.Grid,
+                tile,
+                source.LocalZ,
+                targetLocalZ,
+                verticalBoundaries,
+                ref counters))
+            return;
+
+        MergeJump(jumps, new ExplosionGridLayer(source.Grid.Owner, targetLocalZ), tile);
+    }
+
+    private bool CanExplosionCross(
+        Entity<MapGridComponent> grid,
+        Vector2i tile,
+        int fromLocalZ,
+        int toLocalZ,
+        Dictionary<ExplosionVerticalBoundaryKey, ExplosionVerticalBoundaryResult> verticalBoundaries,
+        ref ExplosionTopologyCounters counters)
+    {
+        counters.VerticalQueries++;
+        var key = new ExplosionVerticalBoundaryKey(grid.Owner, tile, Math.Min(fromLocalZ, toLocalZ));
+        if (verticalBoundaries.TryGetValue(key, out var cached))
+        {
+            counters.VerticalCacheHits++;
+            return cached == ExplosionVerticalBoundaryResult.Open;
+        }
+
+        counters.VerticalTraces++;
+        var localPosition = _map.GridTileToLocal(grid.Owner, grid.Comp, tile).Position;
+        if (!_zLevelTrace.TryCreateGridPoint(grid.Owner, localPosition, fromLocalZ, out var origin) ||
+            !_zLevelTrace.TryCreateGridPoint(grid.Owner, localPosition, toLocalZ, out var destination))
+        {
+            counters.VerticalRejected++;
+            verticalBoundaries[key] = ExplosionVerticalBoundaryResult.Rejected;
+            return false;
+        }
+
+        var request = new ZLevelTraceRequest(
+            origin,
+            destination,
+            ZLevelBoundaryChannels.Explosion,
+            Options: ZLevelTraceOptions.None,
+            BoundaryFrameUid: grid.Owner);
+        var result = _zLevelTrace.Trace(request, _explosionTraceBuffer);
+        ExplosionVerticalBoundaryResult crossingResult;
+        if (result.ReachedDestination &&
+            _explosionTraceBuffer.BoundaryCrossings.Count == 1 &&
+            _explosionTraceBuffer.BoundaryCrossings[0].IsOpen)
+        {
+            counters.VerticalOpen++;
+            crossingResult = ExplosionVerticalBoundaryResult.Open;
+        }
+        else if (result.Termination == ZLevelTraceTermination.ClosedBoundary ||
+                 _explosionTraceBuffer.BoundaryCrossings.Count == 1 &&
+                 !_explosionTraceBuffer.BoundaryCrossings[0].IsOpen)
+        {
+            counters.VerticalClosed++;
+            crossingResult = ExplosionVerticalBoundaryResult.Closed;
+        }
+        else
+        {
+            counters.VerticalRejected++;
+            crossingResult = ExplosionVerticalBoundaryResult.Rejected;
+        }
+
+        verticalBoundaries[key] = crossingResult;
+        return crossingResult == ExplosionVerticalBoundaryResult.Open;
+    }
+
+    private static void MergeJump<TKey>(
+        Dictionary<TKey, HashSet<Vector2i>> target,
+        TKey key,
+        IEnumerable<Vector2i> tiles)
+        where TKey : notnull
+    {
+        if (!target.TryGetValue(key, out var merged))
+        {
+            merged = new();
+            target[key] = merged;
+        }
+
+        merged.UnionWith(tiles);
+    }
+
+    private static void MergeJump<TKey>(
+        Dictionary<TKey, HashSet<Vector2i>> target,
+        TKey key,
+        Vector2i tile)
+        where TKey : notnull
+    {
+        if (!target.TryGetValue(key, out var merged))
+        {
+            merged = new();
+            target[key] = merged;
+        }
+
+        merged.Add(tile);
+    }
+
+    private void RecordExplosionTopology(
+        Dictionary<ExplosionGridLayer, ExplosionGridTileFlood> gridData,
+        Dictionary<int, ExplosionSpaceTileFlood> spaceData,
+        ExplosionTopologyCounters counters,
+        bool areaBudgetExhausted,
+        bool iterationBudgetExhausted,
+        long topologyStarted)
+    {
+        var tileCount = 0;
+        foreach (var data in gridData.Values)
+        {
+            foreach (var tiles in data.TileLists.Values)
+            {
+                tileCount += tiles.Count;
+            }
+        }
+
+        foreach (var data in spaceData.Values)
+        {
+            foreach (var tiles in data.TileLists.Values)
+            {
+                tileCount += tiles.Count;
+            }
+        }
+
+        _zLevelMetrics.RecordExplosionTopology(
+            gridData.Count,
+            spaceData.Count,
+            tileCount,
+            counters.VerticalQueries,
+            counters.VerticalCacheHits,
+            counters.VerticalTraces,
+            counters.VerticalOpen,
+            counters.VerticalClosed,
+            counters.VerticalRejected,
+            areaBudgetExhausted,
+            iterationBudgetExhausted,
+            DiagnosticStopwatch.GetTimestamp() - topologyStarted);
     }
 
     /// <summary>
@@ -261,7 +521,13 @@ public sealed partial class ExplosionSystem
     ///     match a separate grid. This is done so that if you have something like a tiny suicide-bomb shuttle exploding
     ///     near a large station, the explosion will still orient to match the station, not the tiny shuttle.
     /// </remarks>
-    public (List<EntityUid>, EntityUid?, float) GetLocalGrids(MapCoordinates epicenter, float totalIntensity, float slope, float maxIntensity)
+    public (List<EntityUid>, EntityUid?, float) GetLocalGrids(
+        MapCoordinates epicenter,
+        int worldZ,
+        EntityUid? frameGrid,
+        float totalIntensity,
+        float slope,
+        float maxIntensity)
     {
         // Get the explosion radius (approx radius if it were in open-space). Note that if the explosion is confined in
         // some directions but not in others, the actual explosion may reach further than this distance from the
@@ -271,7 +537,9 @@ public sealed partial class ExplosionSystem
         // to avoid a silly lookup for silly input numbers, cap the radius to half of the theoretical maximum (lookup area gets doubled later on).
         radius = Math.Min(radius, MaxIterations / 4);
 
-        EntityUid? referenceGrid = null;
+        EntityUid? referenceGrid = frameGrid is { } preferred && HasGridOnMap(preferred, epicenter.MapId)
+            ? preferred
+            : null;
         var mass = float.MinValue;
 
         // First attempt to find a grid that is relatively close to the explosion's center. Instead of looking in a
@@ -282,6 +550,12 @@ public sealed partial class ExplosionSystem
         _mapManager.FindGridsIntersecting(epicenter.MapId, box, ref _grids);
         foreach (var grid in _grids)
         {
+            if (!HasExplosionLayer(grid.Owner, worldZ))
+                continue;
+
+            if (frameGrid is not null && referenceGrid == frameGrid)
+                continue;
+
             if (TryComp(grid.Owner, out PhysicsComponent? physics) && physics.FixturesMass > mass)
             {
                 mass = physics.Mass;
@@ -310,6 +584,9 @@ public sealed partial class ExplosionSystem
         // We still don't have are reference grid. So lets also look in the enlarged region
         foreach (var grid in _grids)
         {
+            if (!HasExplosionLayer(grid.Owner, worldZ))
+                continue;
+
             if (TryComp(grid.Owner, out PhysicsComponent? physics) && physics.Mass > mass)
             {
                 mass = physics.FixturesMass;
@@ -320,13 +597,88 @@ public sealed partial class ExplosionSystem
         return (grids, referenceGrid, radius);
     }
 
-    public ExplosionVisualsState? GenerateExplosionPreview(SpawnExplosionEuiMsg.PreviewRequest request)
+    private bool HasExplosionLayer(EntityUid grid, int worldZ)
+    {
+        if (!_gridEdges.TryGetValue(grid, out var edges))
+            return false;
+
+        var localZ = _transformSystem.WorldToLocalZLevel(grid, worldZ);
+        return edges.Keys.Any(tile => tile.Z == localZ);
+    }
+
+    private bool HasGridOnMap(EntityUid grid, MapId mapId)
+    {
+        return TryComp<MapGridComponent>(grid, out _) &&
+               TryComp(grid, out TransformComponent? transform) &&
+               transform.MapID == mapId;
+    }
+
+    private bool TryFindExplosionGridAt(
+        MapCoordinates epicenter,
+        int worldZ,
+        EntityUid? frameGrid,
+        List<EntityUid> localGrids,
+        out EntityUid gridUid,
+        out MapGridComponent grid,
+        out ZLevelTileRef tile)
+    {
+        if (frameGrid is { } preferred)
+        {
+            if (TryComp(preferred, out MapGridComponent? preferredGrid) &&
+                Transform(preferred).MapID == epicenter.MapId)
+            {
+                grid = preferredGrid;
+                gridUid = preferred;
+                var xy = _map.WorldToTile(preferred, grid, epicenter.Position);
+                tile = _map.GetZLevelTileRef(
+                    preferred,
+                    grid,
+                    new ZLevelTileIndices(xy.X, xy.Y, _transformSystem.WorldToLocalZLevel(preferred, worldZ)));
+                return !tile.Tile.IsEmpty;
+            }
+
+            gridUid = default;
+            grid = default!;
+            tile = ZLevelTileRef.Zero;
+            return false;
+        }
+
+        foreach (var candidate in localGrids)
+        {
+            if (!TryComp(candidate, out MapGridComponent? candidateGrid))
+                continue;
+
+            grid = candidateGrid;
+            var xy = _map.WorldToTile(candidate, grid, epicenter.Position);
+            tile = _map.GetZLevelTileRef(
+                candidate,
+                grid,
+                new ZLevelTileIndices(xy.X, xy.Y, _transformSystem.WorldToLocalZLevel(candidate, worldZ)));
+            if (tile.Tile.IsEmpty)
+                continue;
+
+            gridUid = candidate;
+            return true;
+        }
+
+        gridUid = default;
+        grid = default!;
+        tile = ZLevelTileRef.Zero;
+        return false;
+    }
+
+    public ExplosionVisualsState? GenerateExplosionPreview(
+        SpawnExplosionEuiMsg.PreviewRequest request,
+        int worldZ,
+        EntityUid? frameGrid)
     {
         var stopwatch = new Stopwatch();
         stopwatch.Start();
 
         var results = GetExplosionTiles(
             request.Epicenter,
+            worldZ,
+            frameGrid,
             request.TypeId,
             request.TotalIntensity,
             request.IntensitySlope,
@@ -339,19 +691,57 @@ public sealed partial class ExplosionSystem
 
         Log.Info($"Generated explosion preview with {area} tiles in {stopwatch.Elapsed.TotalMilliseconds}ms");
 
-        Dictionary<NetEntity, Dictionary<int, List<Vector2i>>> tileLists = new();
-        foreach (var (grid, data) in gridData)
+        Dictionary<NetEntity, Dictionary<int, Dictionary<int, List<Vector2i>>>> tileLists = new();
+        foreach (var (layer, data) in gridData)
         {
-            tileLists.Add(GetNetEntity(grid), data.TileLists);
+            var netGrid = GetNetEntity(layer.GridUid);
+            if (!tileLists.TryGetValue(netGrid, out var layers))
+            {
+                layers = new();
+                tileLists[netGrid] = layers;
+            }
+
+            layers[layer.LocalZ] = data.TileLists;
+        }
+
+        Dictionary<int, Dictionary<int, List<Vector2i>>> spaceTileLists = new();
+        foreach (var (spaceWorldZ, data) in spaceData)
+        {
+            spaceTileLists[spaceWorldZ] = data.TileLists;
         }
 
         return new ExplosionVisualsState(
             request.Epicenter,
+            worldZ,
             request.TypeId,
             iterationIntensity,
-            spaceData?.TileLists,
+            spaceTileLists,
             tileLists, spaceMatrix,
-            spaceData?.TileSize ?? DefaultTileSize
+            spaceData.Values.FirstOrDefault()?.TileSize ?? DefaultTileSize
             );
     }
+}
+
+public readonly record struct ExplosionGridLayer(EntityUid GridUid, int LocalZ);
+
+internal readonly record struct ExplosionVerticalBoundaryKey(
+    EntityUid GridUid,
+    Vector2i Tile,
+    int LowerLocalZ);
+
+internal enum ExplosionVerticalBoundaryResult : byte
+{
+    Open,
+    Closed,
+    Rejected,
+}
+
+internal struct ExplosionTopologyCounters
+{
+    public int VerticalQueries;
+    public int VerticalCacheHits;
+    public int VerticalTraces;
+    public int VerticalOpen;
+    public int VerticalClosed;
+    public int VerticalRejected;
 }

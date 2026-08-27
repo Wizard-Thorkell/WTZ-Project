@@ -7,6 +7,7 @@ using Content.Shared.Damage.Systems;
 using Content.Shared.Explosion;
 using Content.Shared.FixedPoint;
 using Robust.Shared.Collections;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Utility;
@@ -58,6 +59,12 @@ public sealed partial class ExplosionSystem
     public void UpdateAirtightMap(EntityUid gridId, Vector2i tile, MapGridComponent? grid = null)
     {
         if (Resolve(gridId, ref grid, false))
+            UpdateAirtightMap(gridId, grid, new ZLevelTileIndices(tile.X, tile.Y, 0));
+    }
+
+    public void UpdateAirtightMap(EntityUid gridId, ZLevelTileIndices tile, MapGridComponent? grid = null)
+    {
+        if (Resolve(gridId, ref grid, false))
             UpdateAirtightMap(gridId, grid, tile);
     }
 
@@ -77,7 +84,7 @@ public sealed partial class ExplosionSystem
     ///     something like a normal and a reinforced windoor on the same tile. But given that this is a pretty rare
     ///     occurrence, I am fine with this.
     /// </remarks>
-    public void UpdateAirtightMap(EntityUid gridId, MapGridComponent grid, Vector2i tile)
+    public void UpdateAirtightMap(EntityUid gridId, MapGridComponent grid, ZLevelTileIndices tile)
     {
         var airtightGrid = EnsureComp<ExplosionAirtightGridComponent>(gridId);
 
@@ -86,10 +93,13 @@ public sealed partial class ExplosionSystem
         var tolerance = new FixedPoint2[_explosionTypes.Count];
         var blockedDirections = AtmosDirection.Invalid;
 
-        var anchoredEnumerator = _map.GetAnchoredEntitiesEnumerator(gridId, grid, tile);
+        var anchoredEnumerator = _map.GetAnchoredEntitiesEnumerator(gridId, grid, new Vector2i(tile.X, tile.Y));
 
         while (anchoredEnumerator.MoveNext(out var uid))
         {
+            if (_transformSystem.GetZLevel((uid.Value, Transform(uid.Value), CompOrNull<ZLevelPositionComponent>(uid.Value))) != tile.Z)
+                continue;
+
             if (!_airtightQuery.TryGetComponent(uid, out var airtight) || !airtight.AirBlocked)
                 continue;
 
@@ -202,7 +212,9 @@ public sealed partial class ExplosionSystem
         if (!TryComp<MapGridComponent>(transform.GridUid, out var grid))
             return;
 
-        UpdateAirtightMap(transform.GridUid.Value, grid, _map.CoordinatesToTile(transform.GridUid.Value, grid, transform.Coordinates));
+        var xy = _map.CoordinatesToTile(transform.GridUid.Value, grid, transform.Coordinates);
+        var z = _transformSystem.GetZLevel((uid, transform, CompOrNull<ZLevelPositionComponent>(uid)));
+        UpdateAirtightMap(transform.GridUid.Value, grid, new ZLevelTileIndices(xy.X, xy.Y, z));
     }
 
     /// <summary>
