@@ -24,4 +24,10 @@ public sealed partial class ZLevelTraversalComponent : Component
     /// </summary>
     [DataField]
     public bool RequireDirectDestinationSupport = true;
+
+    /// <summary>
+    /// Time spent on the traversal before changing floors.
+    /// </summary>
+    [DataField]
+    public TimeSpan TraversalDelay = TimeSpan.FromSeconds(2);
 }

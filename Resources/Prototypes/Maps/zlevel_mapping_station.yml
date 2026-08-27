@@ -1,0 +1,14 @@
+- type: gameMap
+  id: ZLevelMappingStation
+  mapName: Z-Level Mapping Station
+  mapPath: /Maps/Test/ZLevel/zlevel-mapping-station.yml
+  minPlayers: 0
+  stations:
+    ZLevelMappingStation:
+      stationProto: TestStation
+      components:
+        - type: StationNameSetup
+          mapNameTemplate: "Z-Level Mapping Station"
+        - type: StationJobs
+          availableJobs:
+            Passenger: [ -1, -1 ]

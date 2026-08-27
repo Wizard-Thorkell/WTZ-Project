@@ -22,6 +22,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
 
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelMapSystem _zLevelMap = default!;
 
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<TransformComponent> _transformQuery;
@@ -74,6 +75,11 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         var lower = new ZLevelTileIndices(tile.X, tile.Y, lowerZ);
         var upper = new ZLevelTileIndices(tile.X, tile.Y, lowerZ + 1);
         var defaultOpen = !_map.IsZLevelVerticalPassageBlocked(gridUid, grid, tile, lowerZ);
+        if (_zLevelMap.TryGetConfig(gridUid, out var mapConfig) &&
+            mapConfig.Comp.DefaultBoundaryMode == ZLevelDefaultBoundaryMode.ExplicitOnly)
+        {
+            defaultOpen = true;
+        }
         var query = new ZLevelBoundaryQueryEvent((gridUid, grid), tile, lowerZ);
 
         var anchored = _map.GetAnchoredEntitiesEnumerator(gridUid, grid, tile);

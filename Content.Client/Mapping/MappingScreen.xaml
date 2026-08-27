@@ -50,7 +50,35 @@
             <BoxContainer Name="ZLevelContainer" Access="Public" Orientation="Horizontal">
                 <Label Text="Z" VerticalAlignment="Center" Margin="0 0 6 0" />
                 <SpinBox Name="ZLevelSpinBox" Access="Public" HorizontalExpand="True" />
+                <Label Name="ZLevelStatusLabel" Access="Public" Text="2D" VerticalAlignment="Center"
+                       Margin="8 0" />
+                <TextureButton Name="ZLevelInitializeButton" Access="Public" SetSize="32 32"
+                               TexturePath="/Textures/Interface/VerbIcons/plus.svg.192dpi.png"
+                               ToolTip="{Loc 'mapping-z-initialize-tooltip'}" />
             </BoxContainer>
+            <BoxContainer Name="ZLevelToolsContainer" Access="Public" Orientation="Horizontal">
+                <Label Text="{Loc 'mapping-z-copy-source'}" VerticalAlignment="Center" Margin="0 0 6 0" />
+                <SpinBox Name="ZLevelCopySourceSpinBox" Access="Public" HorizontalExpand="True" />
+                <TextureButton Name="ZLevelCopyButton" Access="Public" SetSize="32 32" Margin="4 0"
+                               TexturePath="/Textures/Interface/VerbIcons/group.svg.192dpi.png"
+                               ToolTip="{Loc 'mapping-z-copy-tooltip'}" />
+                <TextureButton Name="ZLevelCreateButton" Access="Public" SetSize="32 32" Margin="4 0"
+                               TexturePath="/Textures/Interface/VerbIcons/plus.svg.192dpi.png"
+                               ToolTip="{Loc 'mapping-z-create-tooltip'}" />
+                <TextureButton Name="ZLevelDeleteButton" Access="Public" SetSize="32 32" Margin="4 0"
+                               TexturePath="/Textures/Interface/VerbIcons/delete.svg.192dpi.png"
+                               ToolTip="{Loc 'mapping-z-delete-tooltip'}" />
+            </BoxContainer>
+            <BoxContainer Name="ZLevelBoundaryContainer" Access="Public" Orientation="Horizontal">
+                <Label Text="{Loc 'mapping-z-boundary'}" VerticalAlignment="Center" Margin="0 0 6 0" />
+                <OptionButton Name="ZLevelBoundaryMode" Access="Public" HorizontalExpand="True" />
+            </BoxContainer>
+            <BoxContainer Name="ZLevelBoundaryBrushContainer" Access="Public" Orientation="Horizontal">
+                <Label Text="{Loc 'mapping-z-boundary-brush'}" VerticalAlignment="Center" Margin="0 0 6 0" />
+                <OptionButton Name="ZLevelBoundaryBrush" Access="Public" HorizontalExpand="True" />
+            </BoxContainer>
+            <CheckBox Name="ZLevelAdjacentPreview" Access="Public"
+                      Text="{Loc 'mapping-z-adjacent-preview'}" Pressed="True" />
             <BoxContainer Orientation="Horizontal">
                 <Button Name="EraseEntityButton" Access="Public" HorizontalExpand="True"
                         SetHeight="48"

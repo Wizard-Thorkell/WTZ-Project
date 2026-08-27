@@ -2,6 +2,8 @@ using Content.Client.Actions;
 using Content.Shared.Actions;
 using Content.Shared.Mapping;
 using Content.Shared.Maps;
+using Content.Shared.Popups;
+using Content.Shared.ZLevel;
 using Robust.Client.Placement;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
@@ -15,6 +17,7 @@ public sealed partial class MappingSystem : EntitySystem
     [Dependency] private readonly ITileDefinitionManager _tileMan = default!;
     [Dependency] private readonly MetaDataSystem _metaData = default!;
     [Dependency] private readonly SharedActionsSystem _actions = default!;
+    [Dependency] private readonly SharedPopupSystem _popup = default!;
 
     public static readonly EntProtoId SpawnAction = "BaseMappingSpawnAction";
     public static readonly EntProtoId EraserAction = "ActionMappingEraser";
@@ -25,6 +28,12 @@ public sealed partial class MappingSystem : EntitySystem
 
         SubscribeLocalEvent<FillActionSlotEvent>(OnFillActionSlot);
         SubscribeLocalEvent<StartPlacementActionEvent>(OnStartPlacementAction);
+        SubscribeNetworkEvent<ZLevelMappingResultEvent>(OnZLevelMappingResult);
+    }
+
+    private void OnZLevelMappingResult(ZLevelMappingResultEvent message)
+    {
+        _popup.PopupCursor(message.Message, message.Error ? PopupType.LargeCaution : PopupType.Small);
     }
 
     /// <summary>

@@ -30,6 +30,7 @@ public sealed class SharedZLevelSystem : VirtualController
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
+    [Dependency] private readonly SharedZLevelGravitySystem _zLevelGravity = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
 
@@ -543,8 +544,17 @@ public sealed class SharedZLevelSystem : VirtualController
             return;
         }
 
-        var xy = _map.TileIndicesFor(transform.GridUid.Value, grid, transform.Coordinates);
-        var weightless = _gravity.IsWeightless(uid);
+        var gridUid = transform.GridUid.Value;
+        var xy = _map.TileIndicesFor(gridUid, grid, transform.Coordinates);
+        var managedGravity = _zLevelGravity.IsManagedGrid(gridUid);
+        var gravityTarget = 0;
+        var hasGravityTarget = managedGravity && _zLevelGravity.TryGetGravityTarget(
+            gridUid,
+            grid,
+            xy,
+            dzPosition.ZLevel + dzPosition.LocalZOffset,
+            out gravityTarget);
+        var weightless = managedGravity ? !hasGravityTarget : _gravity.IsWeightless(uid);
         var activelyThrown = _thrownQuery.TryComp(uid, out var thrown) &&
             !thrown.Landed &&
             thrown.LandTime > _timing.CurTime;
@@ -559,21 +569,42 @@ public sealed class SharedZLevelSystem : VirtualController
 
         var oldZLevel = dzPosition.ZLevel;
 
-        var currentlySupported = IsStandingOnCurrentLayer(transform.GridUid.Value, grid, xy, dzPosition);
+        var previousWorldHeight = dzPosition.ZLevel + dzPosition.LocalZOffset;
+        var gravityDirection = managedGravity
+            ? GetGravityDirection(previousWorldHeight, hasGravityTarget, gravityTarget)
+            : weightless ? 0 : -1;
+        var currentlySupported = gravityDirection > 0
+            ? IsStandingAgainstUpperBoundary(gridUid, grid, xy, dzPosition)
+            : IsStandingOnCurrentLayer(gridUid, grid, xy, dzPosition);
 
-        if (!weightless && !currentlySupported)
-            dzKinematics.VerticalVelocity = MathF.Max(-dzKinematics.TerminalVelocity, dzKinematics.VerticalVelocity - dzKinematics.Gravity * frameTime);
+        if (gravityDirection == 0 && hasGravityTarget)
+        {
+            dzKinematics.VerticalVelocity = 0f;
+        }
+        else if (!weightless && !currentlySupported)
+        {
+            dzKinematics.VerticalVelocity = Math.Clamp(
+                dzKinematics.VerticalVelocity + gravityDirection * dzKinematics.Gravity * frameTime,
+                -dzKinematics.TerminalVelocity,
+                dzKinematics.TerminalVelocity);
+        }
+        else if (currentlySupported)
+        {
+            dzKinematics.VerticalVelocity = 0f;
+        }
 
         dzPosition.LocalZOffset += dzKinematics.VerticalVelocity * frameTime;
 
         var traversing = true;
+        var blockedDirection = 0;
         while (dzPosition.LocalZOffset < 0f)
         {
-            if (!_boundaries.CanBodyPass(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1))
+            if (!_boundaries.CanBodyPass(gridUid, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1))
             {
                 dzPosition.LocalZOffset = 0f;
                 dzKinematics.VerticalVelocity = 0f;
                 traversing = false;
+                blockedDirection = -1;
                 break;
             }
 
@@ -583,11 +614,12 @@ public sealed class SharedZLevelSystem : VirtualController
 
         while (traversing && dzPosition.LocalZOffset >= 1f)
         {
-            if (!_boundaries.CanBodyPass(transform.GridUid.Value, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel + 1))
+            if (!_boundaries.CanBodyPass(gridUid, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel + 1))
             {
                 dzPosition.LocalZOffset = MathF.BitDecrement(1f);
                 dzKinematics.VerticalVelocity = 0f;
                 traversing = false;
+                blockedDirection = 1;
                 break;
             }
 
@@ -597,8 +629,22 @@ public sealed class SharedZLevelSystem : VirtualController
 
         NormalizeVerticalPosition(dzPosition);
         var currentWorldHeight = dzPosition.ZLevel + dzPosition.LocalZOffset;
+        if (hasGravityTarget && traversing && CrossedTarget(previousWorldHeight, currentWorldHeight, gravityTarget))
+        {
+            dzPosition.ZLevel = gravityTarget;
+            dzPosition.LocalZOffset = 0f;
+            dzKinematics.VerticalVelocity = 0f;
+            currentWorldHeight = gravityTarget;
+            gravityDirection = 0;
+        }
 
-        if (TryGetSupportTile(uid, transform, dzPosition, dzKinematics, out var supportTile) &&
+        if (gravityDirection > 0 &&
+            (blockedDirection > 0 || IsStandingAgainstUpperBoundary(gridUid, grid, xy, dzPosition)))
+        {
+            SetGrounded(uid, physics, dzKinematics, true);
+        }
+        else if (gravityDirection <= 0 &&
+            TryGetSupportTile(uid, transform, dzPosition, dzKinematics, out var supportTile) &&
             currentWorldHeight <= supportTile.GridIndices.Z + 0.001f)
         {
             dzPosition.ZLevel = supportTile.GridIndices.Z;
@@ -612,7 +658,7 @@ public sealed class SharedZLevelSystem : VirtualController
         }
 
         if (dzKinematics.Grounded ||
-            weightless && MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f && dzPosition.LocalZOffset < 0.001f)
+            MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f && (weightless || gravityDirection == 0))
         {
             _activeBodies.Remove(uid);
         }
@@ -744,6 +790,30 @@ public sealed class SharedZLevelSystem : VirtualController
 
         return !_map.IsZLevelTileEmpty(gridUid, grid, new ZLevelTileIndices(xy.X, xy.Y, dzPosition.ZLevel)) &&
                !_boundaries.CanBodyPass(gridUid, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel - 1);
+    }
+
+    private bool IsStandingAgainstUpperBoundary(
+        EntityUid gridUid,
+        MapGridComponent grid,
+        Vector2i xy,
+        ZLevelPositionComponent dzPosition)
+    {
+        return dzPosition.LocalZOffset >= MathF.BitDecrement(1f) - 0.001f &&
+               !_boundaries.CanBodyPass(gridUid, grid, xy, dzPosition.ZLevel, dzPosition.ZLevel + 1);
+    }
+
+    private static int GetGravityDirection(float worldHeight, bool hasTarget, int targetLevel)
+    {
+        if (!hasTarget || MathF.Abs(worldHeight - targetLevel) < 0.001f)
+            return 0;
+
+        return worldHeight < targetLevel ? 1 : -1;
+    }
+
+    private static bool CrossedTarget(float previousHeight, float currentHeight, int targetLevel)
+    {
+        return previousHeight < targetLevel && currentHeight >= targetLevel ||
+               previousHeight > targetLevel && currentHeight <= targetLevel;
     }
 
     private bool TryGetSupportTile(

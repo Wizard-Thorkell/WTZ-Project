@@ -21,6 +21,8 @@ public sealed class ZLevelOverlaySystem : EntitySystem
 
     private ZLevelDebugOverlay _overlay = default!;
 
+    public bool MappingPreviewEnabled { get; private set; }
+
     public override void Initialize()
     {
         _overlay = new ZLevelDebugOverlay();
@@ -67,12 +69,31 @@ public sealed class ZLevelOverlaySystem : EntitySystem
 
     private void RemoveOverlay()
     {
+        if (MappingPreviewEnabled)
+            return;
+
         _overlayManager.RemoveOverlay(_overlay);
+    }
+
+    public void SetMappingPreview(bool enabled)
+    {
+        MappingPreviewEnabled = enabled;
+        _overlay.MappingPreviewEnabled = enabled;
+
+        if (enabled)
+        {
+            AddOverlay();
+            return;
+        }
+
+        if (_playerManager.LocalEntity is not { } player || !HasComp<ZLevelPositionComponent>(player))
+            RemoveOverlay();
     }
 
     public override void Shutdown()
     {
         base.Shutdown();
+        MappingPreviewEnabled = false;
         _overlayManager.RemoveOverlay(_overlay);
     }
 }

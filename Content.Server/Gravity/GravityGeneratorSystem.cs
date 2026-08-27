@@ -1,6 +1,7 @@
 using Content.Server.Power.Components;
 using Content.Server.Power.EntitySystems;
 using Content.Shared.Gravity;
+using Content.Shared.ZLevel;
 
 namespace Content.Server.Gravity;
 
@@ -39,6 +40,7 @@ public sealed class GravityGeneratorSystem : SharedGravityGeneratorSystem
         Dirty(ent, ent.Comp);
 
         var xform = Transform(ent);
+        RaiseSourceChanged(ent, null);
 
         if (TryComp(xform.ParentUid, out GravityComponent? gravity))
         {
@@ -52,6 +54,7 @@ public sealed class GravityGeneratorSystem : SharedGravityGeneratorSystem
         Dirty(ent, ent.Comp);
 
         var xform = Transform(ent);
+        RaiseSourceChanged(ent, null);
 
         if (TryComp(xform.ParentUid, out GravityComponent? gravity))
         {
@@ -65,5 +68,17 @@ public sealed class GravityGeneratorSystem : SharedGravityGeneratorSystem
         {
             _gravitySystem.RefreshGravity(args.OldParent.Value, gravity);
         }
+
+        if (component.GravityActive && TryComp(args.Transform.ParentUid, out gravity))
+            _gravitySystem.EnableGravity(args.Transform.ParentUid, gravity);
+
+        var ev = new ZLevelGravitySourceChangedEvent(args.OldParent);
+        RaiseLocalEvent(uid, ref ev);
+    }
+
+    private void RaiseSourceChanged(Entity<GravityGeneratorComponent> ent, EntityUid? oldGridUid)
+    {
+        var ev = new ZLevelGravitySourceChangedEvent(oldGridUid);
+        RaiseLocalEvent(ent.Owner, ref ev);
     }
 }

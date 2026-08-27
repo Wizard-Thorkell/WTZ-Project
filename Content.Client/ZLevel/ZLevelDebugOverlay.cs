@@ -41,6 +41,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private List<Entity<MapGridComponent>> _grids = new();
 
     public bool ShowDebugInfo { get; set; }
+    public bool MappingPreviewEnabled { get; set; }
 
     public override OverlaySpace Space => OverlaySpace.WorldSpaceBelowEntities | OverlaySpace.ScreenSpace;
     public override bool RequestScreenTexture => false;
@@ -116,8 +117,11 @@ public sealed class ZLevelDebugOverlay : Overlay
         handle.SetTransform(matrix);
 
         var playerLocalZ = _transformSystem.WorldToLocalZLevel(grid.Owner, playerWorldZ);
-        var lowestZ = playerLocalZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
-        for (var z = lowestZ; z <= playerLocalZ; z++)
+        var lowestZ = MappingPreviewEnabled
+            ? playerLocalZ - 1
+            : playerLocalZ - SharedZLevelVisibilitySystem.MaxVisibleLevelDistance;
+        var highestZ = MappingPreviewEnabled ? playerLocalZ + 1 : playerLocalZ;
+        for (var z = lowestZ; z <= highestZ; z++)
         {
             if (z == 0)
                 continue;
@@ -135,7 +139,8 @@ public sealed class ZLevelDebugOverlay : Overlay
                     if (tile.Tile.IsEmpty)
                         continue;
 
-                    if (z < playerLocalZ &&
+                    if (!MappingPreviewEnabled &&
+                        z < playerLocalZ &&
                         !_visibilitySystem.IsTileVisibleFrom(
                             grid.Owner,
                             grid.Comp,
@@ -152,7 +157,10 @@ public sealed class ZLevelDebugOverlay : Overlay
                         continue;
 
                     var tileWorldZ = _transformSystem.LocalToWorldZLevel(grid.Owner, z);
-                    DrawTileTexture(handle, localTile, tile.Tile, GetTileColor(playerWorldZ, tileWorldZ));
+                    DrawTileTexture(handle,
+                        localTile,
+                        tile.Tile,
+                        GetTileColor(playerWorldZ, tileWorldZ, MappingPreviewEnabled));
                 }
             }
         }
@@ -182,8 +190,18 @@ public sealed class ZLevelDebugOverlay : Overlay
         handle.DrawPrimitives(DrawPrimitiveTopology.TriangleList, _tileDefinitionManager.TileTextureAtlas, vertices, color);
     }
 
-    private static Color GetTileColor(int playerZ, int z)
+    private static Color GetTileColor(int playerZ, int z, bool mappingPreview)
     {
+        if (mappingPreview)
+        {
+            return z switch
+            {
+                _ when z == playerZ => Color.White.WithAlpha(0.78f),
+                _ when z < playerZ => new Color(0.68f, 0.82f, 1f, 0.38f),
+                _ => new Color(1f, 0.78f, 0.58f, 0.26f),
+            };
+        }
+
         if (z == playerZ)
             return Color.White;
 

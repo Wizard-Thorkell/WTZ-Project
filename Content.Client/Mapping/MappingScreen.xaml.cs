@@ -89,6 +89,15 @@ public sealed partial class MappingScreen : InGameScreen
             UpdateDecal();
         };
         ZLevelSpinBox.InitDefaultButtons();
+        ZLevelCopySourceSpinBox.InitDefaultButtons();
+        ZLevelBoundaryMode.AddItem(Loc.GetString("mapping-z-boundary-upper-tile"), 0);
+        ZLevelBoundaryMode.AddItem(Loc.GetString("mapping-z-boundary-explicit"), 1);
+        ZLevelBoundaryMode.SelectId(0);
+        ZLevelBoundaryBrush.AddItem(Loc.GetString("mapping-z-brush-opening-below"), 0);
+        ZLevelBoundaryBrush.AddItem(Loc.GetString("mapping-z-brush-shaft-above"), 1);
+        ZLevelBoundaryBrush.AddItem(Loc.GetString("mapping-z-brush-grate-below"), 2);
+        ZLevelBoundaryBrush.AddItem(Loc.GetString("mapping-z-brush-seal-above"), 3);
+        ZLevelBoundaryBrush.SelectId(0);
 
         for (var i = 0; i < EntitySpawnWindow.InitOpts.Length; i++)
         {

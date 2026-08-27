@@ -20,6 +20,7 @@ public sealed class ZLevelSpriteVisibilitySystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
     [Dependency] private readonly ZLevelViewContextSystem _viewContext = default!;
+    [Dependency] private readonly ZLevelOverlaySystem _overlay = default!;
 
     private EntityQuery<TransformComponent> _transformQuery;
 
@@ -53,6 +54,17 @@ public sealed class ZLevelSpriteVisibilitySystem : EntitySystem
 
     public float GetRelativeAlpha(MapId viewerMap, int viewerZ, int entityZ, EntityUid entity)
     {
+        if (_overlay.MappingPreviewEnabled)
+        {
+            return entityZ - viewerZ switch
+            {
+                0 => 1f,
+                -1 => 0.32f,
+                1 => 0.22f,
+                _ => 0f,
+            };
+        }
+
         if (entityZ > viewerZ)
             return 0f;
 

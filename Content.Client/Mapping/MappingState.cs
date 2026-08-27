@@ -7,10 +7,13 @@ using Content.Client.Gameplay;
 using Content.Client.UserInterface.Controls;
 using Content.Client.UserInterface.Systems.Gameplay;
 using Content.Client.Verbs;
+using Content.Client.ZLevel;
 using Content.Shared.Administration;
 using Content.Shared.Decals;
 using Content.Shared.Input;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.Input;
@@ -121,8 +124,17 @@ public sealed class MappingState : GameplayStateBase
         Screen.EraseEntityButton.OnToggled += OnEraseEntityPressed;
         Screen.EraseDecalButton.OnToggled += OnEraseDecalPressed;
         Screen.ZLevelSpinBox.ValueChanged += OnZLevelChanged;
+        Screen.ZLevelInitializeButton.OnPressed += OnZLevelInitializePressed;
+        Screen.ZLevelCreateButton.OnPressed += OnZLevelCreatePressed;
+        Screen.ZLevelCopyButton.OnPressed += OnZLevelCopyPressed;
+        Screen.ZLevelDeleteButton.OnPressed += OnZLevelDeletePressed;
+        Screen.ZLevelBoundaryMode.OnItemSelected += OnZLevelBoundarySelected;
+        Screen.ZLevelBoundaryBrush.OnItemSelected += OnZLevelBoundaryBrushSelected;
+        Screen.ZLevelAdjacentPreview.OnToggled += OnZLevelAdjacentPreviewToggled;
         _placement.PlacementChanged += OnPlacementChanged;
+        _entityManager.System<ZLevelOverlaySystem>().SetMappingPreview(Screen.ZLevelAdjacentPreview.Pressed);
         SetActiveZLevel(GetPlayerZLevel());
+        Screen.ZLevelCopySourceSpinBox.Value = _activeZLevel - 1;
 
         CommandBinds.Builder
             .Bind(ContentKeyFunctions.MappingUnselect, new PointerInputCmdHandler(HandleMappingUnselect, outsidePrediction: true))
@@ -182,8 +194,16 @@ public sealed class MappingState : GameplayStateBase
         Screen.EraseEntityButton.OnToggled -= OnEraseEntityPressed;
         Screen.EraseDecalButton.OnToggled -= OnEraseDecalPressed;
         Screen.ZLevelSpinBox.ValueChanged -= OnZLevelChanged;
+        Screen.ZLevelInitializeButton.OnPressed -= OnZLevelInitializePressed;
+        Screen.ZLevelCreateButton.OnPressed -= OnZLevelCreatePressed;
+        Screen.ZLevelCopyButton.OnPressed -= OnZLevelCopyPressed;
+        Screen.ZLevelDeleteButton.OnPressed -= OnZLevelDeletePressed;
+        Screen.ZLevelBoundaryMode.OnItemSelected -= OnZLevelBoundarySelected;
+        Screen.ZLevelBoundaryBrush.OnItemSelected -= OnZLevelBoundaryBrushSelected;
+        Screen.ZLevelAdjacentPreview.OnToggled -= OnZLevelAdjacentPreviewToggled;
         _placement.PlacementChanged -= OnPlacementChanged;
         _placement.ActiveZLevelOverride = null;
+        _entityManager.System<ZLevelOverlaySystem>().SetMappingPreview(false);
         _prototypeManager.PrototypesReloaded -= OnPrototypesReloaded;
 
         UserInterfaceManager.ClearWindows();
@@ -422,6 +442,136 @@ public sealed class MappingState : GameplayStateBase
 
         if (Screen.ZLevelSpinBox.Value != zLevel)
             Screen.ZLevelSpinBox.Value = zLevel;
+
+        if (TryGetMappingMap(out var mapUid))
+        {
+            SendZLevelMappingRequest(new ZLevelMappingRequestEvent
+            {
+                Map = _entityManager.GetNetEntity(mapUid),
+                Grid = NetEntity.Invalid,
+                Operation = ZLevelMappingOperation.SetActiveLevel,
+                TargetLevel = zLevel,
+            });
+        }
+    }
+
+    private void OnZLevelInitializePressed(ButtonEventArgs args)
+    {
+        if (!TryGetMappingMap(out var mapUid))
+            return;
+
+        SendZLevelMappingRequest(new ZLevelMappingRequestEvent
+        {
+            Map = _entityManager.GetNetEntity(mapUid),
+            Grid = NetEntity.Invalid,
+            Operation = ZLevelMappingOperation.ConfigureMap,
+            MinimumLevel = _activeZLevel,
+            MaximumLevel = _activeZLevel,
+            DefaultLevel = _activeZLevel,
+            BoundaryMode = ZLevelDefaultBoundaryMode.TileAboveCloses,
+        });
+    }
+
+    private void OnZLevelCreatePressed(ButtonEventArgs args)
+    {
+        SendLayerOperation(ZLevelMappingOperation.CreateLevel, _activeZLevel);
+    }
+
+    private void OnZLevelCopyPressed(ButtonEventArgs args)
+    {
+        SendLayerOperation(ZLevelMappingOperation.CopyLevel, _activeZLevel, Screen.ZLevelCopySourceSpinBox.Value);
+    }
+
+    private void OnZLevelDeletePressed(ButtonEventArgs args)
+    {
+        SendLayerOperation(ZLevelMappingOperation.DeleteLevel, _activeZLevel);
+    }
+
+    private void OnZLevelBoundarySelected(ItemSelectedEventArgs args)
+    {
+        Screen.ZLevelBoundaryMode.SelectId(args.Id);
+        if (!TryGetMappingMap(out var mapUid) ||
+            !_entityManager.TryGetComponent<ZLevelMapComponent>(mapUid, out var config))
+        {
+            return;
+        }
+
+        SendZLevelMappingRequest(new ZLevelMappingRequestEvent
+        {
+            Map = _entityManager.GetNetEntity(mapUid),
+            Grid = NetEntity.Invalid,
+            Operation = ZLevelMappingOperation.ConfigureMap,
+            MinimumLevel = config.MinimumLevel,
+            MaximumLevel = config.MaximumLevel,
+            DefaultLevel = config.DefaultLevel,
+            BoundaryMode = (ZLevelDefaultBoundaryMode) args.Id,
+        });
+    }
+
+    private void OnZLevelBoundaryBrushSelected(ItemSelectedEventArgs args)
+    {
+        Screen.ZLevelBoundaryBrush.SelectId(args.Id);
+        var prototype = args.Id switch
+        {
+            0 => "ZLevelFloorOpeningMarker",
+            1 => "ZLevelShaftMarker",
+            2 => "ZLevelGrateBoundaryMarker",
+            3 => "ZLevelSealedBoundaryMarker",
+            _ => null,
+        };
+
+        if (prototype == null || !_prototypeManager.HasIndex<EntityPrototype>(prototype))
+            return;
+
+        Deselect();
+        _decal.SetActive(false);
+        _placement.BeginPlacing(new PlacementInformation
+        {
+            PlacementOption = "AlignTileAny",
+            EntityType = prototype,
+            IsTile = false,
+        });
+    }
+
+    private void SendLayerOperation(ZLevelMappingOperation operation, int targetLevel, int sourceLevel = 0)
+    {
+        if (!TryGetMappingMap(out var mapUid) || !TryGetMappingGrid(out var gridUid))
+            return;
+
+        SendZLevelMappingRequest(new ZLevelMappingRequestEvent
+        {
+            Map = _entityManager.GetNetEntity(mapUid),
+            Grid = _entityManager.GetNetEntity(gridUid),
+            Operation = operation,
+            SourceLevel = sourceLevel,
+            TargetLevel = targetLevel,
+        });
+    }
+
+    private void SendZLevelMappingRequest(ZLevelMappingRequestEvent request)
+    {
+        _entityNetwork.SendSystemNetworkMessage(request);
+    }
+
+    private bool TryGetMappingMap(out EntityUid mapUid)
+    {
+        mapUid = default;
+        if (Viewport.Viewport.Eye is not { } eye)
+            return false;
+
+        var mapSystem = _entityManager.System<SharedMapSystem>();
+        if (!mapSystem.TryGetMap(eye.Position.MapId, out var map))
+            return false;
+
+        mapUid = map.Value;
+        return true;
+    }
+
+    private bool TryGetMappingGrid(out EntityUid gridUid)
+    {
+        gridUid = default;
+        return Viewport.Viewport.Eye is { } eye &&
+               _mapMan.TryFindGridAt(eye.Position, out gridUid, out _);
     }
 
     private int GetPlayerZLevel()
@@ -433,6 +583,11 @@ public sealed class MappingState : GameplayStateBase
         }
 
         return _transform.GetZLevel((player, playerXform, _entityManager.GetComponentOrNull<ZLevelPositionComponent>(player)));
+    }
+
+    private void OnZLevelAdjacentPreviewToggled(ButtonToggledEventArgs args)
+    {
+        _entityManager.System<ZLevelOverlaySystem>().SetMappingPreview(args.Pressed);
     }
 
     protected override void OnKeyBindStateChanged(ViewportBoundKeyEventArgs args)
@@ -976,6 +1131,8 @@ public sealed class MappingState : GameplayStateBase
 
     public override void FrameUpdate(FrameEventArgs e)
     {
+        UpdateZLevelControls();
+
         if (_updatePlacement)
         {
             _updatePlacement = false;
@@ -1000,6 +1157,26 @@ public sealed class MappingState : GameplayStateBase
             scroll.SetScrollValue(scroll.GetScrollValue() + new Vector2(0, y));
             _scrollTo = null;
         }
+    }
+
+    private void UpdateZLevelControls()
+    {
+        var hasMap = TryGetMappingMap(out var mapUid);
+        ZLevelMapComponent? config = null;
+        var hasConfig = hasMap && _entityManager.TryGetComponent(mapUid, out config);
+        Screen.ZLevelInitializeButton.Visible = hasMap && !hasConfig;
+        Screen.ZLevelToolsContainer.Visible = hasConfig;
+        Screen.ZLevelBoundaryContainer.Visible = hasConfig;
+        Screen.ZLevelBoundaryBrushContainer.Visible = hasConfig;
+
+        if (!hasConfig || config == null)
+        {
+            Screen.ZLevelStatusLabel.Text = "2D";
+            return;
+        }
+
+        Screen.ZLevelStatusLabel.Text = $"v{config.FormatVersion} [{config.MinimumLevel}..{config.MaximumLevel}]";
+        Screen.ZLevelBoundaryMode.SelectId((int) config.DefaultBoundaryMode);
     }
 
 

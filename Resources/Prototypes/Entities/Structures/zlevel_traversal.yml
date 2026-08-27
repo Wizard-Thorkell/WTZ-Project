@@ -11,6 +11,7 @@
     requiredTriggeredSpeed: 0
     intersectRatio: 0.15
     ignoreWeightless: true
+    stepOn: true
   - type: Physics
     bodyType: Static
   - type: Fixtures
@@ -49,6 +50,7 @@
     requiredTriggeredSpeed: 0
     intersectRatio: 0.15
     ignoreWeightless: true
+    stepOn: true
   - type: Physics
     bodyType: Static
   - type: Fixtures
@@ -87,6 +89,7 @@
     requiredTriggeredSpeed: 0
     intersectRatio: 0.15
     ignoreWeightless: true
+    stepOn: true
   - type: Physics
     bodyType: Static
   - type: Fixtures
