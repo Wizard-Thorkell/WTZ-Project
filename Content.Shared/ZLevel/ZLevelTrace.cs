@@ -70,7 +70,8 @@ public readonly record struct ZLevelTraceRequest(
     ZLevelBoundaryChannels BoundaryChannels,
     int CollisionMask = 0,
     EntityUid? IgnoredEntity = null,
-    ZLevelTraceOptions Options = ZLevelTraceOptions.Default);
+    ZLevelTraceOptions Options = ZLevelTraceOptions.Default,
+    EntityUid? BoundaryFrameUid = null);
 
 public readonly record struct ZLevelTraceSegment(
     int Sequence,

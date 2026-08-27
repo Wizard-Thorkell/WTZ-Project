@@ -15,16 +15,24 @@ Every `ZLevelTracePoint` contains:
 - `LocalPosition`: XY in that frame, or map XY for a map-only point.
 - `LocalZ`: Z relative to that frame, or world Z for a map-only point.
 
-Use `TryCreateGridPoint` for a grid-relative endpoint. It captures the current
-grid transform and `ZLevelFrameComponent` origin. Use
-`ZLevelTracePoint.FromMap` when no grid frame owns the endpoint. A request never
-infers world Z from XY overlap.
+Use `TryCreateGridPoint` for a grid-relative endpoint. Its local XY and local Z
+are authoritative: `Trace` resolves them through the grid's current transform
+and `ZLevelFrameComponent` origin. The world coordinates stored in the point are
+the creation-time snapshot for inspection, not stale execution geometry. Use
+`ZLevelTracePoint.FromMap` when no grid frame owns the endpoint; map points keep
+their world coordinates authoritative.
 
 Endpoints on different maps return `DifferentMaps`. Same-world-Z endpoints use
-the reference 2D path even when their frames differ. A vertical request
-currently requires both endpoints to share one grid frame and to agree with its
-local-to-world Z conversion. Other vertical frame combinations return
-`FrameResolutionRequired` for P1.3 normalization.
+the reference 2D path even when their frames differ. When both endpoints share a
+grid, that grid is their automatic structural frame. Otherwise a caller may set
+`ZLevelTraceRequest.BoundaryFrameUid` explicitly. Both endpoints are projected
+into that current frame before tile and boundary work begins.
+
+Vertical map-only, cross-grid, and overlapping-grid requests never choose a
+frame from XY overlap. Without a common or explicit structural frame they return
+`FrameResolutionRequired`. An explicit frame means that one grid alone owns the
+request's tiles and vertical boundaries; automatic multi-grid boundary
+composition is a separate future capability.
 
 ## Vertical Geometry
 
@@ -97,6 +105,11 @@ segment is rolled back while previously completed segments remain coherent.
 These flags do not select damage, penetration, stopping, or target preference.
 A consumer makes those decisions from the ordered result.
 
+`BoundaryFrameUid` is orthogonal to the output options. It selects the grid
+whose local tiles and boundaries govern this request. It does not select an
+entity broadphase: physics hits still come from the map and are filtered by
+effective world Z.
+
 Two replicated server CVars bound one query:
 
 - `zlevel.trace_max_vertical_crossings`, default 64, clamped to 1 through 1024.
@@ -108,9 +121,9 @@ boundary or emits a truncated tile sequence.
 
 ## Current Limits
 
-- Vertical map-only and cross-grid traces require P1.3 frame normalization.
-- Grid points are captured snapshots. Moving a frame after endpoint creation is
-  normalized in P1.3 rather than mixing stale world and local coordinates.
+- A request can evaluate boundaries from one common or explicit grid frame.
+  Automatic entry into and exit from several structural frames is not yet
+  modeled.
 - Immutable arrays, per-query lists, the engine ray, and the vertical point
   lookup allocate. P1.3 adds caller-owned buffers and measures the hot path
   before any production consumer is migrated.
@@ -125,7 +138,9 @@ Focused reference tests:
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --no-restore --filter "FullyQualifiedName~ZLevelTraceTest|FullyQualifiedName~ZLevelBudgetTest"
 ```
 
-The P1.2 matrix covers Z0 physics parity, world-Z filtering, translated and
-rotated frames, horizontal and perfect-diagonal tile order, upward and downward
+The cumulative P1.3a matrix covers Z0 physics parity, world-Z filtering,
+translated and rotated frames, movement after endpoint creation, explicit map
+and cross-grid projection, overlapping-grid non-inference, matching client and
+server output, horizontal and perfect-diagonal tile order, upward and downward
 multi-floor traces, perfectly vertical fixture hits, channel-specific openings,
 closed-boundary truncation, unresolved frames, and both trace budgets.

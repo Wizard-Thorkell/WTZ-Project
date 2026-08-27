@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/trace-vertical-crossings`.
-- Active package: `P1.3 Moving-frame normalization, determinism, and allocation hardening`.
+- Active branch: `zlevel/trace-frame-normalization`.
+- Active package: `P1.3b Allocation hardening, trace budgets, metrics, and benchmark`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -334,7 +334,8 @@ treated as Debug-run noise.
 | --- | --- | --- |
 | P1.1 | Trace request/result contract, channels, and 2D reference behavior | Complete |
 | P1.2 | Ordered vertical crossings and boundary-channel integration | Complete |
-| P1.3 | Moving-frame normalization, determinism, and allocation hardening | In progress |
+| P1.3a | Current-frame normalization and explicit structural ownership | Complete |
+| P1.3b | Reusable buffers, output budgets, metrics, and trace benchmark | In progress |
 
 ## Completed Package: P1.1 ZLevelTrace Contract And Reference Behavior
 
@@ -533,21 +534,112 @@ treated as Debug-run noise.
   behavior, add reusable buffers and bounded hit output, and instrument a
   dedicated deterministic trace workload before migrating gameplay consumers.
 
-## Active Package: P1.3 Moving-Frame Normalization, Determinism, And Allocation Hardening
+## Completed Package: P1.3a Current-Frame Normalization And Explicit Ownership
+
+### Scope
+
+- Re-resolve every grid-relative endpoint from its local XY and local Z against
+  the frame's current translation, rotation, map, and world-Z origin.
+- Keep map-only endpoints world-authoritative and project them only when a caller
+  explicitly supplies a structural frame.
+- Use a common endpoint grid automatically, but require `BoundaryFrameUid` for
+  vertical map-only, cross-grid, or overlapping-grid requests.
+- Verify that shared code produces the same ordered geometry on client and
+  server from replicated frame state.
+
+### Acceptance Criteria
+
+- Moving or changing the Z origin of a grid after point creation cannot mix
+  stale world geometry with current local tiles.
+- No grid is selected from 2D overlap; ambiguous vertical requests fail with
+  `FrameResolutionRequired` unless ownership is explicit.
+- One explicit frame can normalize map-only and cross-grid endpoints and owns all
+  tile visits and boundary crossings for that request.
+- Physics remains map-wide and filters entities by effective world Z rather than
+  being restricted to the selected structural frame.
+- Server and client agree on termination, positions, distances, tile order,
+  crossing order, and resolved channel state.
+
+### Evidence
+
+- `Content.Shared` and `Content.IntegrationTests` built with zero errors; reported
+  warnings are the existing analyzer, dependency, and upstream warning set.
+- Seven trace tests passed, including current-frame movement, explicit
+  cross-grid/map projection, overlap non-inference, and client/server parity.
+- The complete focused integration matrix passed 62/62 tests and the focused
+  structural unit matrix passed 2/2 tests.
+- The supported moving-grid collider test preserves grid parentage with authored
+  turf, follows the frame from world Z 5 to 7, and remains visible to the trace.
+- `git diff --check` passed with only checkout line-ending notices.
+
+### Decisions
+
+- Treat local coordinates as authoritative for grid points. Their stored world
+  coordinate is a creation-time snapshot; `Trace` refreshes it before deciding
+  whether the request is horizontal or vertical.
+- Treat world coordinates as authoritative for map points. Projection into a
+  grid occurs only through an explicit `BoundaryFrameUid`.
+- Let one common or explicit frame own structural output. Do not infer or merge
+  several overlapping structures until multi-frame traversal has an explicit
+  result contract.
+- Apply the structural frame to tiles and boundaries only. Entity raycasts still
+  query the whole map and use effective world Z as the isolation invariant.
+- Add the optional request field at the end of the positional contract so
+  existing callers retain source compatibility.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only endpoint normalization, explicit frame
+      selection, its tests, and contract documentation.
+- [x] Invariant review: moving XY transforms, frame-origin changes, map points,
+      cross-grid and overlapping endpoints, Z 0, and client/server parity are
+      covered without changing server authority.
+- [x] Automated verification: build, 7/7 trace references, 62/62 focused
+      integration tests, and 2/2 focused unit tests passed.
+- [x] Performance evidence: normalization adds a fixed number of transform
+      operations and no new result collection. Allocation measurement and the
+      hot caller-owned path are the declared scope of P1.3b.
+- [x] Documentation: coordinate authority, explicit ownership, multi-frame
+      limits, and verification are recorded in `Docs/ZLevelTrace.md`.
+- [x] Dependency check: existing Robust transform APIs are sufficient; no WTZ
+      Engine revision change is required.
+- [x] Git check: `git diff --check` passes apart from line-ending notices and no
+      generated artifacts are present.
+- [x] Mini review: findings, residual risks, and P1.3b are recorded below.
+- [x] Commit: save as `Normalize Z-level traces across moving frames` on
+      `zlevel/trace-frame-normalization`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: refreshing grid points before classifying the request also handles a
+  frame-origin change that turns a formerly same-level endpoint into another
+  world Z.
+- Finding: explicit structural ownership makes overlapping-grid behavior
+  deterministic without pretending that first-found map lookup is meaningful.
+- Finding: moving-grid physics remains coherent when the fixture has real grid
+  support; the earlier unsupported fixture was reparented rather than lost from
+  the broadphase.
+- Residual risk: one request cannot yet compose closed boundaries from several
+  structures along the same world line.
+- Residual risk: immutable output and physics candidate collections still
+  allocate, and entity hits remain independently unbounded.
+- Next package: add caller-owned buffers, a hit budget, trace counters and
+  timings, and a reproducible trace-specific allocation/performance workload.
+
+## Active Package: P1.3b Allocation Hardening, Trace Budgets, Metrics, And Benchmark
 
 ### Planned Scope
 
-- Define canonical frame ownership for map-only, same-grid, cross-grid, and
-  overlapping moving-grid endpoints without inferring world Z from XY overlap.
-- Detect or normalize endpoints whose owning frame moved after capture and keep
-  client/server results deterministic.
-- Add caller-owned reusable result buffers while preserving the immutable
-  convenience API for cold callers.
-- Bound entity-hit and aggregate output work with explicit fail-soft semantics.
-- Instrument query counts, terminations, output sizes, and elapsed time, then add
-  a repeatable same-level and multi-floor trace benchmark.
-- Cover map-only points, moving frames, overlapping grids, stale endpoints,
-  equal-distance ties, extreme coordinates, and allocation behavior in tests.
+- Add caller-owned reusable output and scratch buffers while preserving the
+  immutable convenience API for cold callers.
+- Bound entity-hit and aggregate output work with explicit segment rollback and
+  fail-soft semantics.
+- Instrument query counts, terminations, output sizes, and elapsed time without
+  allocating on the buffered tile-only path.
+- Add repeatable same-level, diagonal multi-floor, closed-boundary, and
+  budget-exhaustion trace workloads with machine-readable measurements.
+- Cover buffer reuse, equal-distance ties, extreme coordinates, budget clamps,
+  metrics reset, and allocation behavior in tests.
 
 ## Package History
 
@@ -558,3 +650,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P0.3 | `Add configurable Z-level performance budgets` | 4 budget, 3 baseline, 53 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.1 | `Define the shared Z-level trace contract` | 4 trace, 57 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.2 | `Implement ordered vertical Z-level traces` | 5 trace, 11 trace/budget, 60 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P1.3a | `Normalize Z-level traces across moving frames` | 7 trace, 62 integration, 2 unit, diff check | Complete |

@@ -86,36 +86,123 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
 
     public ZLevelTraceResult Trace(in ZLevelTraceRequest request)
     {
-        var origin = request.Origin.WorldCoordinates;
-        var destination = request.Destination.WorldCoordinates;
-        if (origin.MapId == MapId.Nullspace ||
-            destination.MapId == MapId.Nullspace ||
-            !IsFinite(origin.Position) ||
-            !IsFinite(destination.Position))
+        if (!TryNormalizePoint(request.Origin, out var normalizedOrigin) ||
+            !TryNormalizePoint(request.Destination, out var normalizedDestination))
         {
             return EmptyResult(ZLevelTraceTermination.InvalidCoordinates, request.Origin);
         }
 
-        if (origin.MapId != destination.MapId)
-            return EmptyResult(ZLevelTraceTermination.DifferentMaps, request.Origin);
-
-        if (origin.Z == destination.Z)
-            return TraceSameLevel(request);
-
-        if (request.Origin.GridUid is not { } gridUid ||
-            request.Destination.GridUid != gridUid ||
-            !_gridQuery.TryComp(gridUid, out var grid) ||
-            _transform.LocalToWorldZLevel(gridUid, request.Origin.LocalZ) != origin.Z ||
-            _transform.LocalToWorldZLevel(gridUid, request.Destination.LocalZ) != destination.Z)
+        var originWorld = normalizedOrigin.WorldCoordinates;
+        var destinationWorld = normalizedDestination.WorldCoordinates;
+        if (originWorld.MapId == MapId.Nullspace ||
+            destinationWorld.MapId == MapId.Nullspace ||
+            !IsFinite(originWorld.Position) ||
+            !IsFinite(destinationWorld.Position))
         {
-            return EmptyResult(ZLevelTraceTermination.FrameResolutionRequired, request.Origin);
+            return EmptyResult(ZLevelTraceTermination.InvalidCoordinates, request.Origin);
         }
 
-        var crossingCount = Math.Abs((long) destination.Z - origin.Z);
-        if (crossingCount > _maxVerticalCrossings)
-            return EmptyResult(ZLevelTraceTermination.IterationBudgetExceeded, request.Origin);
+        if (originWorld.MapId != destinationWorld.MapId)
+            return EmptyResult(ZLevelTraceTermination.DifferentMaps, normalizedOrigin);
 
-        return TraceVerticalSameFrame(request, gridUid, grid, (int) crossingCount);
+        var frameUid = request.BoundaryFrameUid;
+        if (frameUid == null &&
+            normalizedOrigin.GridUid is { } commonFrame &&
+            normalizedDestination.GridUid == commonFrame)
+        {
+            frameUid = commonFrame;
+        }
+
+        if (frameUid is { } selectedFrame)
+        {
+            if (!TryProjectPointToFrame(normalizedOrigin, selectedFrame, out normalizedOrigin) ||
+                !TryProjectPointToFrame(normalizedDestination, selectedFrame, out normalizedDestination))
+            {
+                return EmptyResult(ZLevelTraceTermination.FrameResolutionRequired, normalizedOrigin);
+            }
+        }
+
+        var normalizedRequest = request with
+        {
+            Origin = normalizedOrigin,
+            Destination = normalizedDestination,
+            BoundaryFrameUid = frameUid,
+        };
+        originWorld = normalizedOrigin.WorldCoordinates;
+        destinationWorld = normalizedDestination.WorldCoordinates;
+
+        if (originWorld.Z == destinationWorld.Z)
+            return TraceSameLevel(normalizedRequest);
+
+        if (frameUid is not { } gridUid ||
+            !_gridQuery.TryComp(gridUid, out var grid))
+        {
+            return EmptyResult(ZLevelTraceTermination.FrameResolutionRequired, normalizedOrigin);
+        }
+
+        var crossingCount = Math.Abs((long)destinationWorld.Z - originWorld.Z);
+        if (crossingCount > _maxVerticalCrossings)
+            return EmptyResult(ZLevelTraceTermination.IterationBudgetExceeded, normalizedOrigin);
+
+        return TraceVerticalSameFrame(normalizedRequest, gridUid, grid, (int)crossingCount);
+    }
+
+    private bool TryNormalizePoint(ZLevelTracePoint point, out ZLevelTracePoint normalized)
+    {
+        normalized = point;
+        if (point.GridUid is not { } gridUid)
+            return true;
+
+        if (!_gridQuery.HasComp(gridUid) ||
+            !TryComp<TransformComponent>(gridUid, out var gridTransform) ||
+            gridTransform.MapID == MapId.Nullspace ||
+            !IsFinite(point.LocalPosition))
+        {
+            return false;
+        }
+
+        var mapCoordinates = _transform.ToMapCoordinates(new EntityCoordinates(gridUid, point.LocalPosition));
+        normalized = CreateGridPoint(
+            gridUid,
+            point.LocalPosition,
+            point.LocalZ,
+            mapCoordinates.Position,
+            _transform.LocalToWorldZLevel(gridUid, point.LocalZ),
+            mapCoordinates.MapId);
+        return true;
+    }
+
+    private bool TryProjectPointToFrame(
+        ZLevelTracePoint point,
+        EntityUid frameUid,
+        out ZLevelTracePoint projected)
+    {
+        projected = default;
+        if (!_gridQuery.HasComp(frameUid) ||
+            !TryComp<TransformComponent>(frameUid, out var frameTransform) ||
+            frameTransform.MapID == MapId.Nullspace ||
+            frameTransform.MapID != point.WorldCoordinates.MapId)
+        {
+            return false;
+        }
+
+        if (point.GridUid == frameUid)
+        {
+            projected = point;
+            return true;
+        }
+
+        var local = _transform.ToCoordinates(
+            (frameUid, frameTransform),
+            new MapCoordinates(point.WorldCoordinates.Position, point.WorldCoordinates.MapId));
+        projected = CreateGridPoint(
+            frameUid,
+            local.Position,
+            _transform.WorldToLocalZLevel(frameUid, point.WorldCoordinates.Z),
+            point.WorldCoordinates.Position,
+            point.WorldCoordinates.Z,
+            point.WorldCoordinates.MapId);
+        return true;
     }
 
     private ZLevelTraceResult TraceSameLevel(in ZLevelTraceRequest request)

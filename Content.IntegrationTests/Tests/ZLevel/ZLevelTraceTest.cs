@@ -486,7 +486,98 @@ public sealed class ZLevelTraceTest : GameTest
     }
 
     [Test]
-    public async Task VerticalTraceBetweenDifferentFramesRequiresResolution()
+    public async Task GridPointsResolveAgainstCurrentFrameAtTraceTime()
+    {
+        var testMap = await Pair.CreateTestMap();
+        ZLevelTracePoint origin = default;
+        ZLevelTracePoint destination = default;
+        EntityUid obstacle = default;
+        MapCoordinates staleOrigin = default;
+        MapCoordinates expectedOrigin = default;
+        MapCoordinates expectedDestination = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            for (var x = 0; x <= 5; x++)
+            {
+                map.SetTile(testMap.Grid, grid, new Vector2i(x, 1), new Tile(1));
+            }
+
+            transform.SetLocalPosition(testMap.Grid, new Vector2(2f, -1f));
+            transform.SetLocalRotation(testMap.Grid, Angle.FromDegrees(12));
+            transform.SetZLevelFrameOrigin(testMap.Grid, 5);
+
+            obstacle = SEntMan.SpawnEntity(
+                "ZLevelTraceObstacle",
+                new EntityCoordinates(testMap.Grid, new Vector2(3.5f, 1.5f)));
+            Assert.That(zLevels.StampWorldZLevelPosition(obstacle, 5), Is.True);
+            Assert.That(SEntMan.GetComponent<TransformComponent>(obstacle).GridUid,
+                Is.EqualTo(testMap.Grid.Owner));
+
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 1.5f),
+                0,
+                out origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(5.5f, 1.5f),
+                0,
+                out destination), Is.True);
+            staleOrigin = new MapCoordinates(
+                origin.WorldCoordinates.Position,
+                origin.WorldCoordinates.MapId);
+
+            transform.SetLocalPosition(testMap.Grid, new Vector2(-6f, 4f));
+            transform.SetLocalRotation(testMap.Grid, Angle.FromDegrees(-37));
+            Assert.That(transform.SetZLevelFrameOrigin(testMap.Grid, 7), Is.True);
+            expectedOrigin = transform.ToMapCoordinates(
+                new EntityCoordinates(testMap.Grid, new Vector2(0.5f, 1.5f)));
+            expectedDestination = transform.ToMapCoordinates(
+                new EntityCoordinates(testMap.Grid, new Vector2(5.5f, 1.5f)));
+            Assert.That(expectedOrigin.Position, Is.Not.EqualTo(staleOrigin.Position));
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var obstacleTransform = SEntMan.GetComponent<TransformComponent>(obstacle);
+            Assert.That(obstacleTransform.GridUid, Is.EqualTo(testMap.Grid.Owner));
+            Assert.That(transform.GetWorldZLevel((
+                obstacle,
+                obstacleTransform,
+                SEntMan.GetComponentOrNull<ZLevelPositionComponent>(obstacle))), Is.EqualTo(7));
+            var result = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Projectile,
+                (int)CollisionGroup.BulletImpassable));
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(result.Segments, Has.Length.EqualTo(1));
+                Assert.That(result.Segments[0].Start.WorldCoordinates.Position,
+                    Is.EqualTo(expectedOrigin.Position).Using(Vector2Comparer));
+                Assert.That(result.Segments[0].End.WorldCoordinates.Position,
+                    Is.EqualTo(expectedDestination.Position).Using(Vector2Comparer));
+                Assert.That(result.Segments[0].Start.WorldCoordinates.Z, Is.EqualTo(7));
+                Assert.That(result.Segments[0].End.WorldCoordinates.Z, Is.EqualTo(7));
+                Assert.That(result.EntityHits.Select(hit => hit.Entity), Is.EqualTo(new[] { obstacle }));
+                Assert.That(result.TileVisits.Select(visit => visit.Tile.Z).Distinct(), Is.EqualTo(new[] { 0 }));
+            });
+        });
+    }
+
+    [Test]
+    public async Task VerticalTraceBetweenDifferentFramesRequiresExplicitBoundaryFrame()
     {
         var testMap = await Pair.CreateTestMap();
 
@@ -496,7 +587,7 @@ public sealed class ZLevelTraceTest : GameTest
             var otherGrid = mapManager.CreateGridEntity(testMap.MapId);
             var trace = SEntMan.System<SharedZLevelTraceSystem>();
             var transform = SEntMan.System<SharedTransformSystem>();
-            transform.SetLocalPosition(otherGrid.Owner, new Vector2(3f, 0f));
+            transform.SetLocalPosition(otherGrid.Owner, Vector2.Zero);
             transform.SetZLevelFrameOrigin(otherGrid.Owner, 1);
             Assert.That(trace.TryCreateGridPoint(
                 testMap.Grid,
@@ -513,11 +604,118 @@ public sealed class ZLevelTraceTest : GameTest
                 origin,
                 destination,
                 ZLevelBoundaryChannels.Projectile));
+            var explicitFrame = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Projectile,
+                BoundaryFrameUid: testMap.Grid));
+            var mapOnly = trace.Trace(new ZLevelTraceRequest(
+                ZLevelTracePoint.FromMap(origin.WorldCoordinates),
+                ZLevelTracePoint.FromMap(destination.WorldCoordinates),
+                ZLevelBoundaryChannels.Projectile,
+                BoundaryFrameUid: testMap.Grid));
             Assert.Multiple(() =>
             {
                 Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.FrameResolutionRequired));
                 Assert.That(result.Segments, Is.Empty);
                 Assert.That(result.BoundaryCrossings, Is.Empty);
+
+                Assert.That(explicitFrame.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(explicitFrame.Segments, Has.Length.EqualTo(2));
+                Assert.That(explicitFrame.BoundaryCrossings, Has.Length.EqualTo(1));
+                Assert.That(explicitFrame.BoundaryCrossings[0].GridUid, Is.EqualTo(testMap.Grid.Owner));
+                Assert.That(explicitFrame.BoundaryCrossings[0].FromWorldZ, Is.EqualTo(0));
+                Assert.That(explicitFrame.BoundaryCrossings[0].ToWorldZ, Is.EqualTo(1));
+
+                Assert.That(mapOnly.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(mapOnly.BoundaryCrossings, Has.Length.EqualTo(1));
+                Assert.That(mapOnly.BoundaryCrossings[0].GridUid, Is.EqualTo(testMap.Grid.Owner));
+                Assert.That(mapOnly.Segments, Has.All.Matches<ZLevelTraceSegment>(segment =>
+                    segment.FrameUid == testMap.Grid.Owner));
+            });
+        });
+    }
+
+    [Test]
+    public async Task SharedFrameTraceIsDeterministicBetweenServerAndClient()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gridNetEntity = default;
+        ZLevelTraceResult serverResult = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var transform = SEntMan.System<SharedTransformSystem>();
+            transform.SetLocalPosition(testMap.Grid, new Vector2(8f, -5f));
+            transform.SetLocalRotation(testMap.Grid, Angle.FromDegrees(31));
+            Assert.That(transform.SetZLevelFrameOrigin(testMap.Grid, 3), Is.True);
+            gridNetEntity = SEntMan.GetNetEntity(testMap.Grid);
+        });
+
+        await RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(4.5f, 2.5f),
+                1,
+                out var destination), Is.True);
+            serverResult = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Visibility,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            Assert.That(serverResult.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+        });
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(gridNetEntity, out var clientGrid), Is.True);
+            var trace = CEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.TryCreateGridPoint(
+                clientGrid!.Value,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                clientGrid.Value,
+                new Vector2(4.5f, 2.5f),
+                1,
+                out var destination), Is.True);
+            var clientResult = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Visibility,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(clientResult.Termination, Is.EqualTo(serverResult.Termination));
+                Assert.That(clientResult.FinalPoint.WorldCoordinates.Position,
+                    Is.EqualTo(serverResult.FinalPoint.WorldCoordinates.Position).Using(Vector2Comparer));
+                Assert.That(clientResult.FinalPoint.WorldCoordinates.Z,
+                    Is.EqualTo(serverResult.FinalPoint.WorldCoordinates.Z));
+                Assert.That(clientResult.Segments.Select(segment => segment.StartDistance),
+                    Is.EqualTo(serverResult.Segments.Select(segment => segment.StartDistance)).Within(0.0001f));
+                Assert.That(clientResult.Segments.Select(segment => segment.EndDistance),
+                    Is.EqualTo(serverResult.Segments.Select(segment => segment.EndDistance)).Within(0.0001f));
+                Assert.That(clientResult.TileVisits.Select(visit => visit.Tile),
+                    Is.EqualTo(serverResult.TileVisits.Select(visit => visit.Tile)));
+                Assert.That(clientResult.TileVisits.Select(visit => visit.EntryDistance),
+                    Is.EqualTo(serverResult.TileVisits.Select(visit => visit.EntryDistance)).Within(0.0001f));
+                Assert.That(clientResult.BoundaryCrossings.Select(crossing => crossing.Tile),
+                    Is.EqualTo(serverResult.BoundaryCrossings.Select(crossing => crossing.Tile)));
+                Assert.That(clientResult.BoundaryCrossings.Select(crossing => crossing.Distance),
+                    Is.EqualTo(serverResult.BoundaryCrossings.Select(crossing => crossing.Distance)).Within(0.0001f));
+                Assert.That(clientResult.BoundaryCrossings.Select(crossing => crossing.State.OpenChannels),
+                    Is.EqualTo(serverResult.BoundaryCrossings.Select(crossing => crossing.State.OpenChannels)));
             });
         });
     }
