@@ -160,11 +160,9 @@ public partial class AtmosphereSystem
     /// </summary>
     /// <param name="mapGrid">The grid in question.</param>
     /// <param name="tile">The indices of the tile.</param>
-    private void PryTile(Entity<MapGridComponent> mapGrid, Vector2i tile)
+    private void PryTile(Entity<MapGridComponent> mapGrid, ZLevelTileIndices tile)
     {
-        if (!_mapSystem.TryGetTileRef(mapGrid.Owner, mapGrid.Comp, tile, out var tileRef))
-            return;
-
+        var tileRef = _mapSystem.GetZLevelTileRef(mapGrid, tile);
         _tile.PryTile(tileRef);
     }
 

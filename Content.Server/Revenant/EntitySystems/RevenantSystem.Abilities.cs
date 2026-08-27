@@ -29,8 +29,10 @@ using Content.Shared.Revenant.Components;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Utility;
 using Robust.Shared.Map.Components;
+using Robust.Shared.Map;
 using Content.Shared.Whitelist;
 using Robust.Shared.Prototypes;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Server.Revenant.EntitySystems;
 
@@ -46,6 +48,7 @@ public sealed partial class RevenantSystem
     [Dependency] private readonly EntityWhitelistSystem _whitelistSystem = default!;
     [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     private static readonly ProtoId<TagPrototype> WindowTag = "Window";
 
@@ -233,6 +236,8 @@ public sealed partial class RevenantSystem
         var xform = Transform(uid);
         if (!TryComp<MapGridComponent>(xform.GridUid, out var map))
             return;
+        var localZLevel = _zLevel.GetZLevel(uid);
+        var worldZLevel = _zLevel.GetWorldZLevel(uid);
         var tiles = _mapSystem.GetTilesIntersecting(
             xform.GridUid.Value,
             map,
@@ -246,7 +251,11 @@ public sealed partial class RevenantSystem
         {
             if (!tiles.TryGetValue(i, out var value))
                 continue;
-            _tile.PryTile(value);
+            var zTile = _mapSystem.GetZLevelTileRef(
+                value.GridUid,
+                map,
+                new ZLevelTileIndices(value.GridIndices.X, value.GridIndices.Y, localZLevel));
+            _tile.PryTile(zTile);
         }
 
         var lookup = _lookup.GetEntitiesInRange(uid, component.DefileRadius, LookupFlags.Approximate | LookupFlags.Static);
@@ -257,6 +266,9 @@ public sealed partial class RevenantSystem
 
         foreach (var ent in lookup)
         {
+            if (_zLevel.GetWorldZLevel(ent) != worldZLevel)
+                continue;
+
             //break windows
             if (tags.HasComponent(ent) && _tag.HasTag(ent, WindowTag))
             {

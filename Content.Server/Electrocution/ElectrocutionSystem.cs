@@ -23,6 +23,7 @@ using Content.Shared.StatusEffect;
 using Content.Shared.Stunnable;
 using Content.Shared.Tag;
 using Content.Shared.Weapons.Melee.Events;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Physics.Events;
@@ -54,6 +55,7 @@ public sealed class ElectrocutionSystem : SharedElectrocutionSystem
     [Dependency] private readonly TagSystem _tag = default!;
     [Dependency] private readonly MetaDataSystem _metaData = default!;
     [Dependency] private readonly TurfSystem _turf = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     private static readonly ProtoId<StatusEffectPrototype> StatusKeyIn = "Electrocution";
     private static readonly ProtoId<DamageTypePrototype> DamageType = "Shock";
@@ -131,12 +133,13 @@ public sealed class ElectrocutionSystem : SharedElectrocutionSystem
         if (electrified.NoWindowInTile)
         {
             var tileRef = _turf.GetTileRef(transform.Coordinates);
+            var worldZLevel = _zLevel.GetWorldZLevel(uid);
 
             if (tileRef != null)
             {
                 foreach (var entity in _entityLookup.GetLocalEntitiesIntersecting(tileRef.Value, flags: LookupFlags.StaticSundries))
                 {
-                    if (_tag.HasTag(entity, WindowTag))
+                    if (_zLevel.IsOnWorldZLevel(entity, worldZLevel) && _tag.HasTag(entity, WindowTag))
                         return false;
                 }
             }

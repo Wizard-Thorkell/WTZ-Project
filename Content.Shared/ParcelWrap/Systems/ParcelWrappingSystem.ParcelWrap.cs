@@ -144,6 +144,7 @@ public sealed partial class ParcelWrappingSystem
         // Spawn the actual parcel entity.
         var targetTransform = Transform(target);
         var spawned = Spawn(GetParcelPrototype(wrapper, target), targetTransform.Coordinates);
+        _zLevel.StampWorldZLevelPosition(spawned, _zLevel.GetWorldZLevel(target));
         _transform.SetLocalRotation(spawned, targetTransform.LocalRotation);
 
         // If the target is in a container, try to put the parcel in its place in the container.

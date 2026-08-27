@@ -12,4 +12,17 @@ namespace Content.Shared.Chemistry.Reaction
             IEntityManager entityManager,
             List<ReagentData>? data = null);
     }
+
+    /// <summary>
+    /// A tile reaction that explicitly supports sparse Z-level tiles.
+    /// Reactions without this interface are skipped outside the base layer.
+    /// </summary>
+    public interface IZLevelTileReaction
+    {
+        FixedPoint2 TileReact(ZLevelTileRef tile,
+            ReagentPrototype reagent,
+            FixedPoint2 reactVolume,
+            IEntityManager entityManager,
+            List<ReagentData>? data = null);
+    }
 }

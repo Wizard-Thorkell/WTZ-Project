@@ -6,7 +6,9 @@ using Content.Shared.Interaction;
 using Content.Shared.Maps;
 using Content.Shared.Physics;
 using Content.Shared.Stacks;
+using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 
 namespace Content.Server.Engineering.EntitySystems
@@ -19,6 +21,7 @@ namespace Content.Server.Engineering.EntitySystems
         [Dependency] private readonly TurfSystem _turfSystem = default!;
         [Dependency] private readonly SharedTransformSystem _transform = default!;
         [Dependency] private readonly SharedMapSystem _maps = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
         public override void Initialize()
         {
@@ -37,11 +40,15 @@ namespace Content.Server.Engineering.EntitySystems
             var gridUid = _transform.GetGrid(args.ClickLocation);
             if (!TryComp<MapGridComponent>(gridUid, out var grid))
                 return;
-            if (!_maps.TryGetTileRef(gridUid.Value, grid, args.ClickLocation, out var tileRef))
-                return;
+
+            var worldZLevel = _zLevel.GetWorldZLevel(args.User);
+            var localZLevel = _transform.WorldToLocalZLevel(gridUid.Value, worldZLevel);
+            var xy = _maps.TileIndicesFor(gridUid.Value, grid, args.ClickLocation);
+            var tileIndices = new ZLevelTileIndices(xy.X, xy.Y, localZLevel);
 
             bool IsTileClear()
             {
+                var tileRef = _maps.GetZLevelTileRef(gridUid.Value, grid, tileIndices);
                 return tileRef.Tile.IsEmpty == false && !_turfSystem.IsTileBlocked(tileRef, CollisionGroup.MobMask);
             }
 
@@ -69,7 +76,8 @@ namespace Content.Server.Engineering.EntitySystems
                 return;
             }
 
-            Spawn(component.Prototype, args.ClickLocation.SnapToGrid(grid));
+            var spawned = Spawn(component.Prototype, args.ClickLocation.SnapToGrid(grid));
+            _zLevel.SetZLevelPosition(spawned, localZLevel);
 
             if (component.RemoveOnInteract && stackComp == null)
                 TryQueueDel(uid);

@@ -5,6 +5,8 @@ using Content.Shared.Physics;
 using Content.Shared.Throwing;
 using Content.Shared.Xenoarchaeology.Artifact;
 using Content.Shared.Xenoarchaeology.Artifact.XAE;
+using Content.Shared.ZLevel.Systems;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Random;
@@ -22,6 +24,7 @@ public sealed class XAEThrowThingsAroundSystem : BaseXAESystem<XAEThrowThingsAro
     [Dependency] private readonly TileSystem _tile = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     private EntityQuery<PhysicsComponent> _physQuery;
 
@@ -41,6 +44,8 @@ public sealed class XAEThrowThingsAroundSystem : BaseXAESystem<XAEThrowThingsAro
     {
         var component = ent.Comp;
         var xform = Transform(ent);
+        var localZLevel = _zLevel.GetZLevel(ent);
+        var worldZLevel = _zLevel.GetWorldZLevel(ent);
         if (TryComp<MapGridComponent>(xform.GridUid, out var grid))
         {
             var areaForTilesPry = new Circle(_transform.GetWorldPosition(xform), component.Range);
@@ -51,7 +56,11 @@ public sealed class XAEThrowThingsAroundSystem : BaseXAESystem<XAEThrowThingsAro
                 if (!_random.Prob(component.TilePryChance))
                     continue;
 
-                _tile.PryTile(tile);
+                var zTile = _map.GetZLevelTileRef(
+                    tile.GridUid,
+                    grid,
+                    new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, localZLevel));
+                _tile.PryTile(zTile);
             }
         }
 
@@ -59,6 +68,9 @@ public sealed class XAEThrowThingsAroundSystem : BaseXAESystem<XAEThrowThingsAro
         _lookup.GetEntitiesInRange(ent, component.Range, _entities, LookupFlags.Dynamic | LookupFlags.Sundries);
         foreach (var entity in _entities)
         {
+            if (_zLevel.GetWorldZLevel(entity) != worldZLevel)
+                continue;
+
             if (_physQuery.TryGetComponent(entity, out var phys)
                 && (phys.CollisionMask & (int)CollisionGroup.GhostImpassable) != 0)
                 continue;

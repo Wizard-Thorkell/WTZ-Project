@@ -29,6 +29,7 @@ using Content.Shared.Timing;
 using Content.Shared.UserInterface;
 using Content.Shared.Verbs;
 using Content.Shared.Wall;
+using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
 using Robust.Shared.Containers;
 using Robust.Shared.Input;
@@ -74,6 +75,7 @@ namespace Content.Shared.Interaction
         [Dependency] private readonly SharedPlayerRateLimitManager _rateLimit = default!;
         [Dependency] private readonly TagSystem _tagSystem = default!;
         [Dependency] private readonly UseDelaySystem _useDelay = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
         [Dependency] private readonly EntityQuery<IgnoreUIRangeComponent> _ignoreUiRangeQuery = default!;
         [Dependency] private readonly EntityQuery<FixturesComponent> _fixtureQuery = default!;
@@ -404,6 +406,10 @@ namespace Content.Shared.Interaction
             }
 
             if (target != null && Deleted(target.Value))
+                return;
+
+            // EntityCoordinates only carry X/Y. Enforce the vertical layer on the authoritative path.
+            if (target != null && _zLevel.GetWorldZLevel(user) != _zLevel.GetWorldZLevel(target.Value))
                 return;
 
             if (!altInteract && _combatQuery.TryComp(user, out var combatMode) && combatMode.IsInCombatMode)

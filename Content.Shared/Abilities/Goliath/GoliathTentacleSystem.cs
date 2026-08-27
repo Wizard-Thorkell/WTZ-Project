@@ -7,6 +7,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Network;
 using Robust.Shared.Random;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Shared.Abilities.Goliath;
 
@@ -14,11 +15,11 @@ public sealed class GoliathTentacleSystem : EntitySystem
 {
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly INetManager _net = default!;
-    [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedStunSystem _stun = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly TurfSystem _turf = default!;
     [Dependency] private readonly SharedPopupSystem _popup = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     /// <inheritdoc/>
     public override void Initialize()
@@ -51,10 +52,11 @@ public sealed class GoliathTentacleSystem : EntitySystem
 
         if (_transform.GetGrid(coords) is not { } grid || !TryComp<MapGridComponent>(grid, out var gridComp))
             return;
+        var worldZLevel = _zLevel.GetWorldZLevel(args.Performer);
 
         foreach (var pos in spawnPos)
         {
-            if (!_map.TryGetTileRef(grid, gridComp, pos, out var tileRef) ||
+            if (!_turf.TryGetZLevelTileRefAtWorldZ(pos, worldZLevel, out var tileRef) ||
                 _turf.IsSpace(tileRef) ||
                 _turf.IsTileBlocked(tileRef, CollisionGroup.Impassable))
             {
@@ -62,7 +64,10 @@ public sealed class GoliathTentacleSystem : EntitySystem
             }
 
             if (_net.IsServer)
-                Spawn(args.EntityId, pos);
+            {
+                var tentacle = Spawn(args.EntityId, pos);
+                _zLevel.SetZLevelPosition(tentacle, tileRef.GridIndices.Z);
+            }
         }
 
         args.Handled = true;

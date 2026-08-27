@@ -1,7 +1,7 @@
-using System.Numerics;
 using Content.Server.Administration;
 using Content.Shared.Administration;
 using Content.Shared.Maps;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Console;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -14,6 +14,7 @@ public sealed class TilePryCommand : LocalizedEntityCommands
 {
     [Dependency] private readonly ITileDefinitionManager _tileDefinitionManager = default!;
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     private readonly string _platingId = "Plating";
 
@@ -53,20 +54,30 @@ public sealed class TilePryCommand : LocalizedEntityCommands
             return;
 
         var playerPosition = xform.Coordinates;
+        var playerZLevel = _zLevel.GetZLevel(attached);
 
         for (var i = -radius; i <= radius; i++)
         {
             for (var j = -radius; j <= radius; j++)
             {
-                var tile = _mapSystem.GetTileRef(playerGrid.Value, mapGrid, playerPosition.Offset(new Vector2(i, j)));
-                var coordinates = _mapSystem.GridTileToLocal(playerGrid.Value, mapGrid, tile.GridIndices);
+                var indices = _mapSystem.TileIndicesFor(
+                    playerGrid.Value,
+                    mapGrid,
+                    playerPosition.Offset(new System.Numerics.Vector2(i, j)));
+                var tile = _mapSystem.GetZLevelTileRef(
+                    playerGrid.Value,
+                    mapGrid,
+                    new ZLevelTileIndices(indices.X, indices.Y, playerZLevel));
+                if (tile.Tile.IsEmpty)
+                    continue;
+
                 var tileDef = (ContentTileDefinition)_tileDefinitionManager[tile.Tile.TypeId];
 
                 if (!tileDef.CanCrowbar)
                     continue;
 
                 var plating = _tileDefinitionManager[_platingId];
-                _mapSystem.SetTile(playerGrid.Value, mapGrid, coordinates, new Tile(plating.TileId));
+                _mapSystem.SetZLevelTile(playerGrid.Value, mapGrid, tile.GridIndices, new Tile(plating.TileId));
             }
         }
     }

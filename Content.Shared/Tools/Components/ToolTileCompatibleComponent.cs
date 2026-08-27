@@ -32,11 +32,13 @@ public sealed partial class TileToolDoAfterEvent : DoAfterEvent
 {
     public NetEntity Grid;
     public Vector2i GridTile;
+    public int ZLevel;
 
-    public TileToolDoAfterEvent(NetEntity grid, Vector2i gridTile)
+    public TileToolDoAfterEvent(NetEntity grid, Vector2i gridTile, int zLevel)
     {
         Grid = grid;
         GridTile = gridTile;
+        ZLevel = zLevel;
     }
 
     public override DoAfterEvent Clone()
@@ -48,6 +50,7 @@ public sealed partial class TileToolDoAfterEvent : DoAfterEvent
     {
         return other is TileToolDoAfterEvent otherTile
                && Grid == otherTile.Grid
-               && GridTile == otherTile.GridTile;
+               && GridTile == otherTile.GridTile
+               && ZLevel == otherTile.ZLevel;
     }
 }

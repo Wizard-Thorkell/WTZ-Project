@@ -9,6 +9,7 @@ using Robust.Shared.Network;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Random;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Shared.Trigger.Systems;
 
@@ -20,6 +21,7 @@ public sealed class ScramOnTriggerSystem : XOnTriggerSystem<ScramOnTriggerCompon
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly INetManager _net = default!;
     [Dependency] private readonly TurfSystem _turfSystem = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     protected override void OnTrigger(Entity<ScramOnTriggerComponent> ent, EntityUid target, ref TriggerEvent args)
     {
@@ -54,6 +56,7 @@ public sealed class ScramOnTriggerSystem : XOnTriggerSystem<ScramOnTriggerCompon
     private EntityCoordinates? SelectRandomTileInRange(EntityUid uid, Vector2 radius, int tries = 40, PhysicsComponent? physicsComponent = null)
     {
         var userCoords = Transform(uid).Coordinates;
+        var worldZLevel = _zLevel.GetWorldZLevel(uid);
         EntityCoordinates? targetCoords = null;
 
         if (!Resolve(uid, ref physicsComponent))
@@ -74,9 +77,9 @@ public sealed class ScramOnTriggerSystem : XOnTriggerSystem<ScramOnTriggerCompon
             // We then offset the user coords from a random angle * distance
             var tempTargetCoords = userCoords.Offset(_random.NextAngle().ToVec() * distance);
 
-            if (!_turfSystem.TryGetTileRef(tempTargetCoords, out var tileRef)
-                || _turfSystem.IsSpace(tileRef.Value)
-                || _turfSystem.IsTileBlocked(tileRef.Value, (CollisionGroup)physicsComponent.CollisionMask))
+            if (!_turfSystem.TryGetZLevelTileRefAtWorldZ(tempTargetCoords, worldZLevel, out var tileRef)
+                || _turfSystem.IsSpace(tileRef)
+                || _turfSystem.IsTileBlocked(tileRef, (CollisionGroup)physicsComponent.CollisionMask))
                 continue;
 
             targetCoords = tempTargetCoords;

@@ -3,6 +3,7 @@ using Content.Server.Popups;
 using Content.Shared.Spider;
 using Content.Shared.Maps;
 using Content.Shared.Mobs.Systems;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Player;
@@ -16,6 +17,7 @@ public sealed class SpiderSystem : SharedSpiderSystem
     [Dependency] private readonly TurfSystem _turf = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly MobStateSystem _mobState = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     /// <summary>
     ///     A recycled hashset used to check turfs for spiderwebs.
@@ -79,11 +81,13 @@ public sealed class SpiderSystem : SharedSpiderSystem
     private bool SpawnWeb(Entity<SpiderComponent> ent, EntityCoordinates coords)
     {
         var result = false;
+        var worldZLevel = _zLevel.GetWorldZLevel(ent);
 
         // Spawn web in center
-        if (!IsTileBlockedByWeb(coords))
+        if (!IsTileBlockedByWeb(coords, worldZLevel))
         {
-            Spawn(ent.Comp.WebPrototype, coords);
+            var web = Spawn(ent.Comp.WebPrototype, coords);
+            _zLevel.StampWorldZLevelPosition(web, worldZLevel);
             result = true;
         }
 
@@ -93,22 +97,26 @@ public sealed class SpiderSystem : SharedSpiderSystem
             var direction = (DirectionFlag)(1 << i);
             var outerSpawnCoordinates = coords.Offset(direction.AsDir().ToVec());
 
-            if (IsTileBlockedByWeb(outerSpawnCoordinates))
+            if (IsTileBlockedByWeb(outerSpawnCoordinates, worldZLevel))
                 continue;
 
-            Spawn(ent.Comp.WebPrototype, outerSpawnCoordinates);
+            var web = Spawn(ent.Comp.WebPrototype, outerSpawnCoordinates);
+            _zLevel.StampWorldZLevelPosition(web, worldZLevel);
             result = true;
         }
 
         return result;
     }
 
-    private bool IsTileBlockedByWeb(EntityCoordinates coords)
+    private bool IsTileBlockedByWeb(EntityCoordinates coords, int worldZLevel)
     {
         _webs.Clear();
         _turf.GetEntitiesInTile(coords, _webs);
         foreach (var entity in _webs)
         {
+            if (_zLevel.GetWorldZLevel(entity) != worldZLevel)
+                continue;
+
             if (HasComp<SpiderWebObjectComponent>(entity))
                 return true;
         }

@@ -21,6 +21,7 @@ using Content.Shared.StepTrigger.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Network;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
@@ -43,6 +44,7 @@ public abstract partial class SharedPuddleSystem : EntitySystem
     [Dependency] private readonly StepTriggerSystem _stepTrigger = default!;
     [Dependency] private readonly TileFrictionController _tile = default!;
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedMapSystem _mapSystem = default!;
 
     [Dependency] private readonly EntityQuery<StepTriggerComponent> _stepTriggerQuery = default!;
     [Dependency] private readonly EntityQuery<ReactiveComponent> _reactiveQuery = default!;
@@ -343,6 +345,32 @@ public abstract partial class SharedPuddleSystem : EntitySystem
 
     public void DoTileReactions(TileRef tileRef, Solution solution)
     {
+        for (var i = solution.Contents.Count - 1; i >= 0; i--)
+        {
+            var (reagent, quantity) = solution.Contents[i];
+            var proto = _prototypeManager.Index<ReagentPrototype>(reagent.Prototype);
+            var removed = proto.ReactionTile(tileRef, quantity, EntityManager, reagent.Data);
+            if (removed <= FixedPoint2.Zero)
+                continue;
+
+            solution.RemoveReagent(reagent, removed);
+        }
+    }
+
+    public void DoTileReactions(ZLevelTileRef tileRef, Solution solution)
+    {
+        if (tileRef.GridIndices.Z == 0)
+        {
+            var grid = Comp<MapGridComponent>(tileRef.GridUid);
+            DoTileReactions(
+                _mapSystem.GetTileRef(
+                    tileRef.GridUid,
+                    grid,
+                    new Vector2i(tileRef.GridIndices.X, tileRef.GridIndices.Y)),
+                solution);
+            return;
+        }
+
         for (var i = solution.Contents.Count - 1; i >= 0; i--)
         {
             var (reagent, quantity) = solution.Contents[i];

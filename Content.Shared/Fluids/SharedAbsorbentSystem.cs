@@ -8,7 +8,10 @@ using Content.Shared.Item;
 using Content.Shared.Popups;
 using Content.Shared.Timing;
 using Content.Shared.Weapons.Melee;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
+using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
@@ -31,6 +34,7 @@ public abstract class SharedAbsorbentSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly SharedItemSystem _item = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -322,9 +326,17 @@ public abstract class SharedAbsorbentSystem : EntitySystem
             // Do tile reactions first
             var targetXform = Transform(target);
             var gridUid = targetXform.GridUid;
+            var targetZLevel = _transform.GetZLevel((
+                target,
+                targetXform,
+                CompOrNull<ZLevelPositionComponent>(target)));
             if (TryComp<MapGridComponent>(gridUid, out var mapGrid))
             {
-                var tileRef = _mapSystem.GetTileRef(gridUid.Value, mapGrid, targetXform.Coordinates);
+                var indices = _mapSystem.TileIndicesFor(gridUid.Value, mapGrid, targetXform.Coordinates);
+                var tileRef = _mapSystem.GetZLevelTileRef(
+                    gridUid.Value,
+                    mapGrid,
+                    new ZLevelTileIndices(indices.X, indices.Y, targetZLevel));
                 Puddle.DoTileReactions(tileRef, absorberSplit);
             }
             SolutionContainer.AddSolution(puddle.Solution.Value, absorberSplit);
@@ -337,7 +349,8 @@ public abstract class SharedAbsorbentSystem : EntitySystem
             if (puddleSolution.Volume == FixedPoint2.Zero)
             {
                 // Spawn a *sparkle*
-                PredictedSpawnAttachedTo(absorber.MoppedEffect, Transform(target).Coordinates);
+                var effect = PredictedSpawnAttachedTo(absorber.MoppedEffect, Transform(target).Coordinates);
+                _zLevel.StampWorldZLevelPosition(effect, _zLevel.GetWorldZLevel(target));
                 PredictedQueueDel(target);
                 isRemoved = true;
             }

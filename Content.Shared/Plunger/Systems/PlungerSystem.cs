@@ -9,6 +9,7 @@ using Robust.Shared.Network;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Random;
 using Content.Shared.Random;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Shared.Plunger.Systems;
 
@@ -22,6 +23,7 @@ public sealed class PlungerSystem : EntitySystem
     [Dependency] private readonly SharedAudioSystem _audio = default!;
     [Dependency] private readonly SharedDoAfterSystem _doAfter = default!;
     [Dependency] private readonly SharedPopupSystem _popup = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -69,7 +71,8 @@ public sealed class PlungerSystem : EntitySystem
         var spawn = _proto.Index<WeightedRandomEntityPrototype>(plunge.PlungerLoot).Pick(_random);
 
         _audio.PlayPredicted(plunge.Sound, uid, uid);
-        Spawn(spawn, Transform(target).Coordinates);
+        var loot = Spawn(spawn, Transform(target).Coordinates);
+        _zLevel.StampWorldZLevelPosition(loot, _zLevel.GetWorldZLevel(target));
         RemComp<PlungerUseComponent>(target);
         Dirty(target, plunge);
 

@@ -14,6 +14,7 @@ using Content.Shared.Nutrition.EntitySystems;
 using Content.Shared.Popups;
 using Content.Shared.Storage;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Systems;
 using Robust.Server.Containers;
 using Robust.Server.GameObjects;
 using Robust.Shared.Random;
@@ -32,6 +33,7 @@ public sealed class SharpSystem : EntitySystem
     [Dependency] private readonly TransformSystem _transform = default!;
     [Dependency] private readonly IRobustRandom _robustRandom = default!;
     [Dependency] private readonly ISharedAdminLogManager _adminLogger = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -103,6 +105,7 @@ public sealed class SharpSystem : EntitySystem
 
         var spawnEntities = EntitySpawnCollection.GetSpawns(butcher.SpawnedEntities, _robustRandom);
         var coords = _transform.GetMapCoordinates(args.Args.Target.Value);
+        var worldZLevel = _zLevel.GetWorldZLevel(args.Args.Target.Value);
         EntityUid popupEnt = default!;
 
         if (_containerSystem.TryGetContainingContainer(args.Args.Target.Value, out var container))
@@ -111,6 +114,7 @@ public sealed class SharpSystem : EntitySystem
             {
                 // distribute the spawned items randomly in a small radius around the origin
                 popupEnt = SpawnInContainerOrDrop(proto, container.Owner, container.ID);
+                _zLevel.StampWorldZLevelPosition(popupEnt, worldZLevel);
             }
         }
         else
@@ -119,6 +123,7 @@ public sealed class SharpSystem : EntitySystem
             {
                 // distribute the spawned items randomly in a small radius around the origin
                 popupEnt = Spawn(proto, coords.Offset(_robustRandom.NextVector2(0.25f)));
+                _zLevel.StampWorldZLevelPosition(popupEnt, worldZLevel);
             }
         }
 

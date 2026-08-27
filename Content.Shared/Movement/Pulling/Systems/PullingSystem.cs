@@ -23,6 +23,7 @@ using Content.Shared.Popups;
 using Content.Shared.Pulling.Events;
 using Content.Shared.Standing;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Input.Binding;
 using Robust.Shared.Physics;
@@ -53,6 +54,7 @@ public sealed class PullingSystem : EntitySystem
     [Dependency] private readonly HeldSpeedModifierSystem _clothingMoveSpeed = default!;
     [Dependency] private readonly SharedPopupSystem _popup = default!;
     [Dependency] private readonly SharedVirtualItemSystem _virtual = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -509,6 +511,9 @@ public sealed class PullingSystem : EntitySystem
 
         if (pullerComp.Pulling == pullableUid)
             return true;
+
+        if (_zLevel.GetWorldZLevel(pullerUid) != _zLevel.GetWorldZLevel(pullableUid))
+            return false;
 
         if (!CanPull(pullerUid, pullableUid))
             return false;

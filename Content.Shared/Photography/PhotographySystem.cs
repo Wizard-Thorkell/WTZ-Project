@@ -3,6 +3,7 @@ using Content.Shared.Examine;
 using Content.Shared.Flash;
 using Content.Shared.Hands.EntitySystems;
 using Content.Shared.IdentityManagement;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Network;
 using Robust.Shared.Utility;
 
@@ -17,6 +18,7 @@ public sealed class PhotographySystem : EntitySystem
     [Dependency] private readonly SharedHandsSystem _hands = default!;
     [Dependency] private readonly EntityTableSystem _tables = default!;
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -85,6 +87,7 @@ public sealed class PhotographySystem : EntitySystem
         {
             // we generate an individual photograph (there should be only one tough)
             var spawned = Spawn(prototype, coords);
+            _zLevel.StampWorldZLevelPosition(spawned, _zLevel.GetWorldZLevel(camera));
             var photoComp = EnsureComp<PhotographComponent>(spawned);
             photoComp.NameText = nameText;
             photoComp.Description = description;

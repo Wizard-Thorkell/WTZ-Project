@@ -8,6 +8,7 @@ using Content.Shared.Maps;
 using Content.Shared.Paper;
 using Content.Shared.Physics;
 using Content.Shared.Speech.Muting;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
 using Robust.Shared.Timing;
@@ -23,6 +24,7 @@ public sealed class MimePowersSystem : EntitySystem
     [Dependency] private readonly IMapManager _mapMan = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -91,12 +93,11 @@ public sealed class MimePowersSystem : EntitySystem
         // Get the tile in front of the mime
         var offsetValue = xform.LocalRotation.ToWorldVec();
         var coords = xform.Coordinates.Offset(offsetValue).SnapToGrid(EntityManager, _mapMan);
-        var tile = _turf.GetTileRef(coords);
-        if (tile == null)
+        if (!_turf.TryGetZLevelTileRefAtWorldZ(coords, _zLevel.GetWorldZLevel(ent), out var tile))
             return;
 
         // Check if the tile is blocked by a wall or mob, and don't create the wall if so
-        if (_turf.IsTileBlocked(tile.Value, CollisionGroup.Impassable | CollisionGroup.Opaque))
+        if (_turf.IsTileBlocked(tile, CollisionGroup.Impassable | CollisionGroup.Opaque))
         {
             _popupSystem.PopupClient(Loc.GetString("mime-invisible-wall-failed"), ent, ent);
             return;
@@ -107,7 +108,8 @@ public sealed class MimePowersSystem : EntitySystem
         _popupSystem.PopupPredicted(messageSelf, messageOthers, ent, ent);
 
         // Make sure we set the invisible wall to despawn properly
-        PredictedSpawnAtPosition(ent.Comp.WallPrototype, _turf.GetTileCenter(tile.Value));
+        var wall = PredictedSpawnAtPosition(ent.Comp.WallPrototype, _turf.GetTileCenter(tile));
+        _zLevel.SetZLevelPosition(wall, tile.GridIndices.Z);
         // Handle args so cooldown works
         args.Handled = true;
     }

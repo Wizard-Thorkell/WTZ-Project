@@ -9,6 +9,7 @@ using Content.Shared.Sound.Components;
 using Content.Shared.Throwing;
 using Content.Shared.UserInterface;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Components;
 using JetBrains.Annotations;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.Systems;
@@ -38,6 +39,7 @@ public abstract class SharedEmitSoundSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly EntityWhitelistSystem _whitelistSystem = default!;
     [Dependency] private readonly TurfSystem _turf = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
 
     public override void Initialize()
     {
@@ -91,7 +93,12 @@ public abstract class SharedEmitSoundSystem : EntitySystem
             return;
         }
 
-        var tile = _map.GetTileRef(xform.GridUid.Value, grid, xform.Coordinates);
+        var xy = _map.TileIndicesFor(xform.GridUid.Value, grid, xform.Coordinates);
+        var zLevel = _transform.GetZLevel((uid, xform, CompOrNull<ZLevelPositionComponent>(uid)));
+        var tile = _map.GetZLevelTileRef(
+            xform.GridUid.Value,
+            grid,
+            new ZLevelTileIndices(xy.X, xy.Y, zLevel));
 
         // Handle maps being grids (we'll still emit the sound).
         if (xform.GridUid != xform.MapUid && _turf.IsSpace(tile))

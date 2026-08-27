@@ -4,6 +4,8 @@ using Content.Shared.Interaction;
 using Content.Shared.Maps;
 using Content.Shared.Physics;
 using Content.Shared.Tools.Components;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Network;
@@ -14,6 +16,7 @@ namespace Content.Shared.Tools.Systems;
 public abstract partial class SharedToolSystem
 {
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public void InitializeTile()
     {
@@ -45,9 +48,12 @@ public abstract partial class SharedToolSystem
             return;
         }
 
-        var tileRef = _maps.GetTileRef(gridUid, grid, args.GridTile);
-        var coords = _maps.ToCoordinates(tileRef, grid);
-        if (comp.RequiresUnobstructed && _turfs.IsTileBlocked(gridUid, tileRef.GridIndices, CollisionGroup.MobMask))
+        var tileRef = _maps.GetZLevelTileRef(
+            gridUid,
+            grid,
+            new ZLevelTileIndices(args.GridTile.X, args.GridTile.Y, args.ZLevel));
+        var coords = _maps.GridTileToLocal(gridUid, grid, args.GridTile);
+        if (comp.RequiresUnobstructed && _turfs.IsTileBlocked(tileRef, CollisionGroup.MobMask))
             return;
 
         if (!TryDeconstructWithToolQualities(tileRef, tool.Qualities))
@@ -56,7 +62,7 @@ public abstract partial class SharedToolSystem
         AdminLogger.Add(
             LogType.LatticeCut,
             LogImpact.Medium,
-            $"{ToPrettyString(args.User):player} used {ToPrettyString(ent)} to edit the tile at {coords}");
+            $"{ToPrettyString(args.User):player} used {ToPrettyString(ent)} to edit the tile at {coords} on Z {args.ZLevel}");
         args.Handled = true;
     }
 
@@ -71,7 +77,17 @@ public abstract partial class SharedToolSystem
         if (!_mapManager.TryFindGridAt(_transformSystem.ToMapCoordinates(clickLocation), out var gridUid, out var mapGrid))
             return false;
 
-        var tileRef = _maps.GetTileRef(gridUid, mapGrid, clickLocation);
+        var userTransform = Transform(user);
+        var worldZLevel = _transformSystem.GetWorldZLevel((
+            user,
+            userTransform,
+            CompOrNull<ZLevelPositionComponent>(user)));
+        var zLevel = _transformSystem.WorldToLocalZLevel(gridUid, worldZLevel);
+        var gridIndices = _maps.TileIndicesFor(gridUid, mapGrid, clickLocation);
+        var tileRef = _maps.GetZLevelTileRef(
+            gridUid,
+            mapGrid,
+            new ZLevelTileIndices(gridIndices.X, gridIndices.Y, zLevel));
         var tileDef = (ContentTileDefinition) _tileDefManager[tileRef.Tile.TypeId];
 
         if (!tool.Qualities.ContainsAny(tileDef.DeconstructTools))
@@ -80,14 +96,15 @@ public abstract partial class SharedToolSystem
         if (string.IsNullOrWhiteSpace(tileDef.BaseTurf))
             return false;
 
-        if (comp.RequiresUnobstructed && _turfs.IsTileBlocked(gridUid, tileRef.GridIndices, CollisionGroup.MobMask))
+        if (comp.RequiresUnobstructed && _turfs.IsTileBlocked(tileRef, CollisionGroup.MobMask))
             return false;
 
-        var coordinates = _maps.GridTileToLocal(gridUid, mapGrid, tileRef.GridIndices);
-        if (!InteractionSystem.InRangeUnobstructed(user, coordinates, popup: false))
+        var coordinates = _maps.GridTileToLocal(gridUid, mapGrid, gridIndices);
+        SharedInteractionSystem.Ignored otherFloor = entity => !_zLevel.IsOnWorldZLevel(entity, worldZLevel);
+        if (!InteractionSystem.InRangeUnobstructed(user, coordinates, predicate: otherFloor, popup: false))
             return false;
 
-        var args = new TileToolDoAfterEvent(GetNetEntity(gridUid), tileRef.GridIndices);
+        var args = new TileToolDoAfterEvent(GetNetEntity(gridUid), gridIndices, zLevel);
         UseTool(ent, user, ent, comp.Delay, tool.Qualities, args, out _, toolComponent: tool);
         return true;
     }
@@ -100,6 +117,18 @@ public abstract partial class SharedToolSystem
             // don't do this on the client or else the tile entity spawn mispredicts and looks horrible
             return _net.IsClient || _tiles.DeconstructTile(tileRef);
         }
+        return false;
+    }
+
+    public bool TryDeconstructWithToolQualities(ZLevelTileRef tileRef, PrototypeFlags<ToolQualityPrototype> withToolQualities)
+    {
+        var tileDef = (ContentTileDefinition) _tileDefManager[tileRef.Tile.TypeId];
+        if (withToolQualities.ContainsAny(tileDef.DeconstructTools))
+        {
+            // Do not deconstruct predicted tiles on the client; the resulting item spawn would mispredict.
+            return _net.IsClient || _tiles.DeconstructZLevelTile(tileRef);
+        }
+
         return false;
     }
 }

@@ -4,6 +4,7 @@ using Content.Shared.Item;
 using Content.Shared.ParcelWrap.Components;
 using Content.Shared.Popups;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Containers;
 
@@ -26,6 +27,7 @@ public sealed partial class ParcelWrappingSystem : EntitySystem
     [Dependency] private readonly SharedPopupSystem _popup = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly EntityWhitelistSystem _whitelist = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     /// <inheritdoc/>
     public override void Initialize()

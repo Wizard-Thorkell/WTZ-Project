@@ -3,6 +3,7 @@ using Content.Shared.Interaction;
 using Content.Shared.PowerCell;
 using Content.Shared.Storage;
 using Robust.Shared.Network;
+using Content.Shared.ZLevel.Systems;
 
 namespace Content.Shared.Holosign;
 
@@ -10,6 +11,7 @@ public sealed class HolosignSystem : EntitySystem
 {
     [Dependency] private readonly PowerCellSystem _powerCell = default!;
     [Dependency] private readonly INetManager _net = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
 
     public override void Initialize()
     {
@@ -51,6 +53,7 @@ public sealed class HolosignSystem : EntitySystem
         {
             var holosign = PredictedSpawnAtPosition(ent.Comp.SignProto, args.ClickLocation);
             Transform(holosign).LocalRotation = Angle.Zero;
+            _zLevel.StampWorldZLevelPosition(holosign, _zLevel.GetWorldZLevel(args.User));
         }
 
         args.Handled = true;

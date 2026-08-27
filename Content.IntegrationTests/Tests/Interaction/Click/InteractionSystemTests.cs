@@ -7,6 +7,7 @@ using Content.Shared.Hands.EntitySystems;
 using Content.Shared.Interaction;
 using Content.Shared.Interaction.Components;
 using Content.Shared.Item;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -102,6 +103,45 @@ namespace Content.IntegrationTests.Tests.Interaction.Click
             });
 
             testInteractionSystem.ClearHandlers();
+        }
+
+        [Test]
+        public async Task InteractionRejectsTargetsOnAnotherWorldZLevel()
+        {
+            var pair = Pair;
+            var server = pair.Server;
+            var entities = server.ResolveDependency<IEntityManager>();
+            var systems = server.ResolveDependency<IEntitySystemManager>();
+            var map = await pair.CreateTestMap();
+
+            EntityUid user = default;
+            EntityUid target = default;
+            await server.WaitAssertion(() =>
+            {
+                user = entities.SpawnEntity(null, map.MapCoords);
+                entities.EnsureComponent<HandsComponent>(user);
+                entities.EnsureComponent<ComplexInteractionComponent>(user);
+                systems.GetEntitySystem<SharedHandsSystem>().AddHand(user, "hand", HandLocation.Left);
+                target = entities.SpawnEntity(null, map.MapCoords);
+                Assert.That(systems.GetEntitySystem<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+            });
+
+            var interaction = systems.GetEntitySystem<InteractionSystem>();
+            var listener = systems.GetEntitySystem<TestInteractionSystem>();
+            var interacted = false;
+
+            await server.WaitAssertion(() =>
+            {
+                listener.InteractHandEvent = _ => interacted = true;
+                interaction.UserInteraction(user, entities.GetComponent<TransformComponent>(target).Coordinates, target);
+                Assert.That(interacted, Is.False);
+
+                Assert.That(systems.GetEntitySystem<SharedZLevelSystem>().SetZLevelPosition(user, 1), Is.True);
+                interaction.UserInteraction(user, entities.GetComponent<TransformComponent>(target).Coordinates, target);
+                Assert.That(interacted, Is.True);
+            });
+
+            listener.ClearHandlers();
         }
 
         [Test]
