@@ -147,6 +147,19 @@ public sealed class ZLevelDebugOverlay : Overlay
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 84f),
+            $"ballistic try:{metrics.BallisticRouteAttempts} start:{metrics.BallisticRoutesStarted} " +
+            $"done:{metrics.BallisticRoutesCompleted} reject:{metrics.BallisticRoutesRejected}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 98f),
+            $"ballistic cross:{metrics.BallisticCrossings} closed:{metrics.BallisticClosedBoundaries} " +
+            $"collide:{metrics.BallisticCollisionCancellations} invalid:{metrics.BallisticInvalidCancellations} " +
+            $"flush:{metrics.BallisticContactFlushes}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 112f),
             $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
             $"tiles:{_traceSystem.MaxTileVisits} hits:{_traceSystem.MaxEntityHits}",
             metricsColor);

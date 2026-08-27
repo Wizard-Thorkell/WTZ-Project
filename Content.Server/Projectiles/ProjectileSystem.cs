@@ -9,6 +9,7 @@ using Content.Shared.Damage.Systems;
 using Content.Shared.Database;
 using Content.Shared.FixedPoint;
 using Content.Shared.Projectiles;
+using Content.Shared.ZLevel;
 using Robust.Shared.Physics.Events;
 using Robust.Shared.Player;
 
@@ -27,6 +28,7 @@ public sealed class ProjectileSystem : SharedProjectileSystem
     {
         base.Initialize();
         SubscribeLocalEvent<ProjectileComponent, StartCollideEvent>(OnStartCollide);
+        SubscribeLocalEvent<ProjectileComponent, ZLevelBallisticBoundaryHitEvent>(OnBoundaryHit);
     }
 
     private void OnStartCollide(EntityUid uid, ProjectileComponent component, ref StartCollideEvent args)
@@ -87,15 +89,35 @@ public sealed class ProjectileSystem : SharedProjectileSystem
         if (component.DeleteOnCollide && component.ProjectileSpent)
             QueueDel(uid);
 
-        if (component.ImpactEffect != null && TryComp(uid, out TransformComponent? xform))
-        {
-            RaiseNetworkEvent(
-                new ImpactEffectEvent(
-                    component.ImpactEffect,
-                    GetNetCoordinates(xform.Coordinates),
-                    ZLevels.GetWorldZLevel(uid)),
-                Filter.Pvs(xform.Coordinates, entityMan: EntityManager));
-        }
+        RaiseImpactEffect(uid, component);
+    }
+
+    private void OnBoundaryHit(
+        Entity<ProjectileComponent> entity,
+        ref ZLevelBallisticBoundaryHitEvent args)
+    {
+        if (entity.Comp.ProjectileSpent)
+            return;
+
+        entity.Comp.ProjectileSpent = true;
+        Dirty(entity);
+        RaiseImpactEffect(entity.Owner, entity.Comp);
+
+        if (entity.Comp.DeleteOnCollide)
+            QueueDel(entity.Owner);
+    }
+
+    private void RaiseImpactEffect(EntityUid uid, ProjectileComponent component)
+    {
+        if (component.ImpactEffect == null || !TryComp(uid, out TransformComponent? xform))
+            return;
+
+        RaiseNetworkEvent(
+            new ImpactEffectEvent(
+                component.ImpactEffect,
+                GetNetCoordinates(xform.Coordinates),
+                ZLevels.GetWorldZLevel(uid)),
+            Filter.Pvs(xform.Coordinates, entityMan: EntityManager));
     }
 
     private bool TryPenetrate(Entity<ProjectileComponent> projectile, DamageSpecifier damage, FixedPoint2 damageRequired)

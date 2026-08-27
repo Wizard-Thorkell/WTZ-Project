@@ -80,6 +80,15 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"  trace output: segments={metrics.TraceSegments}, tiles={metrics.TraceTileVisits}, " +
             $"hits={metrics.TraceEntityHits}, crossings={metrics.TraceBoundaryCrossings}");
         shell.WriteLine(
+            $"  ballistic: attempts={metrics.BallisticRouteAttempts}, started={metrics.BallisticRoutesStarted}, " +
+            $"completed={metrics.BallisticRoutesCompleted}, rejected={metrics.BallisticRoutesRejected}");
+        shell.WriteLine(
+            $"  ballistic crossings: success={metrics.BallisticCrossings}, " +
+            $"closed={metrics.BallisticClosedBoundaries}, " +
+            $"collision-cancellations={metrics.BallisticCollisionCancellations}, " +
+            $"invalid-cancellations={metrics.BallisticInvalidCancellations}, " +
+            $"contact-flushes={metrics.BallisticContactFlushes}");
+        shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");
     }

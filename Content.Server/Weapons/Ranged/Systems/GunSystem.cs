@@ -12,6 +12,7 @@ using Content.Shared.Weapons.Ranged.Events;
 using Content.Shared.Weapons.Ranged.Systems;
 using Content.Shared.Weapons.Hitscan.Components;
 using Content.Shared.Weapons.Hitscan.Events;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio;
 using Robust.Shared.Map;
 using Robust.Shared.Player;
@@ -25,6 +26,7 @@ public sealed partial class GunSystem : SharedGunSystem
 {
     [Dependency] private readonly PricingSystem _pricing = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
+    [Dependency] private readonly SharedZLevelBallisticSystem _zBallistics = default!;
 
     private const float DamagePitchVariation = 0.05f;
 
@@ -91,7 +93,7 @@ public sealed partial class GunSystem : SharedGunSystem
             // pneumatic cannon doesn't shoot bullets it just throws them, ignore ammo handling
             if (throwItems && ent != null)
             {
-                ShootOrThrow(ent.Value, mapDirection, gunVelocity, gun, user);
+                ShootOrThrow(ent.Value, mapDirection, mapDirection, gunVelocity, gun, user);
                 continue;
             }
 
@@ -171,20 +173,35 @@ public sealed partial class GunSystem : SharedGunSystem
 
                 var angles = LinearSpread(mapAngle - spreadEvent.Spread / 2,
                     mapAngle + spreadEvent.Spread / 2, ammoSpreadComp.Count);
+                var trajectoryDistance = mapDirection.Length();
 
-                ShootOrThrow(ammoEnt, angles[0].ToVec(), gunVelocity, gun, user);
+                var spreadDirection = angles[0].ToVec();
+                ShootOrThrow(
+                    ammoEnt,
+                    spreadDirection,
+                    spreadDirection * trajectoryDistance,
+                    gunVelocity,
+                    gun,
+                    user);
                 shotProjectiles.Add(ammoEnt);
 
                 for (var i = 1; i < ammoSpreadComp.Count; i++)
                 {
                     var newuid = Spawn(ammoSpreadComp.Proto, fromEnt);
-                    ShootOrThrow(newuid, angles[i].ToVec(), gunVelocity, gun, user);
+                    spreadDirection = angles[i].ToVec();
+                    ShootOrThrow(
+                        newuid,
+                        spreadDirection,
+                        spreadDirection * trajectoryDistance,
+                        gunVelocity,
+                        gun,
+                        user);
                     shotProjectiles.Add(newuid);
                 }
             }
             else
             {
-                ShootOrThrow(ammoEnt, mapDirection, gunVelocity, gun, user);
+                ShootOrThrow(ammoEnt, mapDirection, mapDirection, gunVelocity, gun, user);
                 shotProjectiles.Add(ammoEnt);
             }
 
@@ -193,10 +210,18 @@ public sealed partial class GunSystem : SharedGunSystem
         }
     }
 
-    private void ShootOrThrow(EntityUid uid, Vector2 mapDirection, Vector2 gunVelocity, Entity<GunComponent> gun, EntityUid? user)
+    private void ShootOrThrow(
+        EntityUid uid,
+        Vector2 mapDirection,
+        Vector2 trajectoryDisplacement,
+        Vector2 gunVelocity,
+        Entity<GunComponent> gun,
+        EntityUid? user)
     {
+        EntityUid? targetUid = null;
         if (gun.Comp.Target is { } target && !TerminatingOrDeleted(target))
         {
+            targetUid = target;
             var targeted = EnsureComp<TargetedProjectileComponent>(uid);
             targeted.Target = target;
             Dirty(uid, targeted);
@@ -208,10 +233,14 @@ public sealed partial class GunSystem : SharedGunSystem
             RemoveShootable(uid);
             // TODO: Someone can probably yeet this a billion miles so need to pre-validate input somewhere up the call stack.
             ThrowingSystem.TryThrow(uid, mapDirection, gun.Comp.ProjectileSpeedModified, user);
+            if (targetUid is { } throwTarget)
+                _zBallistics.TryStartTrajectory(uid, throwTarget, trajectoryDisplacement);
             return;
         }
 
         ShootProjectile(uid, mapDirection, gunVelocity, gun, user, gun.Comp.ProjectileSpeedModified);
+        if (targetUid is { } projectileTarget)
+            _zBallistics.TryStartTrajectory(uid, projectileTarget, trajectoryDisplacement);
     }
 
     /// <summary>

@@ -62,6 +62,15 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _traceLastTimestampTicks;
     private long _traceMaxTimestampTicks;
 
+    private long _ballisticRouteAttempts;
+    private long _ballisticRoutesStarted;
+    private long _ballisticRoutesCompleted;
+    private long _ballisticCrossings;
+    private long _ballisticClosedBoundaries;
+    private long _ballisticCollisionCancellations;
+    private long _ballisticInvalidCancellations;
+    private long _ballisticContactFlushes;
+
     public void RecordBoundaryQuery(bool cacheHit)
     {
         _boundaryQueries++;
@@ -207,6 +216,46 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _traceMaxTimestampTicks = Math.Max(_traceMaxTimestampTicks, elapsedTimestampTicks);
     }
 
+    public void RecordBallisticRouteAttempt()
+    {
+        _ballisticRouteAttempts++;
+    }
+
+    public void RecordBallisticRouteStarted()
+    {
+        _ballisticRoutesStarted++;
+    }
+
+    public void RecordBallisticRouteCompleted()
+    {
+        _ballisticRoutesCompleted++;
+    }
+
+    public void RecordBallisticCrossing()
+    {
+        _ballisticCrossings++;
+    }
+
+    public void RecordBallisticClosedBoundary()
+    {
+        _ballisticClosedBoundaries++;
+    }
+
+    public void RecordBallisticCollisionCancellation()
+    {
+        _ballisticCollisionCancellations++;
+    }
+
+    public void RecordBallisticInvalidCancellation()
+    {
+        _ballisticInvalidCancellations++;
+    }
+
+    public void RecordBallisticContactFlush()
+    {
+        _ballisticContactFlushes++;
+    }
+
     public ZLevelMetricsSnapshot Snapshot()
     {
         return new ZLevelMetricsSnapshot(
@@ -255,7 +304,15 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _traceBoundaryCrossings,
             TimestampTicksToMilliseconds(_traceTimestampTicks),
             TimestampTicksToMilliseconds(_traceLastTimestampTicks),
-            TimestampTicksToMilliseconds(_traceMaxTimestampTicks));
+            TimestampTicksToMilliseconds(_traceMaxTimestampTicks),
+            _ballisticRouteAttempts,
+            _ballisticRoutesStarted,
+            _ballisticRoutesCompleted,
+            _ballisticCrossings,
+            _ballisticClosedBoundaries,
+            _ballisticCollisionCancellations,
+            _ballisticInvalidCancellations,
+            _ballisticContactFlushes);
     }
 
     public void ResetCounters()
@@ -306,6 +363,14 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _traceTimestampTicks = 0;
         _traceLastTimestampTicks = 0;
         _traceMaxTimestampTicks = 0;
+        _ballisticRouteAttempts = 0;
+        _ballisticRoutesStarted = 0;
+        _ballisticRoutesCompleted = 0;
+        _ballisticCrossings = 0;
+        _ballisticClosedBoundaries = 0;
+        _ballisticCollisionCancellations = 0;
+        _ballisticInvalidCancellations = 0;
+        _ballisticContactFlushes = 0;
     }
 
     private static double TimestampTicksToMilliseconds(long ticks)
@@ -360,13 +425,22 @@ public readonly record struct ZLevelMetricsSnapshot(
     long TraceBoundaryCrossings,
     double TraceMilliseconds,
     double TraceLastMilliseconds,
-    double TraceMaxMilliseconds)
+    double TraceMaxMilliseconds,
+    long BallisticRouteAttempts,
+    long BallisticRoutesStarted,
+    long BallisticRoutesCompleted,
+    long BallisticCrossings,
+    long BallisticClosedBoundaries,
+    long BallisticCollisionCancellations,
+    long BallisticInvalidCancellations,
+    long BallisticContactFlushes)
 {
     public double BoundaryCacheHitPercent => Percentage(BoundaryCacheHits, BoundaryQueries);
     public double GravityCacheHitPercent => Percentage(GravityCacheHits, GravityCacheHits + GravityCacheMisses);
     public double GravityAverageBuildMilliseconds => Average(GravityBuildMilliseconds, GravityBuilds);
     public double PvsAverageRefreshMilliseconds => Average(PvsRefreshMilliseconds, PvsRefreshes);
     public double TraceAverageMilliseconds => Average(TraceMilliseconds, TraceQueries);
+    public long BallisticRoutesRejected => BallisticRouteAttempts - BallisticRoutesStarted;
 
     private static double Percentage(long value, long total)
     {

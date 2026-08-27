@@ -36,6 +36,8 @@
     - Atmosphere
     - Visibility
     - Sound
+    - Projectile
+    - Explosion
 
 - type: entity
   id: ZLevelStairsDown
@@ -75,6 +77,8 @@
     - Atmosphere
     - Visibility
     - Sound
+    - Projectile
+    - Explosion
 
 - type: entity
   id: ZLevelLadder
@@ -114,3 +118,5 @@
     - Atmosphere
     - Visibility
     - Sound
+    - Projectile
+    - Explosion

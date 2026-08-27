@@ -4,7 +4,7 @@
   id: ZLevelFloorOpeningMarker
   parent: MarkerBase
   name: Z-level floor opening
-  description: Opens free movement, atmosphere, visibility, sound, interaction, and effects through the boundary below.
+  description: Opens free movement, atmosphere, visibility, sound, interaction, effects, projectiles, and explosions through the boundary below.
   components:
   - type: Sprite
     layers:
@@ -19,6 +19,8 @@
     - Interaction
     - Sound
     - Effects
+    - Projectile
+    - Explosion
 
 - type: entity
   id: ZLevelShaftMarker

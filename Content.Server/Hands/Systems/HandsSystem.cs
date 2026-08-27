@@ -13,6 +13,7 @@ using Content.Shared.Movement.Pulling.Systems;
 using Content.Shared.Stacks;
 using Content.Shared.Standing;
 using Content.Shared.Throwing;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameStates;
 using Robust.Shared.Input.Binding;
 using Robust.Shared.Map;
@@ -32,6 +33,7 @@ namespace Content.Server.Hands.Systems
         [Dependency] private readonly SharedTransformSystem _transformSystem = default!;
         [Dependency] private readonly PullingSystem _pullingSystem = default!;
         [Dependency] private readonly ThrowingSystem _throwingSystem = default!;
+        [Dependency] private readonly SharedZLevelBallisticSystem _zBallistics = default!;
 
         private EntityQuery<PhysicsComponent> _physicsQuery;
 
@@ -110,13 +112,17 @@ namespace Content.Server.Hands.Systems
             if (playerSession?.AttachedEntity is not {Valid: true} player || !Exists(player) || !coordinates.IsValid(EntityManager))
                 return false;
 
-            return ThrowHeldItem(player, coordinates);
+            return ThrowHeldItem(player, coordinates, target: entity);
         }
 
         /// <summary>
         /// Throw the player's currently held item.
         /// </summary>
-        public bool ThrowHeldItem(EntityUid player, EntityCoordinates coordinates, float minDistance = 0.1f)
+        public bool ThrowHeldItem(
+            EntityUid player,
+            EntityCoordinates coordinates,
+            float minDistance = 0.1f,
+            EntityUid? target = null)
         {
             if (ContainerSystem.IsEntityInContainer(player) ||
                 !TryComp(player, out HandsComponent? hands) ||
@@ -161,6 +167,8 @@ namespace Content.Server.Hands.Systems
                 return false;
 
             _throwingSystem.TryThrow(ev.ItemUid, ev.Direction, ev.ThrowSpeed, ev.PlayerUid, compensateFriction: !HasComp<LandAtCursorComponent>(ev.ItemUid));
+            if (target is { } targetUid && Exists(targetUid))
+                _zBallistics.TryStartTrajectory(ev.ItemUid, targetUid, ev.Direction);
 
             return true;
         }

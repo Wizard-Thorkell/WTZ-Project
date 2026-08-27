@@ -7,6 +7,7 @@ using Content.Shared.ZLevel.Components;
 using Content.Shared.Friction;
 using Content.Shared.Gravity;
 using Content.Shared.Movement.Systems;
+using Content.Shared.Projectiles;
 using Content.Shared.Throwing;
 using Content.Shared.ZLevel;
 using Robust.Shared.GameObjects;
@@ -38,6 +39,7 @@ public sealed class SharedZLevelSystem : VirtualController
     private EntityQuery<ZLevelPositionComponent> _positionQuery;
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<PhysicsComponent> _physicsQuery;
+    private EntityQuery<ProjectileComponent> _projectileQuery;
     private EntityQuery<ThrownItemComponent> _thrownQuery;
     private EntityQuery<TransformComponent> _transformQuery;
     private readonly List<EntityUid> _anchoredBuffer = new();
@@ -61,6 +63,7 @@ public sealed class SharedZLevelSystem : VirtualController
         _positionQuery = GetEntityQuery<ZLevelPositionComponent>();
         _gridQuery = GetEntityQuery<MapGridComponent>();
         _physicsQuery = GetEntityQuery<PhysicsComponent>();
+        _projectileQuery = GetEntityQuery<ProjectileComponent>();
         _thrownQuery = GetEntityQuery<ThrownItemComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
 
@@ -77,6 +80,8 @@ public sealed class SharedZLevelSystem : VirtualController
         SubscribeLocalEvent<ZLevelPositionComponent, WeightlessnessChangedEvent>(OnWeightlessnessChanged);
         SubscribeLocalEvent<ThrownItemComponent, ComponentStartup>(OnThrownStartup);
         SubscribeLocalEvent<ThrownItemComponent, ComponentRemove>(OnThrownRemove);
+        SubscribeLocalEvent<ProjectileComponent, ComponentStartup>(OnProjectileStartup);
+        SubscribeLocalEvent<ProjectileComponent, ComponentRemove>(OnProjectileRemove);
         SubscribeLocalEvent<GravityChangedEvent>(OnGravityChanged);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnDZTileChanged);
@@ -458,6 +463,18 @@ public sealed class SharedZLevelSystem : VirtualController
             _activeBodies.Add(entity.Owner);
     }
 
+    private void OnProjectileStartup(Entity<ProjectileComponent> entity, ref ComponentStartup args)
+    {
+        if (_positionQuery.HasComp(entity.Owner))
+            RefreshEntity(entity.Owner);
+    }
+
+    private void OnProjectileRemove(Entity<ProjectileComponent> entity, ref ComponentRemove args)
+    {
+        if (_positionQuery.HasComp(entity.Owner))
+            _activeBodies.Add(entity.Owner);
+    }
+
     private void OnGravityChanged(ref GravityChangedEvent args)
     {
         _refreshBodyBuffer.Clear();
@@ -558,8 +575,10 @@ public sealed class SharedZLevelSystem : VirtualController
         var activelyThrown = _thrownQuery.TryComp(uid, out var thrown) &&
             !thrown.Landed &&
             thrown.LandTime > _timing.CurTime;
+        var activeProjectile = _projectileQuery.TryComp(uid, out var projectile) &&
+            !projectile.ProjectileSpent;
 
-        if (activelyThrown)
+        if (activelyThrown || activeProjectile)
         {
             SetGrounded(uid, physics, dzKinematics, false);
             _activeBodies.Add(uid);

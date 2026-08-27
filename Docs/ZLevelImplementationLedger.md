@@ -7,7 +7,7 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/projectile-traversal`.
+- Active branch: `zlevel/projectile-vertical-trajectory`.
 - Active package: `P2.2b Bounded physical vertical trajectory`.
 - Overall status: active.
 
@@ -807,7 +807,7 @@ treated as Debug-run noise.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
-| P2.2 | Physical projectiles and thrown-entity traversal | In progress |
+| P2.2 | Physical projectiles and thrown-entity traversal | Complete |
 | P2.3 | Explosions, fire, heat, and generated effects | Pending |
 | P2.4 | Central direct and remote interaction validation | Pending |
 
@@ -816,7 +816,7 @@ P2.2 is split into independently gated subpackages:
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P2.2a | Projectile/throw floor authority and lifecycle preservation | Complete |
-| P2.2b | Bounded physical vertical trajectory and crossing policy | In progress |
+| P2.2b | Bounded physical vertical trajectory and crossing policy | Complete |
 
 ## Completed Package: P2.1 Hitscan Trace Migration
 
@@ -1032,20 +1032,139 @@ allocation is inside Robust physics enumeration.
   boundary crossings at physics-substep geometry without introducing tunneling
   or changing ordinary same-floor projectile behavior.
 
-## Active Package: P2.2b Bounded Physical Vertical Trajectory
+## Completed Package: P2.2b Bounded Physical Vertical Trajectory
 
-### Planned Scope
+### Scope
 
-- Define opt-in continuous vertical trajectory state separately from vanilla
-  same-floor throw and projectile components.
-- Validate every crossed half-level plane with the `Projectile` boundary channel
-  at the crossing's current grid-local XY.
-- Integrate with physics substeps so source-floor and destination-floor contacts
-  are not assigned to the wrong portion of a fast step.
-- Bound crossings and fail conservatively on invalid frames, closed decks, or
-  exhausted work without tracing an unbounded future trajectory.
-- Cover Z 0 parity, open/closed decks, fast diagonal crossings, moving frames,
-  prediction/reconciliation, landing, reflection, and allocation evidence.
+- Add an opt-in, networked trajectory for physical projectiles and thrown items
+  aimed at a server-resolved entity on another floor of the same grid frame.
+- Keep horizontal integration and collision response in Robust physics while
+  clipping each substep at ordered half-level crossings.
+- Revalidate the current `Projectile` boundary and source-floor contacts before
+  changing collision context at every crossing.
+- Integrate normal guns, projectile spread, gun-thrown ammo, and manual hand
+  throws without changing their same-floor paths.
+- Add lifecycle-safe boundary impacts, adaptive thrown-item landing time,
+  metrics, debug presentation, authored opening channels, and focused tests.
+- Add the smallest paired engine API needed to batch newly-created contact
+  processing after clipped movement.
+
+### Acceptance Criteria
+
+- Same-floor and Z 0 consumers retain their existing behavior and do not acquire
+  trajectory state.
+- A visible lower-floor target starts a bounded route only inside one valid grid
+  frame; hidden, cross-frame, invalid, inactive, or over-budget requests reject.
+- A fast body cannot switch floors before hard contacts from the source portion
+  of its clipped substep are dispatched.
+- Open crossings change floors in deterministic order; closed boundaries spend
+  projectiles or stop thrown items on the source floor.
+- Reflection, solver damping, range clamping, spread, translated/rotated frames,
+  throw landing, and destination-floor replication preserve their native
+  semantics.
+- Contact discovery is batched once per substep containing crossings rather
+  than once per projectile, and terminal metrics are recorded exactly once.
+
+### Evidence
+
+- `Content.IntegrationTests` builds with zero errors. Reported dependency,
+  vulnerability, analyzer, and upstream obsolescence warnings predate P2.2b.
+- The trajectory matrix passes 18/18. It covers open and closed two-floor
+  routes, source-floor contact clipping, route rejection and invalidation,
+  active-route retarget rejection,
+  normal guns, projectile spread distance, manual and clamped throws, initially
+  rotated frames translated after launch, direct thrown-item hits, reflection,
+  authored channels, state replication, destination reconciliation, and a
+  four-projectile contact-flush batch.
+- The affected projectile, weapon, embed, and item-throwing regression matrix
+  passes 12/12. The cumulative test filter containing `ZLevel` passes 101/101;
+  structural unit tests pass 2/2; generated 3-, 6-, and 10-floor baselines pass
+  3/3.
+- WTZ Engine `Collision_Test` passes 7/7, including moved-body contact discovery
+  and idempotent repeated flushes. The paired engine revision is
+  `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea` on
+  `zlevel/physics-contact-flush`.
+- One substep containing four simultaneous crossings records four successful
+  crossings and one contact flush. Launch preflight uses the already measured
+  reusable trace buffer; steady updates reuse the trajectory system's crossing
+  list instead of allocating a result per body.
+
+### Decisions
+
+- Treat vertical ballistics as an explicit route layered over Robust physics,
+  not as a replacement three-dimensional physics engine. Same-floor shots and
+  throws never opt in.
+- Let the authoritative target entity select the destination floor while the
+  post-clamp/post-recoil/post-spread displacement selects planar geometry. This
+  keeps range and spread honest without trusting a client-provided Z value.
+- Interpolate floor centers linearly and cross at half-level planes. For a route
+  from local Z 2 to Z 0, crossings occur at one quarter and three quarters of
+  the planar distance.
+- Preflight with `ZLevelTrace`, then check each live boundary again at the
+  current crossing tile. A deck edited while the projectile is in flight is
+  therefore authoritative.
+- Preserve only collinear, non-reversed solver damping after clipping. A hard
+  contact, reflection, perpendicular response, or invalid body state cancels
+  the route and leaves native physics in control.
+- Flush contacts globally once for all crossings in the substep. A body-local
+  engine API would require a larger physics ownership change and would not
+  guarantee events for every moved proxy; metrics make the global cost visible.
+- Preserve inertial velocity when a grid rotates during flight. Initially
+  rotated frames and post-launch translation work; WTZ does not curve a shot to
+  follow a suddenly rotating ship.
+
+### Completion Gate
+
+- [x] Scope check: the project diff is limited to bounded physical trajectories,
+      their gun/throw consumers, projectile gravity and impact lifecycle,
+      metrics, authored channels, tests, documentation, and the paired engine
+      submodule revision.
+- [x] Invariant review: Z 0 parity, local/world Z, displaced and rotated frames,
+      post-launch translation, server target authority, boundary changes,
+      collision ordering, reflection, and replication are represented.
+- [x] Automated verification: build, 18/18 trajectory, 12/12 affected regression,
+      101/101 cumulative Z-level integration, 7/7 engine contact, 2/2 unit, and
+      3/3 baseline tests pass.
+- [x] Performance evidence: reusable buffers remain in the hot path, four
+      concurrent crossings share one global contact flush, counters expose all
+      terminal causes and flushes, and the three stress baselines remain green.
+- [x] Documentation: architecture, consumers, physics ordering, metrics,
+      limitations, commands, and verification are recorded in
+      `Docs/ZLevelProjectiles.md` and this ledger.
+- [x] Dependency check: WTZ Engine revision
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea` is committed, pushed, clean,
+      and paired by the project submodule pointer.
+- [x] Git check: engine and project `git diff --check` pass apart from checkout
+      line-ending notices; generated TRX and baseline artifacts remain ignored,
+      and final status contains only the declared package files.
+- [x] Mini review: findings, residual risks, and P2.3 are recorded below.
+- [x] Commit: save as `Add physical cross-level ballistic trajectories` on
+      `zlevel/projectile-vertical-trajectory`; remote verification follows the
+      commit.
+
+### Mini Review
+
+- Finding: physical projectiles and thrown items now traverse authored openings
+  through real normal-input paths and preserve contacts on the correct floor.
+- Finding: clipping plus the paired contact flush closes the high-speed window
+  in which a projectile could otherwise leave its source collision context
+  before contact events were raised.
+- Finding: spread and manually clamped throws retain their true planar distance;
+  the completion review caught and fixed the unit-vector spread case.
+- Residual risk: an empty lower-floor tile does not identify a destination Z;
+  physical traversal currently requires an authoritative target entity.
+- Residual risk: upward targeting awaits coherent upper-floor FOV/input policy,
+  and cross-grid routes remain intentionally unsupported.
+- Residual risk: a rotating grid preserves inertial projectile velocity. If the
+  body leaves its authored frame, WTZ records an invalid cancellation and native
+  projectile motion continues on its current floor.
+- Residual risk: the global contact flush is batched and instrumented but needs
+  P8 scale profiling with many simultaneous players and moving grids.
+- Residual risk: impact payload serialization and destination reconciliation are
+  automated; exact visual placement still needs an in-game manual pass.
+- Next package: split P2.3 into an authoritative explosion topology package
+  first, followed by fire/heat propagation and generated-effect presentation,
+  all as specialized consumers of `ZLevelTrace` and boundary channels.
 
 ## Package History
 
@@ -1061,3 +1180,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P1.3b2 | `Instrument and benchmark Z-level traces` | 17 trace/budget, 3 metrics/benchmark, 68 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.1 | `Migrate hitscan to Z-level traces` | 10 hitscan, 1 weapon, 78 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.2a | `Preserve Z-level projectile lifecycle` | 5 lifecycle, 12 regressions, 83 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.2b | `Add physical cross-level ballistic trajectories` | 18 trajectory, 12 regressions, 101 integration, 7 engine, 2 unit, 3 baseline, diff check | Complete |
