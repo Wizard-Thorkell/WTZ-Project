@@ -3,6 +3,7 @@ using Content.Client.Animations;
 using Content.Client.Gameplay;
 using Content.Client.Items;
 using Content.Client.Weapons.Ranged.Components;
+using Content.Client.ZLevel;
 using Content.Shared.Camera;
 using Content.Shared.CCVar;
 using Content.Shared.CombatMode;
@@ -12,6 +13,7 @@ using Content.Shared.Weapons.Ranged;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Events;
 using Content.Shared.Weapons.Ranged.Systems;
+using Content.Shared.ZLevel.Systems;
 using Robust.Client.Animations;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
@@ -45,6 +47,7 @@ public sealed partial class GunSystem : SharedGunSystem
     [Dependency] private readonly SharedMapSystem _maps = default!;
     [Dependency] private readonly SharedTransformSystem _xform = default!;
     [Dependency] private readonly SpriteSystem _sprite = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     public static readonly EntProtoId HitscanProto = "HitscanEffect";
 
@@ -121,6 +124,7 @@ public sealed partial class GunSystem : SharedGunSystem
                 continue;
 
             var ent = Spawn(HitscanProto, coords);
+            _zLevels.StampWorldZLevelPosition(ent, a.WorldZ);
             var sprite = Comp<SpriteComponent>(ent);
 
             var xform = Transform(ent);
@@ -202,7 +206,10 @@ public sealed partial class GunSystem : SharedGunSystem
 
         NetEntity? target = null;
         if (_state.CurrentState is GameplayStateBase screen)
-            target = GetNetEntity(screen.GetClickedEntity(mousePos));
+            target = GetNetEntity(screen.GetClickedEntity(
+                mousePos,
+                _eyeManager.CurrentEye,
+                ZLevelTargetingMode.VisibleCrossFloorRanged));
 
         Log.Debug($"Sending shoot request tick {Timing.CurTick} / {Timing.CurTime}");
 

@@ -14,6 +14,7 @@ Official repositories:
 - Active implementation ledger: [ZLevelImplementationLedger.md](ZLevelImplementationLedger.md)
 - Shared trace contract: [ZLevelTrace.md](ZLevelTrace.md)
 - Trace benchmark report: [ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md)
+- Z-aware hitscan: [ZLevelHitscan.md](ZLevelHitscan.md)
 
 ## Product Goal
 
@@ -178,11 +179,24 @@ Implemented first-pass Z-aware network visibility:
   thread, covering the same range and chunk margin as native PVS.
 - Attached entities and all view subscriptions contribute independent camera
   contexts; visibility from any subscribed view keeps an entity relevant.
+
 - Hidden networked entities are excluded only from normal spatial PVS. Forced,
   global, and explicit session overrides retain their native precedence.
 - Culling a transform parent also culls its descendants, covering contained or
   otherwise non-spatial children without flattening entity hierarchies.
 - Disabling native PVS or disconnecting a session clears its exclusion state.
+
+Implemented authoritative Z-aware hitscan:
+
+- Same-floor and Z 0 shots retain the established collision and target
+  selection rules while filtering colliders from other world Z levels.
+- Visible lower-floor entities can be targeted through open visibility paths;
+  the server independently validates visibility, a shared structural frame,
+  three-dimensional range, and every `Projectile` boundary crossing.
+- Hitscan effects are split into ordered floor segments and stamped with their
+  world Z on the client.
+- Upward targeting and empty-tile cross-floor aiming remain deferred until the
+  viewport/FOV and network input contracts can represent them intentionally.
 
 Implemented vertical boundary foundation:
 

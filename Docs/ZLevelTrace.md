@@ -150,8 +150,11 @@ returns.
   engine physics ray can still allocate internally. Warmed tile-only workloads
   are enforced as allocation-free; hit-enabled consumers must be profiled
   separately.
-- No gameplay system consumes this API yet. Hitscan is the first P2 migration
-  after the complete P1 primitive is stable.
+- Authoritative basic hitscan is the first gameplay consumer. It uses the
+  caller-owned buffer, `Projectile` boundaries, server-owned target validation,
+  and consumer-specific hit selection described in
+  [ZLevelHitscan.md](ZLevelHitscan.md). Physical projectiles and throws remain
+  the next migration.
 
 ## Verification
 

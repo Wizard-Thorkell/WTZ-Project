@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/hitscan-trace`.
-- Active package: `P2.1 Hitscan trace migration`.
+- Active branch: `zlevel/projectile-traversal`.
+- Active package: `P2.2 Physical projectiles and thrown-entity traversal`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -806,24 +806,136 @@ treated as Debug-run noise.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P2.1 | Authoritative hitscan migration and Z 0 parity | In progress |
-| P2.2 | Physical projectiles and thrown-entity traversal | Pending |
+| P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
+| P2.2 | Physical projectiles and thrown-entity traversal | In progress |
 | P2.3 | Explosions, fire, heat, and generated effects | Pending |
 | P2.4 | Central direct and remote interaction validation | Pending |
 
-## Active Package: P2.1 Hitscan Trace Migration
+## Completed Package: P2.1 Hitscan Trace Migration
+
+### Scope
+
+- Preserve authoritative same-floor hitscan selection while filtering physics
+  candidates by world Z.
+- Allow deliberate shots at visible lower-floor entities through a common
+  structural frame and independently open `Projectile` boundaries.
+- Keep range, target preference, damage, reflection, logging, and presentation
+  in the weapon consumer instead of moving them into `ZLevelTrace`.
+- Split visual effects by trace segment and stamp every client effect with its
+  authoritative world Z.
+- Capture collision-enabled allocation evidence and broad Z-level regressions.
+
+### Acceptance Criteria
+
+- Z 0 and same-floor hits retain container and
+  `RequireProjectileTargetComponent` selection behavior.
+- Colliders that overlap in XY but occupy another world Z cannot intercept a
+  same-floor shot.
+- A visible lower target on the same current grid frame can be hit only through
+  open projectile boundaries and within XYZ max range.
+- Hidden, above-floor, cross-frame, invalid, or over-budget requests fail
+  conservatively without trusting a client floor value.
+- Moving translated/rotated frames resolve current local and world Z.
+- Networked muzzle, travel, and impact sprites carry the floor of their trace
+  segment and are stamped on the client.
+
+### Evidence
+
+- `Content.IntegrationTests` builds with zero errors. Reported dependency,
+  analyzer, and upstream obsolescence warnings are pre-existing; the four new
+  transform-query analyzer warnings found during review were removed.
+- The focused hitscan matrix passes 10/10 cases, including same-level parity,
+  open and closed vertical shots, visibility authorization, above-floor denial,
+  three-dimensional range, target-only obstacles, moving frames, trace budget
+  exhaustion, and collision allocation capture.
+- The existing weapon regression passes 1/1; the complete Z-level integration
+  matrix passes 78/78; structural unit tests pass 2/2; all three generated
+  3-, 6-, and 10-floor baselines pass.
+- Client and server integration startup report the same serializer type hash
+  after extending the hitscan visual payload with world Z.
+- `git diff --check` passes apart from the repository's checkout line-ending
+  notices.
+
+The warmed collision-enabled Debug workload measured 512 requests at 447,608
+managed bytes, or 874.23 bytes per request, and 5.759 ms total on the reference
+machine. This is comparison evidence rather than a release threshold. P1's
+buffered tile-only workload remains allocation-free; the remaining collision
+allocation is inside Robust physics enumeration.
+
+### Decisions
+
+- Infer a cross-floor destination only from a server-resolved target entity.
+  Clients do not provide world or local Z in the gun request.
+- Reuse the renderer's current visibility contract: ordinary ranged targeting
+  can select visible lower floors, while above-floor targeting remains disabled
+  because those sprites are intentionally hidden.
+- Recheck visibility on the server, then evaluate projectile passage separately
+  so a visually open grate or shaft can still block weapon fire by policy.
+- Use XYZ distance for cross-floor range and the post-recoil 2D direction for
+  planar geometry. Same-floor shots retain their full legacy max-distance ray.
+- Keep one reusable buffer in the event system. All trace output and effects are
+  consumed before reflection can recursively raise another hitscan event.
+- Preserve the existing reflection event contract. A reflected ray starts on
+  the hit floor and remains two-dimensional until reflection can express a
+  deliberate vertical destination.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only hitscan targeting, authoritative
+      tracing, segmented presentation, focused tests, and related documentation.
+- [x] Invariant review: Z 0, world/local frame conversion, moving grids, server
+      authority, visibility authorization, and projectile boundaries are
+      represented in implementation and tests.
+- [x] Automated verification: build, 10/10 hitscan, 1/1 weapon regression,
+      78/78 Z-level integration, 2/2 unit, and 3/3 baseline tests pass.
+- [x] Performance evidence: the first warmed collision-enabled consumer capture
+      is recorded without converting local Debug timing into a brittle limit.
+- [x] Documentation: architecture, decisions, current targeting limits,
+      performance, and commands are recorded in `Docs/ZLevelHitscan.md`.
+- [x] Dependency check: existing Robust physics, networking, transforms, and
+      sprite APIs are sufficient; no paired WTZ Engine revision is required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, generated artifacts remain ignored, and the diff is package-scoped.
+- [x] Mini review: findings, residual risks, and P2.2 are recorded below.
+- [x] Commit: save as `Migrate hitscan to Z-level traces` on
+      `zlevel/hitscan-trace`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: P2 now has its first real gameplay consumer of the shared trace;
+  cross-floor collision, boundary policy, metrics, and visuals use one ordered
+  result without moving weapon behavior into the geometric primitive.
+- Finding: same-XY colliders on other floors no longer leak into ordinary
+  hitscan, even when no vertical shot is requested.
+- Finding: visibility and projectile channels can intentionally disagree, and
+  the server validates both before damage is emitted.
+- Residual risk: the current gun request cannot encode the world Z of an empty
+  clicked tile, so cross-floor shooting requires an entity target.
+- Residual risk: one target entity selects the structural floor while the
+  post-recoil direction selects planar geometry. Server visibility, range, and
+  every traced boundary are authoritative, but stronger target-to-cursor
+  binding should be considered when the input contract gains explicit view Z.
+- Residual risk: upward shots are geometrically supported but deliberately not
+  targetable until upper-floor FOV and rendering have a coherent player-facing
+  policy.
+- Residual risk: segmented visual payloads have serializer and compile coverage;
+  exact muzzle/travel/impact appearance still needs an in-game manual pass.
+- Next package: audit physical projectile and thrown-entity movement, define
+  continuous crossing state without tracing an unbounded future trajectory,
+  and preserve collision/prediction behavior on Z 0.
+
+## Active Package: P2.2 Physical Projectiles And Thrown Traversal
 
 ### Planned Scope
 
-- Identify the authoritative hitscan entry points and preserve their existing
-  same-level collision, penetration, damage, effects, and prediction behavior.
-- Route candidate geometry through a reusable `ZLevelTraceBuffer` with the
-  `Projectile` boundary channel and reject continuation through closed decks.
-- Add focused Z 0 parity, open/closed vertical, diagonal, deterministic-hit,
-  budget-failure, and moving-frame tests before broad integration verification.
-- Capture allocation and trace metrics with a representative collision mask;
-  document any unavoidable Robust-owned physics allocation before expanding to
-  physical projectiles.
+- Map authoritative projectile movement, CCD/contact handling, throw state,
+  landing, embedding, reflection, and client prediction paths.
+- Define bounded per-step vertical crossing checks using the `Projectile`
+  channel while keeping horizontal physics under the existing engine solver.
+- Preserve current grid-frame ownership and world Z when a projectile or thrown
+  entity crosses an opening, lands, embeds, enters storage, or is deleted.
+- Add focused Z 0, open/closed deck, fast crossing, diagonal moving-frame,
+  throw/landing, and budget/performance tests before migrating broader effects.
 
 ## Package History
 
@@ -837,3 +949,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P1.3a | `Normalize Z-level traces across moving frames` | 7 trace, 62 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.3b1 | `Add reusable Z-level trace buffers` | 8 trace, 7 budget, 64 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P1.3b2 | `Instrument and benchmark Z-level traces` | 17 trace/budget, 3 metrics/benchmark, 68 integration, 2 unit, 3 baseline, diff check | Complete |
+| 2026-08-27 | P2.1 | `Migrate hitscan to Z-level traces` | 10 hitscan, 1 weapon, 78 integration, 2 unit, 3 baseline, diff check | Complete |

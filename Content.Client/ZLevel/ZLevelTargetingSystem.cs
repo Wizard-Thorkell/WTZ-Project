@@ -28,6 +28,7 @@ public enum ZLevelTargetingMode : byte
     VisibleCrossFloorExamine,
     VisibleCrossFloorAdmin,
     VisibleTopmostAny,
+    VisibleCrossFloorRanged,
 }
 
 /// <summary>
@@ -154,6 +155,8 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         {
             ZLevelTargetingMode.SameFloorOnly => false,
             ZLevelTargetingMode.VisibleCrossFloorExamine => entityZ < viewer.WorldZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
+            ZLevelTargetingMode.VisibleCrossFloorRanged => entityZ < viewer.WorldZLevel &&
                 _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
             ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.WorldZLevel &&
                 _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),

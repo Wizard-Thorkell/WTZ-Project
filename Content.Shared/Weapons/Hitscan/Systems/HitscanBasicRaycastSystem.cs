@@ -5,10 +5,10 @@ using Content.Shared.Database;
 using Content.Shared.Weapons.Hitscan.Components;
 using Content.Shared.Weapons.Hitscan.Events;
 using Content.Shared.Weapons.Ranged.Systems;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
-using Robust.Shared.Physics;
-using Robust.Shared.Physics.Systems;
 using Robust.Shared.Player;
 using Robust.Shared.Utility;
 
@@ -16,48 +16,50 @@ namespace Content.Shared.Weapons.Hitscan.Systems;
 
 public sealed class HitscanBasicRaycastSystem : EntitySystem
 {
-    [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
     [Dependency] private readonly ISharedAdminLogManager _log = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
+    [Dependency] private readonly SharedZLevelTraceSystem _zTrace = default!;
+    [Dependency] private readonly SharedZLevelVisibilitySystem _zVisibility = default!;
 
     [Dependency] private readonly EntityQuery<HitscanBasicVisualsComponent> _visualsQuery = default!;
+
+    private readonly ZLevelTraceBuffer _traceBuffer = new();
 
     public override void Initialize()
     {
         base.Initialize();
 
         SubscribeLocalEvent<HitscanBasicRaycastComponent, HitscanTraceEvent>(OnHitscanFired);
+        _traceBuffer.EnsureCapacity(8, 0, 32, 8);
     }
 
     private void OnHitscanFired(Entity<HitscanBasicRaycastComponent> ent, ref HitscanTraceEvent args)
     {
         var shooter = args.Shooter ?? args.Gun;
-        var mapCords = _transform.ToMapCoordinates(args.FromCoordinates);
-        var ray = new CollisionRay(mapCords.Position, args.ShotDirection, (int) ent.Comp.CollisionMask);
-        var rayCastResults = _physics.IntersectRay(mapCords.MapId, ray, ent.Comp.MaxDistance, shooter, false);
+        ZLevelTraceEntityHit? hit = null;
+        var distanceTried = 0f;
+        if (TryCreateTraceRequest(ent.Comp, args, shooter, out var request))
+        {
+            _zTrace.Trace(request, _traceBuffer);
+            hit = SelectHit(shooter, args.Target, _traceBuffer.EntityHits);
+            distanceTried = hit?.Distance ?? GetTraceDistance(_traceBuffer);
 
-        var target = args.Target;
-        // If you are in a container, use the raycast result
-        // Otherwise:
-        //  1.) Hit the first entity that you targeted.
-        //  2.) Hit the first entity that doesn't require you to aim at it specifically to be hit.
-        var result = _container.IsEntityOrParentInContainer(shooter)
-            ? rayCastResults.FirstOrNull()
-            : rayCastResults.FirstOrNull(hit => hit.HitEntity == target
-                                                || CompOrNull<RequireProjectileTargetComponent>(hit.HitEntity)?.Active != true);
-
-        var distanceTried = result?.Distance ?? ent.Comp.MaxDistance;
-
-        // Do visuals without an event. They should always happen and putting it on the attempt event is weird!
-        // If more stuff gets added here, it should probably be turned into an event.
-        FireEffects(args.FromCoordinates, distanceTried, args.ShotDirection.ToAngle(), ent.Owner);
+            // Consume buffered trace output before reflection can raise this event recursively.
+            FireEffects(
+                _traceBuffer.Segments,
+                distanceTried,
+                hit?.SegmentSequence ?? GetStopSegment(_traceBuffer),
+                args.ShotDirection.ToAngle(),
+                ent.Owner);
+        }
 
         // Admin logging
-        if (result?.HitEntity != null)
+        if (hit is { } selected)
         {
             _log.Add(LogType.HitScanHit,
-                $"{ToPrettyString(shooter):user} hit {ToPrettyString(result.Value.HitEntity):target}"
+                $"{ToPrettyString(shooter):user} hit {ToPrettyString(selected.Entity):target}"
                 + $" using {ToPrettyString(args.Gun):entity}.");
         }
 
@@ -66,7 +68,7 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
             ShotDirection = args.ShotDirection,
             Gun = args.Gun,
             Shooter = args.Shooter,
-            HitEntity = result?.HitEntity,
+            HitEntity = hit?.Entity,
         };
 
         var attemptEvent = new AttemptHitscanRaycastFiredEvent { Data = data };
@@ -79,70 +81,285 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
         RaiseLocalEvent(ent, ref hitEvent);
     }
 
+    private bool TryCreateTraceRequest(
+        HitscanBasicRaycastComponent component,
+        HitscanTraceEvent args,
+        EntityUid shooter,
+        out ZLevelTraceRequest request)
+    {
+        request = default;
+        var originMap = _transform.ToMapCoordinates(args.FromCoordinates);
+        if (originMap.MapId == MapId.Nullspace ||
+            !TryComp(shooter, out TransformComponent? shooterTransform) ||
+            shooterTransform.MapID != originMap.MapId ||
+            !IsFinite(originMap.Position) ||
+            !IsFinite(args.ShotDirection) ||
+            !float.IsFinite(component.MaxDistance))
+        {
+            return false;
+        }
+
+        var maxDistance = Math.Max(0f, component.MaxDistance);
+        var direction = args.ShotDirection;
+        var directionLength = direction.Length();
+        if (!float.IsFinite(directionLength))
+            return false;
+
+        if (directionLength > 0f)
+            direction /= directionLength;
+
+        var originWorldZ = _zLevels.GetWorldZLevel(shooter);
+        var destinationPosition = originMap.Position + direction * maxDistance;
+        var destinationWorldZ = originWorldZ;
+        var frameUid = shooterTransform.GridUid;
+
+        if (args.Target is { } target &&
+            TryComp(target, out TransformComponent? targetTransform) &&
+            targetTransform.MapID == originMap.MapId)
+        {
+            var targetWorldZ = _zLevels.GetWorldZLevel(target);
+            if (targetWorldZ != originWorldZ &&
+                frameUid is { } commonFrame &&
+                targetTransform.GridUid == commonFrame &&
+                _zVisibility.IsEntityVisibleFrom(target, originMap.MapId, originWorldZ))
+            {
+                var targetMap = _transform.GetMapCoordinates((target, targetTransform));
+                if (!IsFinite(targetMap.Position))
+                    return false;
+
+                var planarDistance = Vector2.Distance(originMap.Position, targetMap.Position);
+                var verticalDistance = (double) targetWorldZ - originWorldZ;
+                var traceDistance = Math.Sqrt(
+                    (double) planarDistance * planarDistance + verticalDistance * verticalDistance);
+                if (traceDistance <= maxDistance)
+                {
+                    destinationPosition = planarDistance == 0f || directionLength == 0f
+                        ? targetMap.Position
+                        : originMap.Position + direction * planarDistance;
+                    destinationWorldZ = targetWorldZ;
+                }
+            }
+        }
+
+        if (!TryCreatePoint(originMap, originWorldZ, frameUid, out var origin) ||
+            !TryCreatePoint(
+                new MapCoordinates(destinationPosition, originMap.MapId),
+                destinationWorldZ,
+                frameUid,
+                out var destination))
+        {
+            return false;
+        }
+
+        request = new ZLevelTraceRequest(
+            origin,
+            destination,
+            ZLevelBoundaryChannels.Projectile,
+            (int) component.CollisionMask,
+            shooter,
+            ZLevelTraceOptions.IncludeEntityHits,
+            frameUid);
+        return true;
+    }
+
+    private bool TryCreatePoint(
+        MapCoordinates coordinates,
+        int worldZ,
+        EntityUid? frameUid,
+        out ZLevelTracePoint point)
+    {
+        if (frameUid is { } gridUid && TryComp(gridUid, out TransformComponent? gridTransform))
+        {
+            var local = _transform.ToCoordinates((gridUid, gridTransform), coordinates);
+            return _zTrace.TryCreateGridPoint(
+                gridUid,
+                local.Position,
+                _transform.WorldToLocalZLevel(gridUid, worldZ),
+                out point);
+        }
+
+        point = ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
+            coordinates.Position,
+            worldZ,
+            coordinates.MapId));
+        return true;
+    }
+
+    private ZLevelTraceEntityHit? SelectHit(
+        EntityUid shooter,
+        EntityUid? target,
+        IReadOnlyList<ZLevelTraceEntityHit> hits)
+    {
+        if (hits.Count == 0)
+            return null;
+
+        if (_container.IsEntityOrParentInContainer(shooter))
+            return hits[0];
+
+        foreach (var candidate in hits)
+        {
+            if (candidate.Entity == target ||
+                CompOrNull<RequireProjectileTargetComponent>(candidate.Entity)?.Active != true)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static float GetTraceDistance(ZLevelTraceBuffer buffer)
+    {
+        if (buffer.Segments.Count > 0)
+            return buffer.Segments[^1].EndDistance;
+
+        if (buffer.BoundaryCrossings.Count > 0)
+            return buffer.BoundaryCrossings[^1].Distance;
+
+        return 0f;
+    }
+
+    private static int GetStopSegment(ZLevelTraceBuffer buffer)
+    {
+        return buffer.Segments.Count - 1;
+    }
+
     /// <summary>
     /// Create visual effects for the fired hitscan weapon.
     /// </summary>
-    /// <param name="fromCoordinates">Location to start the effect.</param>
-    /// <param name="distance">Distance of the hitscan shot.</param>
-    /// <param name="shotAngle">Angle of the shot.</param>
+    /// <param name="segments">Ordered trace segments to render.</param>
+    /// <param name="stopDistance">Cumulative trace distance reached by the shot.</param>
+    /// <param name="stopSegment">Segment containing the stop point.</param>
+    /// <param name="fallbackWorldAngle">Angle used by a segment with no planar displacement.</param>
     /// <param name="hitscanUid">The hitscan entity itself.</param>
-    private void FireEffects(EntityCoordinates fromCoordinates, float distance, Angle shotAngle, EntityUid hitscanUid)
+    private void FireEffects(
+        IReadOnlyList<ZLevelTraceSegment> segments,
+        float stopDistance,
+        int stopSegment,
+        Angle fallbackWorldAngle,
+        EntityUid hitscanUid)
     {
-        if (distance == 0 || !_visualsQuery.TryComp(hitscanUid, out var vizComp))
+        if (stopDistance <= 0f ||
+            stopSegment < 0 ||
+            segments.Count == 0 ||
+            !_visualsQuery.TryComp(hitscanUid, out var vizComp))
+        {
             return;
-
-        var sprites = new List<(NetCoordinates coordinates, Angle angle, SpriteSpecifier sprite, float scale)>();
-        var fromXform = Transform(fromCoordinates.EntityId);
-
-        // We'll get the effects relative to the grid / map of the firer
-        // Look you could probably optimise this a bit with redundant transforms at this point.
-
-        var gridUid = fromXform.GridUid;
-        if (gridUid != fromCoordinates.EntityId && TryComp(gridUid, out TransformComponent? gridXform))
-        {
-            var (_, gridRot, gridInvMatrix) = _transform.GetWorldPositionRotationInvMatrix(gridXform);
-            var map = _transform.ToMapCoordinates(fromCoordinates);
-            fromCoordinates = new EntityCoordinates(gridUid.Value, Vector2.Transform(map.Position, gridInvMatrix));
-            shotAngle -= gridRot;
-        }
-        else
-        {
-            shotAngle -= _transform.GetWorldRotation(fromXform);
         }
 
-        if (distance >= 1f)
+        var sprites = new List<(NetCoordinates coordinates, Angle angle, SpriteSpecifier sprite, float scale, int worldZ)>();
+        EntityCoordinates? pvsCoordinates = null;
+        for (var i = 0; i < segments.Count; i++)
         {
-            if (vizComp.MuzzleFlash != null)
-            {
-                var coords = fromCoordinates.Offset(shotAngle.ToVec().Normalized() / 2);
-                var netCoords = GetNetCoordinates(coords);
+            var segment = segments[i];
+            if (i > stopSegment)
+                break;
 
-                sprites.Add((netCoords, shotAngle, vizComp.MuzzleFlash, 1f));
-            }
+            var distanceSpan = segment.EndDistance - segment.StartDistance;
+            var amount = i < stopSegment || distanceSpan <= 0f
+                ? 1f
+                : Math.Clamp((stopDistance - segment.StartDistance) / distanceSpan, 0f, 1f);
+            var segmentDelta = GetSegmentDelta(segment) * amount;
+            var planarDistance = segmentDelta.Length();
+            var fromCoordinates = GetCoordinates(segment.Start);
+            pvsCoordinates ??= fromCoordinates;
+            var shotAngle = GetSegmentAngle(segment, segmentDelta, fallbackWorldAngle);
+            var stopsHere = i == stopSegment || i == segments.Count - 1;
+            AppendEffects(
+                sprites,
+                fromCoordinates,
+                planarDistance,
+                shotAngle,
+                segment.Start.WorldCoordinates.Z,
+                vizComp,
+                includeMuzzle: i == 0,
+                includeImpact: stopsHere);
 
-            if (vizComp.TravelFlash != null)
-            {
-                var coords = fromCoordinates.Offset(shotAngle.ToVec() * (distance + 0.5f) / 2);
-                var netCoords = GetNetCoordinates(coords);
-
-                sprites.Add((netCoords, shotAngle, vizComp.TravelFlash, distance - 1.5f));
-            }
+            if (stopsHere)
+                break;
         }
 
-        if (vizComp.ImpactFlash != null)
-        {
-            var coords = fromCoordinates.Offset(shotAngle.ToVec() * distance);
-            var netCoords = GetNetCoordinates(coords);
-
-            sprites.Add((netCoords, shotAngle.FlipPositive(), vizComp.ImpactFlash, 1f));
-        }
-
-        if (sprites.Count > 0)
+        if (sprites.Count > 0 && pvsCoordinates is { } pvs)
         {
             RaiseNetworkEvent(new SharedGunSystem.HitscanEvent
             {
                 Sprites = sprites,
-            }, Filter.Pvs(fromCoordinates, entityMan: EntityManager));
+            }, Filter.Pvs(pvs, entityMan: EntityManager));
         }
+    }
+
+    private void AppendEffects(
+        List<(NetCoordinates coordinates, Angle angle, SpriteSpecifier sprite, float scale, int worldZ)> sprites,
+        EntityCoordinates fromCoordinates,
+        float distance,
+        Angle shotAngle,
+        int worldZ,
+        HitscanBasicVisualsComponent visuals,
+        bool includeMuzzle,
+        bool includeImpact)
+    {
+        if (distance >= 1f)
+        {
+            if (includeMuzzle && visuals.MuzzleFlash != null)
+            {
+                var coords = fromCoordinates.Offset(shotAngle.ToVec().Normalized() / 2);
+                var netCoords = GetNetCoordinates(coords);
+
+                sprites.Add((netCoords, shotAngle, visuals.MuzzleFlash, 1f, worldZ));
+            }
+
+            if (visuals.TravelFlash != null)
+            {
+                var coords = fromCoordinates.Offset(shotAngle.ToVec() * (distance + 0.5f) / 2);
+                var netCoords = GetNetCoordinates(coords);
+
+                sprites.Add((netCoords, shotAngle, visuals.TravelFlash, distance - 1.5f, worldZ));
+            }
+        }
+
+        if (includeImpact && visuals.ImpactFlash != null)
+        {
+            var coords = fromCoordinates.Offset(shotAngle.ToVec() * distance);
+            var netCoords = GetNetCoordinates(coords);
+
+            sprites.Add((netCoords, shotAngle.FlipPositive(), visuals.ImpactFlash, 1f, worldZ));
+        }
+    }
+
+    private EntityCoordinates GetCoordinates(ZLevelTracePoint point)
+    {
+        if (point.GridUid is { } gridUid)
+            return new EntityCoordinates(gridUid, point.LocalPosition);
+
+        return _transform.ToCoordinates(new MapCoordinates(
+            point.WorldCoordinates.Position,
+            point.WorldCoordinates.MapId));
+    }
+
+    private Angle GetSegmentAngle(
+        ZLevelTraceSegment segment,
+        Vector2 segmentDelta,
+        Angle fallbackWorldAngle)
+    {
+        if (segmentDelta != Vector2.Zero)
+            return segmentDelta.ToAngle();
+
+        if (segment.FrameUid is { } frameUid && TryComp(frameUid, out TransformComponent? frameTransform))
+            return fallbackWorldAngle - _transform.GetWorldRotation(frameTransform);
+
+        return fallbackWorldAngle;
+    }
+
+    private static Vector2 GetSegmentDelta(ZLevelTraceSegment segment)
+    {
+        if (segment.FrameUid != null)
+            return segment.End.LocalPosition - segment.Start.LocalPosition;
+
+        return segment.End.WorldCoordinates.Position - segment.Start.WorldCoordinates.Position;
+    }
+
+    private static bool IsFinite(Vector2 value)
+    {
+        return float.IsFinite(value.X) && float.IsFinite(value.Y);
     }
 }
