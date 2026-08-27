@@ -6,6 +6,7 @@ using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.CCVar;
+using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared;
 using Robust.Shared.Enums;
@@ -122,6 +123,78 @@ public sealed class ZLevelBudgetTest : GameTest
             {
                 SEntMan.DeleteEntity(candidate);
             }
+        });
+    }
+
+    [Test]
+    public async Task TraceCrossingBudgetIsClampedAndRejectsOversizedVerticalWork()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelTraceMaxVerticalCrossings, 0);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.MaxVerticalCrossings, Is.EqualTo(1));
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                2,
+                out var destination), Is.True);
+
+            var result = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Projectile));
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.IterationBudgetExceeded));
+                Assert.That(result.Segments, Is.Empty);
+                Assert.That(result.TileVisits, Is.Empty);
+                Assert.That(result.BoundaryCrossings, Is.Empty);
+            });
+        });
+    }
+
+    [Test]
+    public async Task TraceTileBudgetRollsBackTheOverflowingSegment()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelTraceMaxTileVisits, 2);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+            Assert.That(trace.MaxTileVisits, Is.EqualTo(2));
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.5f, 0.5f),
+                0,
+                out var origin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(3.5f, 0.5f),
+                0,
+                out var destination), Is.True);
+
+            var result = trace.Trace(new ZLevelTraceRequest(
+                origin,
+                destination,
+                ZLevelBoundaryChannels.Effects,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination, Is.EqualTo(ZLevelTraceTermination.IterationBudgetExceeded));
+                Assert.That(result.Segments, Is.Empty);
+                Assert.That(result.TileVisits, Is.Empty,
+                    "An overflowing segment must not expose a truncated tile sequence.");
+                Assert.That(result.EntityHits, Is.Empty);
+            });
         });
     }
 }

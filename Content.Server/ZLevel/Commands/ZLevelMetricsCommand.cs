@@ -38,6 +38,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var boundaries = _entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
+        var trace = _entityManager.System<SharedZLevelTraceSystem>();
         var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
 
         shell.WriteLine("Native Z-level metrics for this process since the last reset:");
@@ -67,5 +68,8 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"fail-open-candidates={metrics.PvsFailOpenCandidates}, " +
             $"avg={metrics.PvsAverageRefreshMilliseconds:0.000}ms, " +
             $"last={metrics.PvsLastRefreshMilliseconds:0.000}ms, max={metrics.PvsMaxRefreshMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
+            $"tile-visits={trace.MaxTileVisits}");
     }
 }

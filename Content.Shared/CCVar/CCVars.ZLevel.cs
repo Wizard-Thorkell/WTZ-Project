@@ -34,6 +34,24 @@ public sealed partial class CCVars
             16384,
             CVar.SERVERONLY);
 
+    /// <summary>
+    /// Maximum adjacent world-Z boundaries resolved by one shared trace.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTraceMaxVerticalCrossings =
+        CVarDef.Create(
+            "zlevel.trace_max_vertical_crossings",
+            64,
+            CVar.REPLICATED | CVar.SERVER);
+
+    /// <summary>
+    /// Maximum tile visits emitted by one shared trace.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTraceMaxTileVisits =
+        CVarDef.Create(
+            "zlevel.trace_max_tile_visits",
+            8_192,
+            CVar.REPLICATED | CVar.SERVER);
+
     public static readonly CVarDef<bool> ZLevelDebugOverlay =
         CVarDef.Create("zlevel.debug_overlay", false, CVar.CLIENTONLY | CVar.ARCHIVE);
 }

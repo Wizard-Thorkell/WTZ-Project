@@ -36,6 +36,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedZLevelBoundarySystem _boundarySystem;
     private readonly SharedZLevelGravitySystem _gravitySystem;
     private readonly SharedZLevelMetricsSystem _metricsSystem;
+    private readonly SharedZLevelTraceSystem _traceSystem;
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
@@ -57,6 +58,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _boundarySystem = _entityManager.System<SharedZLevelBoundarySystem>();
         _gravitySystem = _entityManager.System<SharedZLevelGravitySystem>();
         _metricsSystem = _entityManager.System<SharedZLevelMetricsSystem>();
+        _traceSystem = _entityManager.System<SharedZLevelTraceSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
@@ -128,6 +130,12 @@ public sealed class ZLevelDebugOverlay : Overlay
             metricsPosition + new Vector2(0f, 42f),
             $"gravity build count:{metrics.GravityBuilds} " +
             $"avg/max:{metrics.GravityAverageBuildMilliseconds:0.000}/{metrics.GravityMaxBuildMilliseconds:0.000}ms",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 56f),
+            $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
+            $"tiles:{_traceSystem.MaxTileVisits}",
             metricsColor);
     }
 

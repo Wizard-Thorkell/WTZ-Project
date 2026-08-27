@@ -27,7 +27,7 @@ public enum ZLevelTraceTermination : byte
     Completed,
     InvalidCoordinates,
     DifferentMaps,
-    VerticalTraversalRequired,
+    FrameResolutionRequired,
     ClosedBoundary,
     IterationBudgetExceeded,
 }

@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/trace-contract`.
-- Active package: `P1.2 Ordered vertical crossings and boundary integration`.
+- Active branch: `zlevel/trace-vertical-crossings`.
+- Active package: `P1.3 Moving-frame normalization, determinism, and allocation hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -333,8 +333,8 @@ treated as Debug-run noise.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P1.1 | Trace request/result contract, channels, and 2D reference behavior | Complete |
-| P1.2 | Ordered vertical crossings and boundary-channel integration | In progress |
-| P1.3 | Moving-frame normalization, determinism, and allocation hardening | Pending |
+| P1.2 | Ordered vertical crossings and boundary-channel integration | Complete |
+| P1.3 | Moving-frame normalization, determinism, and allocation hardening | In progress |
 
 ## Completed Package: P1.1 ZLevelTrace Contract And Reference Behavior
 
@@ -431,20 +431,123 @@ treated as Debug-run noise.
   boundary channels at each crossing, and merge per-level segments and hits by
   cumulative distance.
 
-## Active Package: P1.2 Ordered Vertical Crossings And Boundary Integration
+## Completed Package: P1.2 Ordered Vertical Crossings And Boundary Integration
+
+### Scope
+
+- Traverse one continuous world XYZ line in deterministic order and split it at
+  every adjacent half-level boundary.
+- Resolve crossings in a translated or rotated grid frame and query the shared
+  boundary resolver with the request's complete channel mask.
+- Stop coherently at the first closed boundary without evaluating later tiles,
+  fixtures, or crossings.
+- Merge per-floor segments, tile visits, entity hits, and crossings by
+  cumulative 3D distance in both upward and downward directions.
+- Bound crossing and tile work with replicated server CVars and explicit
+  `IterationBudgetExceeded` results.
+
+### Acceptance Criteria
+
+- One Z level contributes one unit to Euclidean trace distance, and crossings
+  occur at half-level planes.
+- Vertical crossings use explicit local and world Z values and never infer a
+  floor from overlapping XY geometry.
+- Every requested boundary bit must be open; the returned closed crossing is the
+  final evaluated boundary.
+- Same-floor fixture queries remain filtered by effective world Z, including
+  segments with zero XY extent.
+- Output order is deterministic for upward, downward, diagonal, and perfectly
+  vertical traces.
+- Crossing-budget rejection is a preflight empty result, while a tile-budget
+  overflow rolls back the complete overflowing segment.
+
+### Evidence
+
+- `Content.Shared`, `Content.Client`, and `Content.IntegrationTests` built with
+  zero errors. Their 99, 316, and 443 reported warnings are the existing
+  dependency, generator, analyzer, and upstream warning set.
+- The five trace reference tests passed, including Z 0 parity, rotated frames,
+  vertical fixture hits, closed channels, and unresolved cross-frame requests.
+- The combined trace and budget matrix passed 11/11 tests; the complete focused
+  Z-level integration matrix passed 60/60 tests.
+- Focused structural unit tests passed 2/2, and all 3-, 6-, and 10-floor P0
+  baseline cases passed 3/3 after the implementation.
+- `git diff --check` passed with only the checkout's LF-to-CRLF notices.
+
+### Decisions
+
+- Model discrete floor centers one world unit apart and split a monotonic line at
+  each `Z + 0.5` plane. This gives every output collection one shared distance
+  parameter without introducing continuous entity Z extents.
+- Execute vertical traces only when both captured endpoints share a valid grid
+  frame in P1.2. Return `FrameResolutionRequired` for map-only or cross-frame
+  vertical requests instead of selecting an overlapping grid implicitly.
+- Keep the existing engine 2D ray authoritative for segments with horizontal
+  extent. Filter every candidate by effective world Z and globally sort hits by
+  cumulative distance, entity UID, and segment sequence.
+- Resolve perfectly vertical collision through the existing exact entity lookup
+  plus point-in-fixture validation for hard fixtures matching the collision
+  mask. Record those hits at the segment entry distance.
+- Clamp crossings to 1 through 1,024 and tile visits to 1 through 1,000,000.
+  Replicate both server values and expose their effective values in
+  `zlevelmetrics` and the debug overlay.
+- Preserve immutable result snapshots until P1.3 establishes stable
+  caller-owned buffer and reuse semantics.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains only vertical trace geometry, its two
+      budgets and presentation, focused tests, and trace documentation.
+- [x] Invariant review: Z 0 parity, local/world Z, rotated frames, upward and
+      downward order, server-configured budgets, and channel masks are covered.
+- [x] Automated verification: Shared, Client, and IntegrationTests builds,
+      5/5 trace, 11/11 trace plus budget, 60/60 focused integration, 2/2 unit,
+      and 3/3 baseline cases passed.
+- [x] Performance evidence: no production system invokes the trace yet, so a
+      throughput comparison would be synthetic. Existing P0 baselines pass;
+      query allocations and a dedicated trace benchmark are assigned to P1.3.
+- [x] Documentation: geometry, ordering, partial results, budgets, commands,
+      limitations, and verification are recorded in `Docs/ZLevelTrace.md`.
+- [x] Dependency check: P1.2 uses existing Robust physics and lookup APIs and
+      requires no WTZ Engine revision change.
+- [x] Git check: `git diff --check` passes apart from line-ending notices, and
+      generated baseline artifacts remain ignored.
+- [x] Mini review: findings, residual risks, and P1.3 are recorded below.
+- [x] Commit: save as `Implement ordered vertical Z-level traces` on
+      `zlevel/trace-vertical-crossings`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: one half-level split algorithm covers diagonal, vertical, upward, and
+  downward requests without consumer-specific geometry.
+- Finding: boundary-first truncation prevents a closed roof or deck from leaking
+  entity and tile information from later floors.
+- Finding: the exact point path is needed because a 2D ray has no direction for
+  a perfectly vertical XYZ trace.
+- Residual risk: captured endpoint world coordinates can become stale if a grid
+  moves between point creation and `Trace`; P1.3 must normalize or reject this
+  deterministically.
+- Residual risk: immutable arrays, temporary candidate collections, and physics
+  enumerables allocate. Entity hits also lack an independent output budget.
+- Next package: normalize map and moving-grid frames, define stale-snapshot
+  behavior, add reusable buffers and bounded hit output, and instrument a
+  dedicated deterministic trace workload before migrating gameplay consumers.
+
+## Active Package: P1.3 Moving-Frame Normalization, Determinism, And Allocation Hardening
 
 ### Planned Scope
 
-- Traverse the continuous world XYZ line in deterministic order and split it at
-  every adjacent world-Z boundary.
-- Resolve each crossing to a grid-local tile and local Z pair, including holes
-  and translated or rotated origin frames supported by the current contract.
-- Query `SharedZLevelBoundarySystem` with the request's channels and stop at the
-  first closed crossing without evaluating geometry beyond it.
-- Raycast each open same-level segment through the existing physics path and
-  merge segments, tile visits, hits, and crossings by cumulative distance.
-- Add an explicit bounded-iteration failure result and tests for upward,
-  downward, diagonal, multi-floor, open, and closed traces.
+- Define canonical frame ownership for map-only, same-grid, cross-grid, and
+  overlapping moving-grid endpoints without inferring world Z from XY overlap.
+- Detect or normalize endpoints whose owning frame moved after capture and keep
+  client/server results deterministic.
+- Add caller-owned reusable result buffers while preserving the immutable
+  convenience API for cold callers.
+- Bound entity-hit and aggregate output work with explicit fail-soft semantics.
+- Instrument query counts, terminations, output sizes, and elapsed time, then add
+  a repeatable same-level and multi-floor trace benchmark.
+- Cover map-only points, moving frames, overlapping grids, stale endpoints,
+  equal-distance ties, extreme coordinates, and allocation behavior in tests.
 
 ## Package History
 
@@ -454,3 +557,4 @@ treated as Debug-run noise.
 | 2026-08-27 | P0.2 | `Add deterministic Z-level stress baselines` | 3 baseline cases, 49 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.3 | `Add configurable Z-level performance budgets` | 4 budget, 3 baseline, 53 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P1.1 | `Define the shared Z-level trace contract` | 4 trace, 57 integration, 2 unit, diff check | Complete |
+| 2026-08-27 | P1.2 | `Implement ordered vertical Z-level traces` | 5 trace, 11 trace/budget, 60 integration, 2 unit, 3 baseline, diff check | Complete |
