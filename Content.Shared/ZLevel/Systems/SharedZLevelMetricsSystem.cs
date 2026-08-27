@@ -87,6 +87,15 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _explosionLastTopologyTimestampTicks;
     private long _explosionMaxTopologyTimestampTicks;
 
+    private long _atmosOverlayUpdates;
+    private long _atmosOverlayInvalidatedTiles;
+    private long _atmosOverlayInvalidatedUpperTiles;
+    private long _atmosOverlayUpperLayers;
+    private long _atmosOverlayUpdatedChunks;
+    private long _atmosOverlayTimestampTicks;
+    private long _atmosOverlayLastTimestampTicks;
+    private long _atmosOverlayMaxTimestampTicks;
+
     public void RecordBoundaryQuery(bool cacheHit)
     {
         _boundaryQueries++;
@@ -307,6 +316,23 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             elapsedTimestampTicks);
     }
 
+    public void RecordAtmosOverlayUpdate(
+        int invalidatedTiles,
+        int invalidatedUpperTiles,
+        int upperLayers,
+        int updatedChunks,
+        long elapsedTimestampTicks)
+    {
+        _atmosOverlayUpdates++;
+        _atmosOverlayInvalidatedTiles += invalidatedTiles;
+        _atmosOverlayInvalidatedUpperTiles += invalidatedUpperTiles;
+        _atmosOverlayUpperLayers += upperLayers;
+        _atmosOverlayUpdatedChunks += updatedChunks;
+        _atmosOverlayTimestampTicks += elapsedTimestampTicks;
+        _atmosOverlayLastTimestampTicks = elapsedTimestampTicks;
+        _atmosOverlayMaxTimestampTicks = Math.Max(_atmosOverlayMaxTimestampTicks, elapsedTimestampTicks);
+    }
+
     public ZLevelMetricsSnapshot Snapshot()
     {
         return new ZLevelMetricsSnapshot(
@@ -378,7 +404,15 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _explosionIterationBudgetExhaustions,
             TimestampTicksToMilliseconds(_explosionTopologyTimestampTicks),
             TimestampTicksToMilliseconds(_explosionLastTopologyTimestampTicks),
-            TimestampTicksToMilliseconds(_explosionMaxTopologyTimestampTicks));
+            TimestampTicksToMilliseconds(_explosionMaxTopologyTimestampTicks),
+            _atmosOverlayUpdates,
+            _atmosOverlayInvalidatedTiles,
+            _atmosOverlayInvalidatedUpperTiles,
+            _atmosOverlayUpperLayers,
+            _atmosOverlayUpdatedChunks,
+            TimestampTicksToMilliseconds(_atmosOverlayTimestampTicks),
+            TimestampTicksToMilliseconds(_atmosOverlayLastTimestampTicks),
+            TimestampTicksToMilliseconds(_atmosOverlayMaxTimestampTicks));
     }
 
     public void ResetCounters()
@@ -452,6 +486,14 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _explosionTopologyTimestampTicks = 0;
         _explosionLastTopologyTimestampTicks = 0;
         _explosionMaxTopologyTimestampTicks = 0;
+        _atmosOverlayUpdates = 0;
+        _atmosOverlayInvalidatedTiles = 0;
+        _atmosOverlayInvalidatedUpperTiles = 0;
+        _atmosOverlayUpperLayers = 0;
+        _atmosOverlayUpdatedChunks = 0;
+        _atmosOverlayTimestampTicks = 0;
+        _atmosOverlayLastTimestampTicks = 0;
+        _atmosOverlayMaxTimestampTicks = 0;
     }
 
     private static double TimestampTicksToMilliseconds(long ticks)
@@ -529,7 +571,15 @@ public readonly record struct ZLevelMetricsSnapshot(
     long ExplosionIterationBudgetExhaustions,
     double ExplosionTopologyMilliseconds,
     double ExplosionLastTopologyMilliseconds,
-    double ExplosionMaxTopologyMilliseconds)
+    double ExplosionMaxTopologyMilliseconds,
+    long AtmosOverlayUpdates,
+    long AtmosOverlayInvalidatedTiles,
+    long AtmosOverlayInvalidatedUpperTiles,
+    long AtmosOverlayUpperLayers,
+    long AtmosOverlayUpdatedChunks,
+    double AtmosOverlayMilliseconds,
+    double AtmosOverlayLastMilliseconds,
+    double AtmosOverlayMaxMilliseconds)
 {
     public double BoundaryCacheHitPercent => Percentage(BoundaryCacheHits, BoundaryQueries);
     public double GravityCacheHitPercent => Percentage(GravityCacheHits, GravityCacheHits + GravityCacheMisses);
@@ -543,6 +593,7 @@ public readonly record struct ZLevelMetricsSnapshot(
     public double ExplosionAverageTopologyMilliseconds => Average(
         ExplosionTopologyMilliseconds,
         ExplosionTopologyBuilds);
+    public double AtmosOverlayAverageMilliseconds => Average(AtmosOverlayMilliseconds, AtmosOverlayUpdates);
 
     private static double Percentage(long value, long total)
     {

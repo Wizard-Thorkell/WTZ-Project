@@ -61,6 +61,15 @@ public partial class AtmosphereSystem
     }
 
     /// <summary>
+    /// Marks an explicit grid-local Z-level tile's gas overlay as dirty.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void InvalidateVisuals(Entity<GasTileOverlayComponent?> grid, ZLevelTileIndices tile)
+    {
+        _gasTileOverlaySystem.Invalidate(grid, tile);
+    }
+
+    /// <summary>
     /// <para>Marks a tile's visual overlay as needing to be redetermined.</para>
     ///
     /// <para>A tile's overlay (how it looks like, ex. water vapor's texture)
@@ -75,10 +84,9 @@ public partial class AtmosphereSystem
         Entity<GridAtmosphereComponent, GasTileOverlayComponent, MapGridComponent, TransformComponent> ent,
         TileAtmosphere tile)
     {
-        if (tile.ZLevel != 0)
-            return;
-
-        _gasTileOverlaySystem.Invalidate((ent.Owner, ent.Comp2), tile.GridIndices);
+        _gasTileOverlaySystem.Invalidate(
+            (ent.Owner, ent.Comp2),
+            new ZLevelTileIndices(tile.GridIndices.X, tile.GridIndices.Y, tile.ZLevel));
     }
 
     /// <summary>

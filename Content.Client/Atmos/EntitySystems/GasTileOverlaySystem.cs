@@ -19,6 +19,8 @@ public sealed class GasTileOverlaySystem : SharedGasTileOverlaySystem
     private void OnHandleState(EntityUid gridUid, GasTileOverlayComponent comp, ref ComponentHandleState args)
     {
         Dictionary<Vector2i, GasOverlayChunk> modifiedChunks;
+        Dictionary<int, Dictionary<Vector2i, GasOverlayChunk>> modifiedZLevelChunks;
+        Dictionary<int, HashSet<Vector2i>> allZLevelChunks;
 
         switch (args.Current)
         {
@@ -26,6 +28,8 @@ public sealed class GasTileOverlaySystem : SharedGasTileOverlaySystem
             case GasTileOverlayDeltaState delta:
             {
                 modifiedChunks = delta.ModifiedChunks;
+                modifiedZLevelChunks = delta.ModifiedZLevelChunks;
+                allZLevelChunks = delta.AllZLevelChunks;
                 foreach (var index in comp.Chunks.Keys)
                 {
                     if (!delta.AllChunks.Contains(index))
@@ -37,6 +41,13 @@ public sealed class GasTileOverlaySystem : SharedGasTileOverlaySystem
             case GasTileOverlayState state:
             {
                 modifiedChunks = state.Chunks;
+                modifiedZLevelChunks = state.ZLevelChunks;
+                allZLevelChunks = new(state.ZLevelChunks.Count);
+                foreach (var (localZ, chunks) in state.ZLevelChunks)
+                {
+                    allZLevelChunks[localZ] = new(chunks.Keys);
+                }
+
                 foreach (var index in comp.Chunks.Keys)
                 {
                     if (!state.Chunks.ContainsKey(index))
@@ -53,20 +64,67 @@ public sealed class GasTileOverlaySystem : SharedGasTileOverlaySystem
         {
             comp.Chunks[index] = data;
         }
+
+        ApplyZLevelState(comp, modifiedZLevelChunks, allZLevelChunks);
+    }
+
+    private static void ApplyZLevelState(
+        GasTileOverlayComponent component,
+        Dictionary<int, Dictionary<Vector2i, GasOverlayChunk>> modified,
+        Dictionary<int, HashSet<Vector2i>> all)
+    {
+        foreach (var localZ in component.ZLevelChunks.Keys)
+        {
+            if (!all.ContainsKey(localZ))
+                component.ZLevelChunks.Remove(localZ);
+        }
+
+        foreach (var (localZ, allChunks) in all)
+        {
+            var layer = component.GetOrNewChunks(localZ);
+            foreach (var index in layer.Keys)
+            {
+                if (!allChunks.Contains(index))
+                    layer.Remove(index);
+            }
+
+            if (!modified.TryGetValue(localZ, out var changed))
+                continue;
+
+            foreach (var (index, chunk) in changed)
+            {
+                layer[index] = chunk;
+            }
+        }
     }
 
     private void HandleGasOverlayUpdate(GasOverlayUpdateEvent ev)
     {
-        foreach (var (nent, removedIndicies) in ev.RemovedChunks)
+        foreach (var nent in ev.ClearedGrids)
+        {
+            var grid = GetEntity(nent);
+            if (!TryComp(grid, out GasTileOverlayComponent? comp))
+                continue;
+
+            comp.Chunks.Clear();
+            comp.ZLevelChunks.Clear();
+        }
+
+        foreach (var (nent, removedIndices) in ev.RemovedChunks)
         {
             var grid = GetEntity(nent);
 
             if (!TryComp(grid, out GasTileOverlayComponent? comp))
                 continue;
 
-            foreach (var index in removedIndicies)
+            foreach (var index in removedIndices)
             {
-                comp.Chunks.Remove(index);
+                if (!comp.TryGetChunks(index.LocalZ, out var chunks))
+                    continue;
+
+                chunks.Remove(index.Indices);
+                if (index.LocalZ != 0 && chunks.Count == 0)
+                    comp.ZLevelChunks.Remove(index.LocalZ);
             }
         }
 
@@ -79,7 +137,7 @@ public sealed class GasTileOverlaySystem : SharedGasTileOverlaySystem
 
             foreach (var chunkData in gridData)
             {
-                comp.Chunks[chunkData.Index] = chunkData;
+                comp.GetOrNewChunks(chunkData.LocalZ)[chunkData.Index] = chunkData;
             }
         }
     }

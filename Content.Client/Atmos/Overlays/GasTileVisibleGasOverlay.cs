@@ -1,10 +1,12 @@
 using Content.Client.Atmos.Components;
+using Content.Client.ZLevel;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Client.Player;
 using Robust.Shared.Enums;
 using Robust.Shared.Graphics.RSI;
 using Robust.Shared.Map;
@@ -26,6 +28,7 @@ public sealed class GasTileVisibleGasOverlay : Overlay
     [Dependency] private readonly IResourceCache _resourceCache = default!;
     [Dependency] private readonly IPrototypeManager _protoManager = default!;
     [Dependency] private readonly IMapManager _mapManager = default!;
+    [Dependency] private readonly IPlayerManager _playerManager = default!;
 
     private static readonly ProtoId<ShaderPrototype> UnshadedShader = "unshaded";
 
@@ -34,6 +37,7 @@ public sealed class GasTileVisibleGasOverlay : Overlay
     private readonly SharedTransformSystem _xformSys;
     private readonly SharedGasTileOverlaySystem _gasTileOverlaySystem;
     private readonly SpriteSystem _spriteSystem;
+    private readonly ZLevelViewContextSystem _viewContext;
 
     public override OverlaySpace Space => OverlaySpace.WorldSpaceEntities | OverlaySpace.WorldSpaceBelowWorld;
     private readonly ShaderInstance _shader;
@@ -58,6 +62,7 @@ public sealed class GasTileVisibleGasOverlay : Overlay
         _xformSys = _entManager.System<SharedTransformSystem>();
         _gasTileOverlaySystem = _entManager.System<SharedGasTileOverlaySystem>();
         _spriteSystem = _entManager.System<SpriteSystem>();
+        _viewContext = _entManager.System<ZLevelViewContextSystem>();
 
         _shader = _protoManager.Index(UnshadedShader).Instance();
         ZIndex = GasOverlayZIndex;
@@ -120,6 +125,12 @@ public sealed class GasTileVisibleGasOverlay : Overlay
         if (args.MapId == MapId.Nullspace)
             return;
 
+        if (args.Viewport.Eye is not { } eye ||
+            !_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var view))
+        {
+            return;
+        }
+
         var drawHandle = args.WorldHandle;
         var xformQuery = _entManager.GetEntityQuery<TransformComponent>();
         var overlayQuery = _entManager.GetEntityQuery<GasTileOverlayComponent>();
@@ -131,7 +142,8 @@ public sealed class GasTileVisibleGasOverlay : Overlay
             _shader,
             overlayQuery,
             xformQuery,
-            _xformSys);
+            _xformSys,
+            view.WorldZLevel);
 
         var mapUid = _mapSystem.GetMapOrInvalid(args.MapId);
 
@@ -155,7 +167,8 @@ public sealed class GasTileVisibleGasOverlay : Overlay
                     ShaderInstance shader,
                     EntityQuery<GasTileOverlayComponent> overlayQuery,
                     EntityQuery<TransformComponent> xformQuery,
-                    SharedTransformSystem xformSys) state) =>
+                    SharedTransformSystem xformSys,
+                    int worldZ) state) =>
             {
                 if (!state.overlayQuery.TryGetComponent(uid, out var comp) ||
                     !state.xformQuery.TryGetComponent(uid, out var gridXform))
@@ -177,7 +190,11 @@ public sealed class GasTileVisibleGasOverlay : Overlay
                 // by chunk, even though its currently slower.
 
                 state.drawHandle.UseShader(null);
-                foreach (var chunk in comp.Chunks.Values)
+                var localZ = state.xformSys.WorldToLocalZLevel(uid, state.worldZ);
+                if (!comp.TryGetChunks(localZ, out var chunks))
+                    return true;
+
+                foreach (var chunk in chunks.Values)
                 {
                     var enumerator = new GasChunkEnumerator(chunk);
 

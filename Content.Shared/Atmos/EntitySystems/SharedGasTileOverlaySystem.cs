@@ -45,7 +45,7 @@ public abstract class SharedGasTileOverlaySystem : EntitySystem
         // Should this be a full component state or a delta-state?
         if (args.FromTick <= component.CreationTick || args.FromTick <= component.ForceTick)
         {
-            args.State = new GasTileOverlayState(component.Chunks);
+            args.State = new GasTileOverlayState(component.Chunks, component.ZLevelChunks);
             return;
         }
 
@@ -56,7 +56,28 @@ public abstract class SharedGasTileOverlaySystem : EntitySystem
                 data[index] = chunk;
         }
 
-        args.State = new GasTileOverlayDeltaState(data, new(component.Chunks.Keys));
+        Dictionary<int, Dictionary<Vector2i, GasOverlayChunk>> zLevelData = new();
+        Dictionary<int, HashSet<Vector2i>> allZLevelChunks = new();
+        foreach (var (localZ, chunks) in component.ZLevelChunks)
+        {
+            Dictionary<Vector2i, GasOverlayChunk> changed = new();
+            foreach (var (index, chunk) in chunks)
+            {
+                if (chunk.LastUpdate >= args.FromTick)
+                    changed[index] = chunk;
+            }
+
+            if (changed.Count != 0)
+                zLevelData[localZ] = changed;
+
+            allZLevelChunks[localZ] = new(chunks.Keys);
+        }
+
+        args.State = new GasTileOverlayDeltaState(
+            data,
+            new(component.Chunks.Keys),
+            zLevelData,
+            allZLevelChunks);
     }
 
     public static Vector2i GetGasChunkIndices(Vector2i indices)
@@ -113,10 +134,14 @@ public abstract class SharedGasTileOverlaySystem : EntitySystem
     [Serializable, NetSerializable]
     public sealed class GasOverlayUpdateEvent : EntityEventArgs
     {
+        public HashSet<NetEntity> ClearedGrids = new();
         public Dictionary<NetEntity, List<GasOverlayChunk>> UpdatedChunks = new();
-        public Dictionary<NetEntity, HashSet<Vector2i>> RemovedChunks = new();
+        public Dictionary<NetEntity, HashSet<GasOverlayChunkIndices>> RemovedChunks = new();
     }
 }
+
+[Serializable, NetSerializable]
+public readonly record struct GasOverlayChunkIndices(Vector2i Indices, int LocalZ);
 
 /// <summary>
 ///     Struct for networking gas temperatures to all clients using a single struct(byte) per tile.

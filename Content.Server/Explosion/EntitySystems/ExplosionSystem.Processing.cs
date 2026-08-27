@@ -246,9 +246,15 @@ public sealed partial class ExplosionSystem
         }
 
         // heat the atmosphere
-        if (temperature != null && localZ == 0)
+        if (temperature != null)
         {
-            _atmosphere.HotspotExpose(grid.Owner, tile, temperature.Value, currentIntensity, cause, true);
+            _atmosphere.HotspotExpose(
+                grid.Owner,
+                new ZLevelTileIndices(tile.X, tile.Y, localZ),
+                temperature.Value,
+                currentIntensity,
+                cause,
+                true);
         }
 
         // Walls and reinforced walls will break into girders. These girders will also be considered turf-blocking for

@@ -2,9 +2,11 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using Content.IntegrationTests.Tests.Atmos;
+using Content.IntegrationTests.Fixtures.Attributes;
 using Content.IntegrationTests.Tests.Helpers;
 using Content.Server.Atmos.Components;
 using Content.Server.Atmos.EntitySystems;
+using Content.Server.Explosion.EntitySystems;
 using Content.Server.NodeContainer.EntitySystems;
 using Content.Server.NodeContainer.Nodes;
 using Content.Shared.Atmos.Components;
@@ -17,6 +19,9 @@ using Content.Shared.NodeContainer;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
+using Robust.Server.GameObjects;
+using Robust.Shared;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -29,6 +34,416 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 public sealed class ZLevelAtmosTest : AtmosTest
 {
     protected override ResPath? TestMapPath => new("Maps/Test/Atmospherics/tile_atmosphere_test_room.yml");
+
+    [TestPrototypes]
+    private const string Prototypes = @"
+- type: explosion
+  id: ZLevelAtmosHeatTest
+  damagePerIntensity:
+    types:
+      Heat: 0
+  tileBreakChance: [0]
+  tileBreakIntensity: [0]
+  temperature: 1500
+";
+
+    [Test]
+    public async Task CoordinateHotspotApisStayOnRequestedZLevel()
+    {
+        var markers = SEntMan.AllEntities<TestMarkerComponent>();
+        Assert.That(GetMarker(markers, "floor", out var source), Is.True);
+
+        await Server.WaitPost(() =>
+        {
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var mapSystem = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(source).Coordinates);
+            var lowerIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 0);
+            var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+            mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var lower = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, lowerIndices, true);
+            var upper = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, upperIndices, true);
+            Assert.That(lower, Is.Not.Null);
+            Assert.That(upper, Is.Not.Null);
+            MakeCombustible(lower!);
+            MakeCombustible(upper!);
+
+            SAtmos.HotspotExpose(RelevantAtmos, upperIndices, 1500f, 100f);
+            Assert.Multiple(() =>
+            {
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, upperIndices), Is.True);
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, lowerIndices), Is.False);
+            });
+
+            SAtmos.HotspotExtinguish(MapData.Grid, upperIndices);
+            SAtmos.HotspotExpose(RelevantAtmos, sourceTile, 1500f, 100f);
+            Assert.Multiple(() =>
+            {
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, upperIndices), Is.False);
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, lowerIndices), Is.True,
+                    "The legacy Vector2i overload must retain its Z=0 behavior.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task ExplosionHeatUsesCapturedUpperFloorAndFrame()
+    {
+        var markers = SEntMan.AllEntities<TestMarkerComponent>();
+        Assert.That(GetMarker(markers, "floor", out var sourceMarker), Is.True);
+        ZLevelTileIndices lowerIndices = default;
+        ZLevelTileIndices upperIndices = default;
+
+        await Server.WaitPost(() =>
+        {
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var mapSystem = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(sourceMarker).Coordinates);
+            lowerIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 0);
+            upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+
+            SEntMan.System<SharedZLevelMapSystem>().Configure(
+                MapData.MapUid,
+                0,
+                1,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+            Assert.That(Transform.SetZLevelFrameOrigin(MapData.Grid, 5), Is.True);
+            mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var lower = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, lowerIndices, true);
+            var upper = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, upperIndices, true);
+            Assert.That(lower, Is.Not.Null);
+            Assert.That(upper, Is.Not.Null);
+            MakeCombustible(lower!);
+            MakeCombustible(upper!);
+            SAtmos.SetAtmosphereSimulation(RelevantAtmos, false);
+
+            var source = SEntMan.SpawnEntity(null, Xform(sourceMarker).Coordinates);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(source, 1), Is.True);
+            Assert.That(Transform.GetWorldZLevel(source), Is.EqualTo(6));
+            SEntMan.System<ExplosionSystem>().QueueExplosion(
+                source,
+                "ZLevelAtmosHeatTest",
+                totalIntensity: 12f,
+                slope: 4f,
+                maxTileIntensity: 6f,
+                tileBreakScale: 1f,
+                maxTileBreak: 0,
+                canCreateVacuum: false,
+                addLog: false);
+        });
+
+        await RunTicks(20);
+
+        await Server.WaitPost(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, upperIndices), Is.True,
+                    "Explosion heat must ignite the grid-local floor captured at queue time.");
+                Assert.That(SAtmos.IsHotspotActive(MapData.Grid, lowerIndices), Is.False,
+                    "An overlapping base-floor atmosphere tile must remain untouched.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task NonAtmosphereOpeningDoesNotConnectAtmosphereLayers()
+    {
+        var markers = SEntMan.AllEntities<TestMarkerComponent>();
+        Assert.That(GetMarker(markers, "floor", out var source), Is.True);
+
+        await Server.WaitPost(() =>
+        {
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var mapSystem = SEntMan.System<SharedMapSystem>();
+            var boundarySystem = SEntMan.System<SharedZLevelBoundarySystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(source).Coordinates);
+            var lowerIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 0);
+            var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+            mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
+
+            var provider = SEntMan.SpawnEntity(null, Xform(source).Coordinates);
+            var boundary = SEntMan.EnsureComponent<ZLevelBoundaryComponent>(provider);
+            boundarySystem.SetBoundary(
+                (provider, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.Projectile,
+                ZLevelBoundaryChannels.None);
+            Transform.AnchorEntity(provider, Xform(provider));
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var lower = SAtmos.GetZLevelTileAtmosphere(RelevantAtmos, lowerIndices);
+            Assert.That(lower, Is.Not.Null);
+            Assert.That(lower!.AdjacentTileAbove, Is.Null,
+                "A Projectile-only opening must not create an atmosphere or fire path.");
+
+            boundarySystem.SetBoundary(
+                (provider, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.Projectile | ZLevelBoundaryChannels.Atmosphere,
+                ZLevelBoundaryChannels.None);
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            Assert.That(lower.AdjacentTileAbove, Is.Not.Null,
+                "Adding the Atmosphere channel must connect the same vertical boundary.");
+        });
+    }
+
+    [Test]
+    public async Task OverlayComponentStateKeepsFloorsSeparateWithoutPvs()
+    {
+        var markers = SEntMan.AllEntities<TestMarkerComponent>();
+        Assert.That(GetMarker(markers, "floor", out var source), Is.True);
+        Vector2i sourceTile = default;
+        NetEntity gridNetEntity = default;
+
+        await Server.WaitPost(() =>
+        {
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var mapSystem = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(source).Coordinates);
+            var lowerIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 0);
+            var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+            mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
+            SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+            var lower = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, lowerIndices, true);
+            var upper = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, upperIndices, true);
+            Assert.That(lower, Is.Not.Null);
+            Assert.That(upper, Is.Not.Null);
+            SetOverlayTemperature(lower!, 400f);
+            SetOverlayTemperature(upper!, 800f);
+            SAtmos.SetAtmosphereSimulation(RelevantAtmos, false);
+            SAtmos.InvalidateVisuals((MapData.Grid.Owner, ProcessEnt.Comp2), lowerIndices);
+            SAtmos.InvalidateVisuals((MapData.Grid.Owner, ProcessEnt.Comp2), upperIndices);
+            gridNetEntity = SEntMan.GetNetEntity(MapData.Grid);
+        });
+
+        await RunTicks(90);
+
+        await Client.WaitPost(() =>
+        {
+            var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+            Assert.Multiple(() =>
+            {
+                Assert.That(ReadOverlayTemperature(overlay, 0, sourceTile), Is.EqualTo(400f).Within(0.01f));
+                Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(800f).Within(0.01f));
+            });
+        });
+
+        await Server.WaitPost(() =>
+        {
+            var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+            var upper = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, upperIndices, true);
+            Assert.That(upper, Is.Not.Null);
+            SetOverlayTemperature(upper!, 600f);
+            SAtmos.InvalidateVisuals((MapData.Grid.Owner, ProcessEnt.Comp2), upperIndices);
+        });
+
+        await RunTicks(90);
+
+        await Client.WaitPost(() =>
+        {
+            var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+            Assert.Multiple(() =>
+            {
+                Assert.That(ReadOverlayTemperature(overlay, 0, sourceTile), Is.EqualTo(400f).Within(0.01f));
+                Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(600f).Within(0.01f));
+            });
+        });
+    }
+
+    [Test]
+    public async Task OverlayPvsTracksViewerWorldFloorsAndRemoteViews()
+    {
+        var markers = SEntMan.AllEntities<TestMarkerComponent>();
+        Assert.That(GetMarker(markers, "floor", out var sourceMarker), Is.True);
+        var configuration = Server.ResolveDependency<IConfigurationManager>();
+        EntityUid remoteViewer = default;
+
+        try
+        {
+            Vector2i sourceTile = default;
+            NetEntity gridNetEntity = default;
+            ZLevelMetricsSnapshot overlayMetrics = default;
+
+            await Server.WaitPost(() =>
+            {
+                SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+                var mapSystem = SEntMan.System<SharedMapSystem>();
+                var zLevels = SEntMan.System<SharedZLevelSystem>();
+                var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+                var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+                Transform.SetCoordinates(SPlayer, Xform(sourceMarker).Coordinates);
+                sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(sourceMarker).Coordinates);
+                var lowerIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 0);
+                var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+
+                SEntMan.System<SharedZLevelMapSystem>().Configure(
+                    MapData.MapUid,
+                    0,
+                    1,
+                    0,
+                    ZLevelDefaultBoundaryMode.TileAboveCloses);
+                Assert.That(Transform.SetZLevelFrameOrigin(MapData.Grid, 5), Is.True);
+                mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
+                SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
+
+                var lower = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, lowerIndices, true);
+                var upper = SAtmos.GetZLevelTileMixture(RelevantAtmos, null, upperIndices, true);
+                Assert.That(lower, Is.Not.Null);
+                Assert.That(upper, Is.Not.Null);
+                SetOverlayTemperature(lower!, 400f);
+                SetOverlayTemperature(upper!, 800f);
+                SAtmos.SetAtmosphereSimulation(RelevantAtmos, false);
+
+                ProcessEnt.Comp2.InvalidTiles.Clear();
+                ProcessEnt.Comp2.InvalidZLevelTiles.Clear();
+                metrics.ResetCounters();
+                SAtmos.InvalidateVisuals((MapData.Grid.Owner, ProcessEnt.Comp2), lowerIndices);
+                SAtmos.InvalidateVisuals((MapData.Grid.Owner, ProcessEnt.Comp2), upperIndices);
+                Assert.That(zLevels.SetZLevelPosition(SPlayer, 0), Is.True);
+                gridNetEntity = SEntMan.GetNetEntity(MapData.Grid);
+            });
+
+            await RunTicks(90);
+
+            await Server.WaitPost(() =>
+            {
+                var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+                overlayMetrics = metrics;
+                var chunkIndex = SharedGasTileOverlaySystem.GetGasChunkIndices(sourceTile);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(ProcessEnt.Comp2.Chunks.ContainsKey(chunkIndex), Is.True);
+                    Assert.That(ProcessEnt.Comp2.ZLevelChunks.TryGetValue(1, out var upperChunks), Is.True);
+                    Assert.That(upperChunks!.ContainsKey(chunkIndex), Is.True);
+                    Assert.That(metrics.AtmosOverlayUpdates, Is.GreaterThanOrEqualTo(1));
+                    Assert.That(metrics.AtmosOverlayInvalidatedTiles, Is.GreaterThanOrEqualTo(2));
+                    Assert.That(metrics.AtmosOverlayInvalidatedUpperTiles, Is.GreaterThanOrEqualTo(1));
+                    Assert.That(metrics.AtmosOverlayUpperLayers, Is.GreaterThanOrEqualTo(1));
+                    Assert.That(metrics.AtmosOverlayUpdatedChunks, Is.GreaterThanOrEqualTo(2));
+                    Assert.That(metrics.AtmosOverlayMilliseconds, Is.GreaterThanOrEqualTo(0d));
+                });
+            });
+
+            TestContext.Progress.WriteLine(
+                $"WTZ atmosphere overlay baseline: updates={overlayMetrics.AtmosOverlayUpdates}, " +
+                $"tiles={overlayMetrics.AtmosOverlayInvalidatedTiles}, " +
+                $"upper-tiles={overlayMetrics.AtmosOverlayInvalidatedUpperTiles}, " +
+                $"upper-layers={overlayMetrics.AtmosOverlayUpperLayers}, " +
+                $"changed-chunks={overlayMetrics.AtmosOverlayUpdatedChunks}, " +
+                $"elapsed={overlayMetrics.AtmosOverlayMilliseconds:0.000}ms");
+
+            await Client.WaitPost(() =>
+            {
+                var clientGrid = CEntMan.GetEntity(gridNetEntity);
+                var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(clientGrid);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(ReadOverlayTemperature(overlay, 0, sourceTile), Is.EqualTo(400f).Within(0.01f));
+                    Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(800f).Within(0.01f));
+                });
+            });
+
+            await Server.WaitPost(() => configuration.SetCVar(CVars.NetPVS, true));
+            await RunTicks(90);
+
+            await Client.WaitPost(() =>
+            {
+                var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+                Assert.Multiple(() =>
+                {
+                    Assert.That(ReadOverlayTemperature(overlay, 0, sourceTile), Is.EqualTo(400f).Within(0.01f));
+                    Assert.That(HasOverlayChunk(overlay, 1, sourceTile), Is.False,
+                        "Enabling PVS must discard layers outside the player's current world Z.");
+                });
+            });
+
+            await Server.WaitPost(() =>
+            {
+                Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(SPlayer, 1), Is.True);
+                Assert.That(Transform.GetWorldZLevel(SPlayer), Is.EqualTo(6));
+            });
+            await RunTicks(90);
+
+            await Client.WaitPost(() =>
+            {
+                var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+                Assert.Multiple(() =>
+                {
+                    Assert.That(HasOverlayChunk(overlay, 0, sourceTile), Is.False);
+                    Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(800f).Within(0.01f));
+                });
+            });
+
+            await Server.WaitPost(() =>
+            {
+                remoteViewer = SEntMan.SpawnEntity(null, Xform(SPlayer).Coordinates);
+                Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(remoteViewer, 0), Is.True);
+                SEntMan.System<ViewSubscriberSystem>().AddViewSubscriber(remoteViewer, ServerSession);
+            });
+            await RunTicks(90);
+
+            await Client.WaitPost(() =>
+            {
+                var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+                Assert.Multiple(() =>
+                {
+                    Assert.That(ReadOverlayTemperature(overlay, 0, sourceTile), Is.EqualTo(400f).Within(0.01f));
+                    Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(800f).Within(0.01f));
+                });
+            });
+
+            await Server.WaitPost(() =>
+            {
+                SEntMan.System<ViewSubscriberSystem>().RemoveViewSubscriber(remoteViewer, ServerSession);
+                SEntMan.DeleteEntity(remoteViewer);
+                remoteViewer = default;
+            });
+            await RunTicks(90);
+
+            await Client.WaitPost(() =>
+            {
+                var overlay = CEntMan.GetComponent<GasTileOverlayComponent>(CEntMan.GetEntity(gridNetEntity));
+                Assert.Multiple(() =>
+                {
+                    Assert.That(HasOverlayChunk(overlay, 0, sourceTile), Is.False);
+                    Assert.That(ReadOverlayTemperature(overlay, 1, sourceTile), Is.EqualTo(800f).Within(0.01f));
+                });
+            });
+        }
+        finally
+        {
+            await Server.WaitPost(() =>
+            {
+                if (remoteViewer.IsValid() && SEntMan.EntityExists(remoteViewer))
+                {
+                    SEntMan.System<ViewSubscriberSystem>().RemoveViewSubscriber(remoteViewer, ServerSession);
+                    SEntMan.DeleteEntity(remoteViewer);
+                }
+
+                configuration.SetCVar(CVars.NetPVS, false);
+            });
+            await RunTicks(5);
+        }
+    }
 
     [Test]
     public async Task CeilingTileInvalidatesLowerAtmosAdjacency()
@@ -221,6 +636,7 @@ public sealed class ZLevelAtmosTest : AtmosTest
             var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
             var sourceTile = mapSystem.TileIndicesFor(MapData.Grid, grid, Xform(source).Coordinates);
             var upperIndices = new ZLevelTileIndices(sourceTile.X, sourceTile.Y, 1);
+            Assert.That(Transform.SetZLevelFrameOrigin(MapData.Grid, 5), Is.True);
             mapSystem.SetZLevelTile(MapData.Grid, grid, upperIndices, new Tile(1));
             SAtmos.RunProcessingFull(ProcessEnt, MapData.Grid.Owner, SAtmos.AtmosTickRate);
 
@@ -229,6 +645,12 @@ public sealed class ZLevelAtmosTest : AtmosTest
             zLevelSystem.SetZLevelPosition(upperEntity, 1);
             SEntMan.EnsureComponent<TestListenerComponent>(lowerEntity);
             SEntMan.EnsureComponent<TestListenerComponent>(upperEntity);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(Transform.GetWorldZLevel(lowerEntity), Is.EqualTo(5));
+                Assert.That(Transform.GetWorldZLevel(upperEntity), Is.EqualTo(6));
+            });
 
             var upperTile = SAtmos.GetZLevelTileAtmosphere(RelevantAtmos, upperIndices);
             Assert.That(upperTile?.Air, Is.Not.Null);
@@ -349,6 +771,41 @@ public sealed class ZLevelAtmosTest : AtmosTest
                     "Pipes on different Z-levels must not share a pipe network.");
             });
         });
+    }
+
+    private static void MakeCombustible(GasMixture mixture)
+    {
+        mixture.Clear();
+        mixture.Temperature = Atmospherics.T20C;
+        mixture.AdjustMoles(Gas.Plasma, 100f);
+        mixture.AdjustMoles(Gas.Oxygen, 900f);
+    }
+
+    private static void SetOverlayTemperature(GasMixture mixture, float temperature)
+    {
+        mixture.Clear();
+        mixture.AdjustMoles(Gas.Nitrogen, 100f);
+        mixture.Temperature = temperature;
+    }
+
+    private static bool HasOverlayChunk(GasTileOverlayComponent overlay, int localZ, Vector2i tile)
+    {
+        return overlay.TryGetChunks(localZ, out var chunks) &&
+               chunks.ContainsKey(SharedGasTileOverlaySystem.GetGasChunkIndices(tile));
+    }
+
+    private static float ReadOverlayTemperature(GasTileOverlayComponent overlay, int localZ, Vector2i tile)
+    {
+        Assert.That(overlay.TryGetChunks(localZ, out var chunks), Is.True,
+            $"Missing gas overlay layer Z={localZ}.");
+        var chunkIndex = SharedGasTileOverlaySystem.GetGasChunkIndices(tile);
+        Assert.That(chunks.TryGetValue(chunkIndex, out var chunk), Is.True,
+            $"Missing gas overlay chunk {chunkIndex} on Z={localZ}.");
+        var localX = MathHelper.Mod(tile.X, SharedGasTileOverlaySystem.ChunkSize);
+        var localY = MathHelper.Mod(tile.Y, SharedGasTileOverlaySystem.ChunkSize);
+        var data = chunk!.TileData[localX + localY * SharedGasTileOverlaySystem.ChunkSize];
+        Assert.That(data.ByteGasTemperature.TryGetTemperature(out var temperature), Is.True);
+        return temperature;
     }
 }
 

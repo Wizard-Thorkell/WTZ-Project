@@ -6,6 +6,8 @@ using Content.Shared.CCVar;
 using Content.Shared.Chunking;
 using Content.Shared.GameTicking;
 using Content.Shared.Rounding;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
 using Microsoft.Extensions.ObjectPool;
 using Robust.Server.Player;
@@ -32,6 +34,8 @@ namespace Content.Server.Atmos.EntitySystems
         [Robust.Shared.IoC.Dependency] private readonly IParallelManager _parMan = default!;
         [Robust.Shared.IoC.Dependency] private readonly AtmosphereSystem _atmosphereSystem = default!;
         [Robust.Shared.IoC.Dependency] private readonly ChunkingSystem _chunkingSys = default!;
+        [Robust.Shared.IoC.Dependency] private readonly SharedTransformSystem _transformSystem = default!;
+        [Robust.Shared.IoC.Dependency] private readonly SharedZLevelMetricsSystem _zLevelMetrics = default!;
 
         /// <summary>
         /// Per-tick cache of sessions.
@@ -39,7 +43,10 @@ namespace Content.Server.Atmos.EntitySystems
         private readonly List<ICommonSession> _sessions = new();
         private UpdatePlayerJob _updateJob;
 
-        private readonly Dictionary<ICommonSession, Dictionary<NetEntity, HashSet<Vector2i>>> _lastSentChunks = new();
+        private readonly Dictionary<ICommonSession, Dictionary<GasOverlayGridLayer, HashSet<Vector2i>>> _lastSentChunks = new();
+        private readonly Dictionary<ICommonSession, HashSet<int>> _viewedWorldZLevels = new();
+        private readonly HashSet<(EntityUid Grid, int LocalZ)> _rebuiltUpperLayers = new();
+        private readonly HashSet<(EntityUid Grid, int LocalZ, Vector2i Chunk)> _updatedOverlayChunks = new();
 
         // Oh look its more duplicated decal system code!
         private ObjectPool<HashSet<Vector2i>> _chunkIndexPool =
@@ -59,6 +66,9 @@ namespace Content.Server.Atmos.EntitySystems
         private int _thresholds;
         private EntityQuery<MapGridComponent> _gridQuery;
         private EntityQuery<GasTileOverlayComponent> _query;
+        private EntityQuery<TransformComponent> _transformQuery;
+        private EntityQuery<ZLevelFrameComponent> _frameQuery;
+        private EntityQuery<ZLevelPositionComponent> _zLevelPositionQuery;
 
         public override void Initialize()
         {
@@ -66,6 +76,9 @@ namespace Content.Server.Atmos.EntitySystems
 
             _query = GetEntityQuery<GasTileOverlayComponent>();
             _gridQuery = GetEntityQuery<MapGridComponent>();
+            _transformQuery = GetEntityQuery<TransformComponent>();
+            _frameQuery = GetEntityQuery<ZLevelFrameComponent>();
+            _zLevelPositionQuery = GetEntityQuery<ZLevelPositionComponent>();
 
             _updateJob = new UpdatePlayerJob()
             {
@@ -77,7 +90,9 @@ namespace Content.Server.Atmos.EntitySystems
                 MapManager = _mapManager,
                 ChunkViewerPool = _chunkViewerPool,
                 LastSentChunks = _lastSentChunks,
+                ViewedWorldZLevels = _viewedWorldZLevels,
                 GridQuery = _gridQuery,
+                FrameQuery = _frameQuery,
             };
 
             _playerManager.PlayerStatusChanged += OnPlayerStatusChanged;
@@ -109,7 +124,10 @@ namespace Content.Server.Atmos.EntitySystems
             PvsEnabled = value;
 
             if (value)
+            {
+                ClearClientOverlayData();
                 return;
+            }
 
             foreach (var lastSent in _lastSentChunks.Values)
             {
@@ -130,6 +148,23 @@ namespace Content.Server.Atmos.EntitySystems
             }
         }
 
+        private void ClearClientOverlayData()
+        {
+            var ev = new GasOverlayUpdateEvent();
+            var query = AllEntityQuery<GasTileOverlayComponent>();
+            while (query.MoveNext(out var uid, out _))
+                ev.ClearedGrids.Add(GetNetEntity(uid));
+
+            if (ev.ClearedGrids.Count == 0)
+                return;
+
+            foreach (var session in _playerManager.Sessions)
+            {
+                if (session.Status == SessionStatus.InGame)
+                    RaiseNetworkEvent(ev, session.Channel);
+            }
+        }
+
         private void UpdateTickRate(float value) => _updateInterval = value > 0.0f ? 1 / value : float.MaxValue;
         private void UpdateThresholds(int value) => _thresholds = value;
 
@@ -138,6 +173,18 @@ namespace Content.Server.Atmos.EntitySystems
         {
             if (_query.Resolve(grid.Owner, ref grid.Comp))
                 grid.Comp.InvalidTiles.Add(index);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invalidate(Entity<GasTileOverlayComponent?> grid, ZLevelTileIndices index)
+        {
+            if (!_query.Resolve(grid.Owner, ref grid.Comp))
+                return;
+
+            if (index.Z == 0)
+                grid.Comp.InvalidTiles.Add(new Vector2i(index.X, index.Y));
+            else
+                grid.Comp.InvalidZLevelTiles.Add(index);
         }
 
         private void OnPlayerStatusChanged(object? sender, SessionStatusEventArgs e)
@@ -152,12 +199,18 @@ namespace Content.Server.Atmos.EntitySystems
                         _chunkIndexPool.Return(set);
                     }
                 }
+
+                _viewedWorldZLevels.Remove(e.Session);
+                return;
             }
 
             if (!_lastSentChunks.ContainsKey(e.Session))
             {
                 _lastSentChunks[e.Session] = new();
             }
+
+            if (!_viewedWorldZLevels.ContainsKey(e.Session))
+                _viewedWorldZLevels[e.Session] = new();
         }
 
         private byte GetOpacity(float moles, float molesVisible, float molesVisibleMax)
@@ -205,10 +258,18 @@ namespace Content.Server.Atmos.EntitySystems
         /// <summary>
         ///     Updates the visuals for a tile on some grid chunk. Returns true if the visuals have changed.
         /// </summary>
-        private bool UpdateChunkTile(GridAtmosphereComponent gridAtmosphere, GasOverlayChunk chunk, Vector2i index)
+        private bool UpdateChunkTile(
+            GridAtmosphereComponent gridAtmosphere,
+            GasOverlayChunk chunk,
+            ZLevelTileIndices indices)
         {
+            var index = new Vector2i(indices.X, indices.Y);
             ref var oldData = ref chunk.TileData[chunk.GetDataIndex(index)];
-            if (!gridAtmosphere.Tiles.TryGetValue(index, out var tile))
+            TileAtmosphere? tile;
+            var found = indices.Z == 0
+                ? gridAtmosphere.Tiles.TryGetValue(index, out tile)
+                : gridAtmosphere.ZLevelTiles.TryGetValue(indices, out tile);
+            if (!found || tile == null)
             {
                 if (oldData.Equals(default))
                     return false;
@@ -289,6 +350,12 @@ namespace Content.Server.Atmos.EntitySystems
 
         private void UpdateOverlayData()
         {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var invalidatedTiles = 0;
+            var invalidatedUpperTiles = 0;
+            _rebuiltUpperLayers.Clear();
+            _updatedOverlayChunks.Clear();
+
             // TODO parallelize?
             var query = AllEntityQuery<GasTileOverlayComponent, GridAtmosphereComponent, MetaDataComponent>();
             while (query.MoveNext(out var uid, out var overlay, out var gam, out var meta))
@@ -296,18 +363,52 @@ namespace Content.Server.Atmos.EntitySystems
                 var changed = false;
                 foreach (var index in overlay.InvalidTiles)
                 {
+                    invalidatedTiles++;
                     var chunkIndex = GetGasChunkIndices(index);
 
                     if (!overlay.Chunks.TryGetValue(chunkIndex, out var chunk))
                         overlay.Chunks[chunkIndex] = chunk = new GasOverlayChunk(chunkIndex);
 
-                    changed |= UpdateChunkTile(gam, chunk, index);
+                    if (UpdateChunkTile(gam, chunk, new ZLevelTileIndices(index.X, index.Y, 0)))
+                    {
+                        changed = true;
+                        _updatedOverlayChunks.Add((uid, 0, chunkIndex));
+                    }
+                }
+
+                foreach (var index in overlay.InvalidZLevelTiles)
+                {
+                    invalidatedTiles++;
+                    invalidatedUpperTiles++;
+                    var chunkIndex = GetGasChunkIndices(new Vector2i(index.X, index.Y));
+                    var layer = overlay.GetOrNewChunks(index.Z);
+                    _rebuiltUpperLayers.Add((uid, index.Z));
+
+                    if (!layer.TryGetValue(chunkIndex, out var chunk))
+                        layer[chunkIndex] = chunk = new GasOverlayChunk(chunkIndex, index.Z);
+
+                    if (UpdateChunkTile(gam, chunk, index))
+                    {
+                        changed = true;
+                        _updatedOverlayChunks.Add((uid, index.Z, chunkIndex));
+                    }
                 }
 
                 if (changed)
                     Dirty(uid, overlay, meta);
 
                 overlay.InvalidTiles.Clear();
+                overlay.InvalidZLevelTiles.Clear();
+            }
+
+            if (invalidatedTiles != 0)
+            {
+                _zLevelMetrics.RecordAtmosOverlayUpdate(
+                    invalidatedTiles,
+                    invalidatedUpperTiles,
+                    _rebuiltUpperLayers.Count,
+                    _updatedOverlayChunks.Count,
+                    System.Diagnostics.Stopwatch.GetTimestamp() - started);
             }
         }
 
@@ -353,6 +454,7 @@ namespace Content.Server.Atmos.EntitySystems
                     continue;
 
                 _sessions.Add(player);
+                RefreshViewedWorldZLevels(player);
             }
 
             if (_sessions.Count == 0)
@@ -360,6 +462,35 @@ namespace Content.Server.Atmos.EntitySystems
 
             _parMan.ProcessNow(_updateJob, _sessions.Count);
             _updateJob.LastSessionUpdate = _gameTiming.CurTick;
+        }
+
+        private void RefreshViewedWorldZLevels(ICommonSession session)
+        {
+            if (!_viewedWorldZLevels.TryGetValue(session, out var levels))
+            {
+                levels = new();
+                _viewedWorldZLevels[session] = levels;
+            }
+
+            levels.Clear();
+            if (session.AttachedEntity is { } attached)
+                AddViewedWorldZLevel(attached, levels);
+
+            foreach (var viewer in session.ViewSubscriptions)
+            {
+                AddViewedWorldZLevel(viewer, levels);
+            }
+
+            if (levels.Count == 0)
+                levels.Add(0);
+        }
+
+        private void AddViewedWorldZLevel(EntityUid viewer, HashSet<int> levels)
+        {
+            if (!_transformQuery.TryComp(viewer, out var transform) || transform.MapID == MapId.Nullspace)
+                return;
+
+            levels.Add(_transformSystem.GetWorldZLevel((viewer, transform, _zLevelPositionQuery.CompOrNull(viewer))));
         }
 
         public void Reset(RoundRestartCleanupEvent ev)
@@ -393,34 +524,50 @@ namespace Content.Server.Atmos.EntitySystems
             public ObjectPool<Dictionary<NetEntity, HashSet<Vector2i>>> ChunkViewerPool;
 
             public GameTick LastSessionUpdate;
-            public Dictionary<ICommonSession, Dictionary<NetEntity, HashSet<Vector2i>>> LastSentChunks;
+            public Dictionary<ICommonSession, Dictionary<GasOverlayGridLayer, HashSet<Vector2i>>> LastSentChunks;
+            public Dictionary<ICommonSession, HashSet<int>> ViewedWorldZLevels;
             public List<ICommonSession> Sessions;
 
             public EntityQuery<MapGridComponent> GridQuery;
+            public EntityQuery<ZLevelFrameComponent> FrameQuery;
 
             public void Execute(int index)
             {
                 var playerSession = Sessions[index];
                 var chunksInRange = ChunkingSys.GetChunksForSession(playerSession, ChunkSize, ChunkIndexPool, ChunkViewerPool);
                 var previouslySent = LastSentChunks[playerSession];
+                var viewedWorldZLevels = ViewedWorldZLevels[playerSession];
 
                 var ev = new GasOverlayUpdateEvent();
 
-                foreach (var (netGrid, oldIndices) in previouslySent)
+                foreach (var (layer, oldIndices) in previouslySent)
                 {
-                    // Mark the whole grid as stale and flag for removal.
-                    if (!chunksInRange.TryGetValue(netGrid, out var chunks))
+                    EntityUid gridUid = default;
+                    var gridExists = false;
+                    if (EntManager.TryGetEntity(layer.Grid, out var gridId) &&
+                        gridId is { } resolvedGrid &&
+                        GridQuery.HasComp(resolvedGrid))
                     {
-                        previouslySent.Remove(netGrid);
+                        gridUid = resolvedGrid;
+                        gridExists = true;
+                    }
 
-                        // If grid was deleted then don't worry about sending it to the client.
-                        if (!EntManager.TryGetEntity(netGrid, out var gridId) || GridQuery.HasComp(gridId.Value))
-                            ev.RemovedChunks[netGrid] = oldIndices;
-                        else
-                        {
-                            oldIndices.Clear();
-                            ChunkIndexPool.Return(oldIndices);
-                        }
+                    Dictionary<Vector2i, GasOverlayChunk>? layerChunks = null;
+                    var layerExists = gridExists &&
+                        EntManager.TryGetComponent(gridUid, out GasTileOverlayComponent? overlay) &&
+                        overlay.TryGetChunks(layer.LocalZ, out layerChunks);
+                    var layerViewed = gridExists && IsLayerViewed(gridUid, layer.LocalZ, viewedWorldZLevels);
+
+                    if (!chunksInRange.TryGetValue(layer.Grid, out var chunks) ||
+                        !layerExists ||
+                        !layerViewed)
+                    {
+                        previouslySent.Remove(layer);
+                        if (gridExists)
+                            AddRemoved(ev, layer, oldIndices);
+
+                        oldIndices.Clear();
+                        ChunkIndexPool.Return(oldIndices);
 
                         continue;
                     }
@@ -429,14 +576,18 @@ namespace Content.Server.Atmos.EntitySystems
                     DebugTools.Assert(old.Count == 0);
                     foreach (var chunk in oldIndices)
                     {
-                        if (!chunks.Contains(chunk))
+                        if (!chunks.Contains(chunk) || !layerChunks!.ContainsKey(chunk))
                             old.Add(chunk);
                     }
 
                     if (old.Count == 0)
                         ChunkIndexPool.Return(old);
                     else
-                        ev.RemovedChunks.Add(netGrid, old);
+                    {
+                        AddRemoved(ev, layer, old);
+                        old.Clear();
+                        ChunkIndexPool.Return(old);
+                    }
                 }
 
                 foreach (var (netGrid, gridChunks) in chunksInRange)
@@ -445,42 +596,95 @@ namespace Content.Server.Atmos.EntitySystems
                     if (!EntManager.TryGetEntity(netGrid, out var grid) || !EntManager.TryGetComponent(grid, out GasTileOverlayComponent? overlay))
                         continue;
 
-                    List<GasOverlayChunk> dataToSend = new();
-                    ev.UpdatedChunks[netGrid] = dataToSend;
-
-                    previouslySent.TryGetValue(netGrid, out var previousChunks);
-
-                    foreach (var gIndex in gridChunks)
+                    var origin = FrameQuery.TryGetComponent(grid.Value, out var frame) ? frame.Origin : 0;
+                    foreach (var worldZ in viewedWorldZLevels)
                     {
-                        if (!overlay.Chunks.TryGetValue(gIndex, out var value))
+                        var localZ = worldZ - origin;
+                        if (!overlay.TryGetChunks(localZ, out var overlayChunks))
                             continue;
 
-                        // If the chunk was updated since we last sent it, send it again
-                        if (value.LastUpdate > LastSessionUpdate)
+                        var layer = new GasOverlayGridLayer(netGrid, localZ);
+                        previouslySent.TryGetValue(layer, out var previousChunks);
+
+                        foreach (var gIndex in gridChunks)
                         {
+                            if (!overlayChunks.TryGetValue(gIndex, out var value))
+                                continue;
+
+                            if (value.LastUpdate <= LastSessionUpdate &&
+                                previousChunks != null &&
+                                previousChunks.Contains(gIndex))
+                            {
+                                continue;
+                            }
+
+                            if (!ev.UpdatedChunks.TryGetValue(netGrid, out var dataToSend))
+                            {
+                                dataToSend = new();
+                                ev.UpdatedChunks[netGrid] = dataToSend;
+                            }
+
                             dataToSend.Add(value);
-                            continue;
                         }
 
-                        // Always send it if we didn't previously send it
-                        if (previousChunks == null || !previousChunks.Contains(gIndex))
-                            dataToSend.Add(value);
-                    }
+                        var currentChunks = ChunkIndexPool.Get();
+                        DebugTools.Assert(currentChunks.Count == 0);
+                        foreach (var gridChunk in gridChunks)
+                        {
+                            if (overlayChunks.ContainsKey(gridChunk))
+                                currentChunks.Add(gridChunk);
+                        }
 
-                    previouslySent[netGrid] = gridChunks;
-                    if (previousChunks != null)
-                    {
-                        previousChunks.Clear();
-                        ChunkIndexPool.Return(previousChunks);
+                        previouslySent[layer] = currentChunks;
+
+                        if (previousChunks != null)
+                        {
+                            previousChunks.Clear();
+                            ChunkIndexPool.Return(previousChunks);
+                        }
                     }
                 }
+
+                foreach (var chunks in chunksInRange.Values)
+                {
+                    chunks.Clear();
+                    ChunkIndexPool.Return(chunks);
+                }
+
+                chunksInRange.Clear();
+                ChunkViewerPool.Return(chunksInRange);
 
                 if (ev.UpdatedChunks.Count != 0 || ev.RemovedChunks.Count != 0)
                     System.RaiseNetworkEvent(ev, playerSession.Channel);
             }
+
+            private bool IsLayerViewed(EntityUid grid, int localZ, HashSet<int> worldZLevels)
+            {
+                var origin = FrameQuery.TryGetComponent(grid, out var frame) ? frame.Origin : 0;
+                return worldZLevels.Contains(origin + localZ);
+            }
+
+            private static void AddRemoved(
+                GasOverlayUpdateEvent ev,
+                GasOverlayGridLayer layer,
+                IEnumerable<Vector2i> chunks)
+            {
+                if (!ev.RemovedChunks.TryGetValue(layer.Grid, out var removed))
+                {
+                    removed = new();
+                    ev.RemovedChunks[layer.Grid] = removed;
+                }
+
+                foreach (var chunk in chunks)
+                {
+                    removed.Add(new GasOverlayChunkIndices(chunk, layer.LocalZ));
+                }
+            }
         }
 
         #endregion
+
+        private readonly record struct GasOverlayGridLayer(NetEntity Grid, int LocalZ);
 
         private void InitializeCVars()
         {

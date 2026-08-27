@@ -108,6 +108,15 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"iterations={metrics.ExplosionIterationBudgetExhaustions}, " +
             $"limits={explosion.MaxArea} tiles/{explosion.MaxIterations} iterations");
         shell.WriteLine(
+            $"  atmos overlay: updates={metrics.AtmosOverlayUpdates}, " +
+            $"tiles={metrics.AtmosOverlayInvalidatedTiles}, " +
+            $"upper-tiles={metrics.AtmosOverlayInvalidatedUpperTiles}, " +
+            $"upper-layers={metrics.AtmosOverlayUpperLayers}, " +
+            $"changed-chunks={metrics.AtmosOverlayUpdatedChunks}, " +
+            $"avg={metrics.AtmosOverlayAverageMilliseconds:0.000}ms, " +
+            $"last={metrics.AtmosOverlayLastMilliseconds:0.000}ms, " +
+            $"max={metrics.AtmosOverlayMaxMilliseconds:0.000}ms");
+        shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");
     }

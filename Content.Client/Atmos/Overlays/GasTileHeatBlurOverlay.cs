@@ -1,12 +1,14 @@
 using Content.Client.Atmos.EntitySystems;
 using Content.Client.Graphics;
 using Content.Client.Resources;
+using Content.Client.ZLevel;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Content.Shared.CCVar;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Client.Player;
 using Robust.Shared.Configuration;
 using Robust.Shared.Enums;
 using Robust.Shared.Map;
@@ -33,9 +35,11 @@ public sealed class GasTileHeatBlurOverlay : Overlay
     [Dependency] private readonly IClyde _clyde = default!;
     [Dependency] private readonly IConfigurationManager _configManager = default!;
     [Dependency] private readonly IResourceCache _resourceCache = default!;
+    [Dependency] private readonly IPlayerManager _playerManager = default!;
 
     private readonly SharedTransformSystem _xformSys;
     private readonly ShaderInstance _shader;
+    private readonly ZLevelViewContextSystem _viewContext;
 
     private readonly Texture _noiseTexture;
     private readonly Texture _heatGradientTexture;
@@ -64,6 +68,7 @@ public sealed class GasTileHeatBlurOverlay : Overlay
     {
         IoCManager.InjectDependencies(this);
         _xformSys = _entManager.System<SharedTransformSystem>();
+        _viewContext = _entManager.System<ZLevelViewContextSystem>();
 
         _noiseTexture = _resourceCache.GetTexture("/Textures/Effects/HeatBlur/perlin_noise.png");
         _heatGradientTexture = _resourceCache.GetTexture("/Textures/Effects/HeatBlur/soft_circle.png");
@@ -83,6 +88,12 @@ public sealed class GasTileHeatBlurOverlay : Overlay
     {
         if (args.MapId == MapId.Nullspace)
             return false;
+
+        if (args.Viewport.Eye is not { } eye ||
+            !_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var view))
+        {
+            return false;
+        }
 
         var res = _resources.GetForViewport(args.Viewport, static _ => new CachedResources());
 
@@ -132,6 +143,10 @@ public sealed class GasTileHeatBlurOverlay : Overlay
                     if (!overlayQuery.TryGetComponent(grid.Owner, out var comp))
                         continue;
 
+                    var localZ = _xformSys.WorldToLocalZLevel(grid.Owner, view.WorldZLevel);
+                    if (!comp.TryGetChunks(localZ, out var chunks))
+                        continue;
+
                     var gridEntToWorld = _xformSys.GetWorldMatrix(grid.Owner);
                     var gridEntToViewportLocal = gridEntToWorld * worldToViewportLocal;
 
@@ -162,7 +177,7 @@ public sealed class GasTileHeatBlurOverlay : Overlay
                         (int)MathF.Ceiling(floatBounds.Top));
 
                     // for each tile and its gas --->
-                    foreach (var chunk in comp.Chunks.Values)
+                    foreach (var chunk in chunks.Values)
                     {
                         var enumerator = new GasChunkEnumerator(chunk);
 

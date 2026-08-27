@@ -300,7 +300,7 @@ public sealed partial class AtmosphereSystem
         if (args.Handled)
             return;
 
-        if (!component.Tiles.TryGetValue(args.Tile, out var tile))
+        if (!TryGetTileAtmosphere(component, args.Tile, out var tile))
             return;
 
         tile.Hotspot = new Hotspot();
@@ -317,7 +317,7 @@ public sealed partial class AtmosphereSystem
         if (args.Handled)
             return;
 
-        if (!component.Tiles.TryGetValue(args.Tile, out var tile))
+        if (!TryGetTileAtmosphere(component, args.Tile, out var tile))
             return;
 
         args.Result = tile.Hotspot.Valid;

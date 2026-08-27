@@ -284,8 +284,7 @@ public partial class AtmosphereSystem
             if (excite)
             {
                 AddActiveTile(gridEnt.Comp1, tile);
-                if (gridTile.Z == 0)
-                    InvalidateVisuals((grid.Value.Owner, grid.Value.Comp2), tile.GridIndices);
+                InvalidateVisuals((grid.Value.Owner, grid.Value.Comp2), gridTile);
             }
 
             return tile.Air;
@@ -693,10 +692,30 @@ public partial class AtmosphereSystem
         EntityUid? sparkSourceUid = null,
         bool soh = false)
     {
+        HotspotExpose(
+            grid,
+            new ZLevelTileIndices(tile.X, tile.Y, 0),
+            exposedTemperature,
+            exposedVolume,
+            sparkSourceUid,
+            soh);
+    }
+
+    /// <summary>
+    /// Exposes an atmosphere tile on an explicit grid-local Z-level to a hotspot.
+    /// </summary>
+    [PublicAPI]
+    public void HotspotExpose(Entity<GridAtmosphereComponent?> grid,
+        ZLevelTileIndices tile,
+        float exposedTemperature,
+        float exposedVolume,
+        EntityUid? sparkSourceUid = null,
+        bool soh = false)
+    {
         if (!_atmosQuery.Resolve(grid, ref grid.Comp, false))
             return;
 
-        if (grid.Comp.Tiles.TryGetValue(tile, out var atmosTile))
+        if (TryGetTileAtmosphere(grid.Comp, tile, out var atmosTile))
             HotspotExpose(grid.Comp, atmosTile, exposedTemperature, exposedVolume, soh, sparkSourceUid);
     }
 
@@ -761,6 +780,15 @@ public partial class AtmosphereSystem
     [PublicAPI]
     public void HotspotExtinguish(EntityUid gridUid, Vector2i tile)
     {
+        HotspotExtinguish(gridUid, new ZLevelTileIndices(tile.X, tile.Y, 0));
+    }
+
+    /// <summary>
+    /// Extinguishes a hotspot on an explicit grid-local Z-level.
+    /// </summary>
+    [PublicAPI]
+    public void HotspotExtinguish(EntityUid gridUid, ZLevelTileIndices tile)
+    {
         var ev = new HotspotExtinguishMethodEvent(gridUid, tile);
         RaiseLocalEvent(gridUid, ref ev);
     }
@@ -773,6 +801,15 @@ public partial class AtmosphereSystem
     /// <returns>True if a hotspot is active on the tile, false otherwise.</returns>
     [PublicAPI]
     public bool IsHotspotActive(EntityUid gridUid, Vector2i tile)
+    {
+        return IsHotspotActive(gridUid, new ZLevelTileIndices(tile.X, tile.Y, 0));
+    }
+
+    /// <summary>
+    /// Checks whether a hotspot is active on an explicit grid-local Z-level.
+    /// </summary>
+    [PublicAPI]
+    public bool IsHotspotActive(EntityUid gridUid, ZLevelTileIndices tile)
     {
         var ev = new IsHotspotActiveMethodEvent(gridUid, tile);
         RaiseLocalEvent(gridUid, ref ev);
@@ -981,13 +1018,13 @@ public partial class AtmosphereSystem
     [ByRefEvent]
     private record struct HotspotExtinguishMethodEvent(
         EntityUid Grid,
-        Vector2i Tile,
+        ZLevelTileIndices Tile,
         bool Handled = false);
 
     [ByRefEvent]
     private record struct IsHotspotActiveMethodEvent(
         EntityUid Grid,
-        Vector2i Tile,
+        ZLevelTileIndices Tile,
         bool Result = false,
         bool Handled = false);
 }

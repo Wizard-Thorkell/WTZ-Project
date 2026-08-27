@@ -15,22 +15,25 @@ namespace Content.Shared.Atmos
         /// </summary>
         public readonly Vector2i Index;
         public readonly Vector2i Origin;
+        public readonly int LocalZ;
 
         public GasOverlayData[] TileData = new GasOverlayData[ChunkSize * ChunkSize];
 
         [NonSerialized]
         public GameTick LastUpdate;
 
-        public GasOverlayChunk(Vector2i index)
+        public GasOverlayChunk(Vector2i index, int localZ = 0)
         {
             Index = index;
             Origin = Index * ChunkSize;
+            LocalZ = localZ;
         }
 
         public GasOverlayChunk(GasOverlayChunk data)
         {
             Index = data.Index;
             Origin = data.Origin;
+            LocalZ = data.LocalZ;
 
             // This does not clone the opacity array. However, this chunk cloning is only used by the client,
             // which never modifies that directly. So this should be fine.

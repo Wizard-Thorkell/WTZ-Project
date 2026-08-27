@@ -1,10 +1,12 @@
 using Content.Client.Atmos.EntitySystems;
+using Content.Client.ZLevel;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Species;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Client.Player;
 using Robust.Shared.Enums;
 using Robust.Shared.Graphics.RSI;
 using Robust.Shared.Map;
@@ -24,12 +26,14 @@ public sealed class GasTileFireOverlay : Overlay
     [Dependency] private readonly IResourceCache _resourceCache = default!;
     [Dependency] private readonly IEntityManager _entManager = default!;
     [Dependency] private readonly IMapManager _mapManager = default!;
+    [Dependency] private readonly IPlayerManager _playerManager = default!;
 
     public override OverlaySpace Space => OverlaySpace.WorldSpaceEntities | OverlaySpace.WorldSpaceBelowWorld;
     private static readonly ProtoId<ShaderPrototype> UnshadedShader = "unshaded";
 
     private readonly SharedTransformSystem _xformSys;
     private readonly SharedMapSystem _mapSystem = default!;
+    private readonly ZLevelViewContextSystem _viewContext;
     private readonly ShaderInstance _shader;
 
     private readonly float[] _timer;
@@ -49,6 +53,7 @@ public sealed class GasTileFireOverlay : Overlay
         IoCManager.InjectDependencies(this);
         _xformSys = _entManager.System<SharedTransformSystem>();
         _mapSystem = _entManager.System<SharedMapSystem>();
+        _viewContext = _entManager.System<ZLevelViewContextSystem>();
         _shader = _protoMan.Index(UnshadedShader).Instance();
         ZIndex = GasOverlayZIndex;
 
@@ -95,6 +100,12 @@ public sealed class GasTileFireOverlay : Overlay
         if (args.MapId == MapId.Nullspace)
             return;
 
+        if (args.Viewport.Eye is not { } eye ||
+            !_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var view))
+        {
+            return;
+        }
+
         var drawHandle = args.WorldHandle;
         var xformQuery = _entManager.GetEntityQuery<TransformComponent>();
         var overlayQuery = _entManager.GetEntityQuery<GasTileOverlayComponent>();
@@ -105,7 +116,8 @@ public sealed class GasTileFireOverlay : Overlay
             _shader,
             overlayQuery,
             xformQuery,
-            _xformSys);
+            _xformSys,
+            view.WorldZLevel);
 
         var mapUid = _mapSystem.GetMapOrInvalid(args.MapId);
 
@@ -122,7 +134,8 @@ public sealed class GasTileFireOverlay : Overlay
                     ShaderInstance shader,
                     EntityQuery<GasTileOverlayComponent> overlayQuery,
                     EntityQuery<TransformComponent> xformQuery,
-                    SharedTransformSystem xformSys) state) =>
+                    SharedTransformSystem xformSys,
+                    int worldZ) state) =>
             {
                 if (!state.overlayQuery.TryGetComponent(uid, out var comp) ||
                     !state.xformQuery.TryGetComponent(uid, out var gridXform))
@@ -144,7 +157,11 @@ public sealed class GasTileFireOverlay : Overlay
                 // by chunk, even though its currently slower.
 
                 state.drawHandle.UseShader(state.shader);
-                foreach (var chunk in comp.Chunks.Values)
+                var localZ = state.xformSys.WorldToLocalZLevel(uid, state.worldZ);
+                if (!comp.TryGetChunks(localZ, out var chunks))
+                    return true;
+
+                foreach (var chunk in chunks.Values)
                 {
                     var enumerator = new GasChunkEnumerator(chunk);
 

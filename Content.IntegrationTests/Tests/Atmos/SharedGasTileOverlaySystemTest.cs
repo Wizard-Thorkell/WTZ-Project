@@ -39,6 +39,10 @@ public sealed class GasTileOverlayTemperatureNetworkingTest : AtmosTest
         Assert.That(cOverlay, Is.Not.Null, "Gas overlay is null on the client.");
         Assert.That(cOverlay.Chunks, Is.Not.Empty, "Gas overlay chunks are empty on the client.");
 
+        // This test measures compression and replication, not thermal simulation. Keeping the grid paused makes the
+        // expected temperature independent of how many atmosphere ticks elapse while the network catches up.
+        await Server.WaitPost(() => SAtmos.SetAtmosphereSimulation(RelevantAtmos, false));
+
         //Start real tests
         await InjectHotPlasma(ProcessEnt, tileIndices, mixture, 400f);
 

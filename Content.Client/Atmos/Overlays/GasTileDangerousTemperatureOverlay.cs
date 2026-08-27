@@ -1,9 +1,11 @@
 using Content.Client.Atmos.EntitySystems;
 using Content.Client.Graphics;
+using Content.Client.ZLevel;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Atmos.EntitySystems;
 using Robust.Client.Graphics;
+using Robust.Client.Player;
 using Robust.Shared.Enums;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -21,9 +23,11 @@ public sealed class GasTileDangerousTemperatureOverlay : Overlay
     [Dependency] private readonly IEntityManager _entManager = default!;
     [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly IClyde _clyde = default!;
+    [Dependency] private readonly IPlayerManager _playerManager = default!;
 
     private GasTileOverlaySystem? _gasTileOverlay;
     private readonly SharedTransformSystem _xformSys;
+    private readonly ZLevelViewContextSystem _viewContext;
     private EntityQuery<GasTileOverlayComponent> _overlayQuery;
 
     private readonly OverlayResourceCache<CachedResources> _resources = new();
@@ -38,6 +42,7 @@ public sealed class GasTileDangerousTemperatureOverlay : Overlay
     {
         IoCManager.InjectDependencies(this);
         _xformSys = _entManager.System<SharedTransformSystem>();
+        _viewContext = _entManager.System<ZLevelViewContextSystem>();
 
         _overlayQuery = _entManager.GetEntityQuery<GasTileOverlayComponent>();
 
@@ -148,6 +153,12 @@ public sealed class GasTileDangerousTemperatureOverlay : Overlay
         if (args.MapId == MapId.Nullspace)
             return false;
 
+        if (args.Viewport.Eye is not { } eye ||
+            !_viewContext.TryGetViewContext(eye, _playerManager.LocalEntity, out var view))
+        {
+            return false;
+        }
+
         _gasTileOverlay ??= _entManager.System<GasTileOverlaySystem>();
         if (_gasTileOverlay == null)
             return false;
@@ -181,6 +192,10 @@ public sealed class GasTileDangerousTemperatureOverlay : Overlay
                     if (!_overlayQuery.TryGetComponent(grid.Owner, out var comp))
                         continue;
 
+                    var localZ = _xformSys.WorldToLocalZLevel(grid.Owner, view.WorldZLevel);
+                    if (!comp.TryGetChunks(localZ, out var chunks))
+                        continue;
+
                     var gridTileSizeVec = grid.Comp.TileSizeVector;
                     var gridTileCenterVec = grid.Comp.TileSizeHalfVector;
                     var gridEntToWorld = _xformSys.GetWorldMatrix(grid.Owner);
@@ -197,7 +212,7 @@ public sealed class GasTileDangerousTemperatureOverlay : Overlay
                         (int)MathF.Ceiling(floatBounds.Right),
                         (int)MathF.Ceiling(floatBounds.Top));
 
-                    foreach (var chunk in comp.Chunks.Values)
+                    foreach (var chunk in chunks.Values)
                     {
                         var enumerator = new GasChunkEnumerator(chunk);
                         while (enumerator.MoveNext(out var tileGas))

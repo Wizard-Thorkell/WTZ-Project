@@ -7,8 +7,9 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/explosion-topology`.
-- Active package: none; next is `P2.3b Z-aware fire and atmospheric heat`.
+- Active branch: `zlevel/fire-atmos-heat`.
+- Active package: none; next is `P2.3c generated effect placement and
+  cross-floor presentation hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -824,8 +825,161 @@ presentation can each pass the completion gate independently:
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P2.3a | Authoritative per-floor explosion topology and blast processing | Complete |
-| P2.3b | Z-aware fire and atmospheric heat propagation | Pending |
+| P2.3b | Z-aware fire and atmospheric heat propagation | Complete |
 | P2.3c | Generated effect placement and cross-floor presentation hardening | Pending |
+
+## Completed Package: P2.3b Z-Aware Fire And Atmospheric Heat
+
+### Scope
+
+- Reuse the existing per-floor `TileAtmosphere` simulation and `Atmosphere`
+  boundary channel; do not create a second fire or gas model.
+- Add explicit `(x, y, local Z)` hotspot APIs and make explosion heat target the
+  atmosphere cell on the blast layer instead of suppressing upper-floor heat.
+- Preserve horizontal and vertical hotspot spread through the atmosphere
+  adjacency graph, including closed boundaries and independently authored
+  channels.
+- Store gas, hotspot, and compressed temperature overlay chunks per grid-local
+  floor while preserving the established Z 0 chunk path.
+- Limit custom gas-overlay replication to the world floors observed by each
+  session's attached entity and view subscriptions.
+- Render fire, visible gas, heat blur, and dangerous-temperature overlays from
+  the viewport's authoritative world floor on translated Z-level frames.
+- Add low-cost overlay-build observability and deterministic integration tests
+  for authority, isolation, propagation, networking, and Z 0 parity.
+
+### Acceptance Criteria
+
+- An explosion on a non-zero floor can ignite and heat only that floor's gas;
+  the overlapping Z 0 atmosphere and entities remain unchanged.
+- Hotspot expose, query, and extinguish operations accept explicit Z-level tile
+  coordinates without changing existing `Vector2i` Z 0 behavior.
+- Fire and heat cross vertically only through a boundary open for
+  `ZLevelBoundaryChannels.Atmosphere`; an opening for another channel is inert.
+- Upper-floor hotspot events affect only entities on the matching world floor,
+  including grids with non-zero frame origins.
+- Overlay invalidation and chunk identity include local Z, so equal XY chunks
+  on separate floors cannot overwrite one another.
+- PVS-enabled sessions receive only layers represented by their current viewers;
+  changing floor removes stale client layers and sends the newly viewed layer.
+- All four atmosphere overlays select the current viewport world Z and retain
+  their existing Z 0 visual and temperature-compression behavior.
+- Work added to the atmosphere update remains proportional to invalidated tiles,
+  and replication cost remains proportional to visible layers rather than every
+  authored floor.
+
+### Explicit Deferrals
+
+- P4 owns vertical fire sound propagation. Upper hotspots remain silent until
+  sound portals can attenuate and authorize them coherently.
+- P2.3c owns Z-aware burnt decals, spawned debris, transient effect stamping,
+  camera shake, and final presentation polish outside the gas overlay itself.
+- P6 owns serialization and round-trip restoration of initialized upper-floor
+  atmosphere cells and active hotspots.
+- P8 owns production-scale profiling and any resumable or stricter networking
+  budgets suggested by those profiles.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to hotspot/heat authority, gas-overlay
+      storage/network/rendering, observability, focused tests, and this ledger.
+- [x] Invariant review: Z 0 compatibility, non-zero sparse layers,
+      local/world frame conversion, translated frame origins, server authority,
+      independent boundary channels, PVS toggles, and multiple viewers were
+      considered and covered where applicable.
+- [x] Automated verification: 12/12 package atmosphere tests, 14/14 explosion
+      regression tests, 120/120 focused Z-level integration tests, 9/9
+      explosion-prototype cases, 2/2 structural unit tests, the legacy gas
+      overlay networking test, and the 3/3 stress runner passed.
+- [x] Performance evidence: the deterministic two-tile/two-layer overlay
+      rebuild is recorded below; unrelated stress workloads report zero overlay
+      work and retain their fixed 6,336-byte measured allocation profile.
+- [x] Documentation: contracts, metrics, PVS transition behavior, tests,
+      limitations, and deferrals are recorded here.
+- [x] Dependency check: `RobustToolbox` remains clean at its pinned revision;
+      P2.3b requires no WTZ Engine commit or submodule-pointer update.
+- [x] Git check: `git diff --check` passed, generated artifacts remain ignored,
+      and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risks, and P2.3c ownership are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Make fire and atmosphere
+      overlays Z-aware` commit on `zlevel/fire-atmos-heat`; remote verification
+      is recorded by the branch push that follows this commit.
+
+### Evidence
+
+- Pre-change baseline: all 7 existing `ZLevelAtmosTest` cases passed. The
+  legacy gas-overlay networking case failed reproducibly because 60 live
+  atmosphere ticks cooled the asserted 800 K mixture to approximately 620 K;
+  this established a test-timing defect rather than a replication defect.
+- The completed atmosphere matrix passed 12/12. New cases cover explicit
+  hotspot expose/query/extinguish, Z 0 overload parity, upper-floor explosion
+  heat, independent Projectile/Atmosphere openings, non-zero frame origins,
+  full/delta component state, runtime PVS enablement, floor changes, and
+  simultaneous attached/remote viewers.
+- The final focused integration matrix passed 120/120. The dedicated explosion
+  regression matrix passed 14/14, explosion prototype validation passed 9/9,
+  focused structural unit tests passed 2/2, and the generated 3/6/10-floor
+  stress runner passed 3/3.
+- The legacy temperature compression/networking test passes after suspending
+  simulation only for that networking-focused test. It still checks 400 K,
+  rounding near 800 K, clamping at 1000 K, and dirty-threshold behavior.
+- A non-incremental warning audit produced zero warnings in files touched by
+  P2.3b. Existing dependency, vulnerability, and upstream warning lines remain.
+- Client and server startup accept the expanded gas-overlay payloads with the
+  matching serializer hash
+  `2416F6408F56AAE3A82FA56D1828697E48038C2FEF4D6EB8D53EFD930F0EA765`.
+- The deterministic local Debug overlay sample rebuilt 2 invalidated tiles in
+  2 distinct chunks across Z 0 and one non-zero layer in 2.111 ms. This cold,
+  test-host measurement is comparison evidence, not a production threshold.
+- The unrelated 3/6/10-floor stress workloads recorded zero atmosphere-overlay
+  updates, confirming that the new collector has no work when no overlay tile
+  is invalidated. Their measured allocations remain 6,336 bytes.
+
+### Decisions
+
+- Reuse `TileAtmosphere`, its existing vertical adjacency, and the independent
+  `Atmosphere` boundary channel. P2.3b adds coordinate authority and does not
+  create a competing gas, heat, or fire simulation.
+- Preserve the established Z 0 dictionaries and APIs. Non-zero local floors use
+  sparse per-layer dictionaries, and every network chunk carries its local Z so
+  equal XY coordinates cannot collide.
+- Convert each viewer's world Z back into each intersecting grid's local frame
+  before selecting chunks. Attached entities and all view subscriptions are
+  unioned, allowing cameras on separate floors without sending every floor.
+- Treat enabling PVS at runtime as an explicit protocol transition: clients
+  clear atmosphere data by grid, then receive only currently viewed layers.
+  The reset payload is proportional to grids rather than authored chunks.
+- Resolve the viewport world floor through `ZLevelViewContextSystem` in fire,
+  visible-gas, heat-blur, and dangerous-temperature overlays. Rendering remains
+  a consumer of replicated state rather than an authority source.
+- Record overlay rebuild metrics only on the simulation main thread and only
+  when invalidations exist. Reused sets count distinct layers/chunks without
+  adding per-tile allocations.
+- Pause atmosphere simulation in the legacy compression test because that test
+  owns byte encoding and replication, not thermal evolution.
+
+### Mini Review
+
+- Finding: hotspot state, explosion heat, event delivery, overlay identity,
+  replication, and rendering now share one explicit floor from server mutation
+  through client viewport selection.
+- Finding: PVS cost scales with visible XY chunks multiplied by distinct viewer
+  floors, while the common one-viewer case sends one floor per intersecting
+  grid. Runtime enablement no longer retains stale all-floor snapshots, and
+  leaving `InGame` now releases the session's pooled chunk/view caches.
+- Finding: Z 0 keeps its original storage/API path and passed the complete
+  focused regression and legacy temperature-compression checks.
+- Residual risk: overlay layer selection has deterministic state/network/frame
+  coverage but no automated pixel screenshot; final visual inspection under
+  live fire, thermal goggles, remote cameras, and moving grids remains useful.
+- Residual risk: production bandwidth and retained sparse-layer memory with many
+  simultaneous remote viewers require P8 profiling before public-server claims.
+- Residual risk: burnt decals and upper-floor fire audio remain intentionally
+  suppressed. P2.3c and P4 own those policies respectively; P6 owns initialized
+  atmosphere/hotspot save-load round trips.
+- Next package: P2.3c will harden generated decal/debris/effect placement and
+  cross-floor presentation without reopening the atmospheric authority model.
 
 ## Completed Package: P2.3a Authoritative Explosion Topology
 
