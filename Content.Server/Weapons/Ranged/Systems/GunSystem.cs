@@ -72,7 +72,20 @@ public sealed partial class GunSystem : SharedGunSystem
         var toMap = TransformSystem.ToMapCoordinates(toCoordinates).Position;
         var mapDirection = toMap - fromMap.Position;
         var source = user ?? gun.Owner;
-        if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+        var sourceWorldZ = ZLevels.GetWorldZLevel(source);
+        if (gun.Comp.Target is { } target &&
+            !TerminatingOrDeleted(target) &&
+            gun.Comp.TargetWorldZ is { } entityTargetWorldZ &&
+            entityTargetWorldZ != sourceWorldZ)
+        {
+            var targetMap = TransformSystem.GetMapCoordinates(target);
+            if (targetMap.MapId == fromMap.MapId)
+            {
+                toMap = targetMap.Position;
+                mapDirection = toMap - fromMap.Position;
+            }
+        }
+        else if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
             targetWorldZ != ZLevels.GetWorldZLevel(source) &&
             mapDirection.LengthSquared() <= float.Epsilon)
         {
@@ -231,6 +244,7 @@ public sealed partial class GunSystem : SharedGunSystem
         EntityUid? user)
     {
         EntityUid? targetUid = null;
+        var hasExplicitTarget = gun.Comp.Target is not null;
         if (gun.Comp.Target is { } target && !TerminatingOrDeleted(target))
         {
             targetUid = target;
@@ -245,9 +259,13 @@ public sealed partial class GunSystem : SharedGunSystem
             RemoveShootable(uid);
             // TODO: Someone can probably yeet this a billion miles so need to pre-validate input somewhere up the call stack.
             ThrowingSystem.TryThrow(uid, mapDirection, gun.Comp.ProjectileSpeedModified, user);
-            if (targetUid is { } throwTarget)
+            if (targetUid is { } throwTarget &&
+                ZLevels.GetWorldZLevel(throwTarget) != ZLevels.GetWorldZLevel(uid))
+            {
                 _zBallistics.TryStartTrajectory(uid, throwTarget, trajectoryDisplacement);
-            else if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+            }
+            else if (!hasExplicitTarget &&
+                     gun.Comp.TargetWorldZ is { } targetWorldZ &&
                      targetWorldZ != ZLevels.GetWorldZLevel(uid) &&
                      gun.Comp.ShootCoordinates is { } targetCoordinates)
             {
@@ -261,9 +279,13 @@ public sealed partial class GunSystem : SharedGunSystem
         }
 
         ShootProjectile(uid, mapDirection, gunVelocity, gun, user, gun.Comp.ProjectileSpeedModified);
-        if (targetUid is { } projectileTarget)
+        if (targetUid is { } projectileTarget &&
+            ZLevels.GetWorldZLevel(projectileTarget) != ZLevels.GetWorldZLevel(uid))
+        {
             _zBallistics.TryStartTrajectory(uid, projectileTarget, trajectoryDisplacement);
-        else if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+        }
+        else if (!hasExplicitTarget &&
+                 gun.Comp.TargetWorldZ is { } targetWorldZ &&
                  targetWorldZ != ZLevels.GetWorldZLevel(uid) &&
                  gun.Comp.ShootCoordinates is { } targetCoordinates)
         {

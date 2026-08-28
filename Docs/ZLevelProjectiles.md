@@ -42,6 +42,13 @@ uses a 0.1-tile displacement in the shooter's facing direction so the 2D solver
 can measure progress; the route still performs every ordered vertical crossing
 and boundary check. Same-floor coordinate shots never enter the router.
 
+The shared gun funnel validates the target before ammo use and repeats that
+validation for every burst follow-up. Explicit lower-floor entities supply both
+their current server world Z and planar position; a forged coordinate cannot
+redirect them. Deleted, stale-layer, hidden, upper-floor, different-frame, and
+out-of-range explicit targets cancel the request or remaining burst without a
+coordinate fallback. Transient aim state is cleared when firing stops or ends.
+
 The networked `ZLevelBallisticTrajectoryComponent` stores a route in the grid's
 local frame. A line between floor centers crosses each half-level plane in
 order, so a route from local Z 2 to Z 0 changes floors at one quarter and three
@@ -70,6 +77,21 @@ remaining route needs it. This preserves the normal throw hit event at the
 destination instead of allowing the item to land between floors. Active
 projectiles and throws temporarily suspend ordinary Z gravity; the existing
 gravity solver resumes as soon as their ballistic lifecycle ends.
+
+## Manual Pointer Throws
+
+`ThrowItemInHand` uses `VisibleCrossFloorRanged` targeting and carries the
+pointer's optional world Z through the engine input message. With no entity, the
+client may select the nearest visible non-empty lower-floor surface. The server
+then resolves the layer from its own spatial origin and rechecks map, frame,
+direction, visibility, and entity identity.
+
+Validation completes before throw cooldown, stack splitting, hand drop, or
+physics launch. A forged upper target, stale layer, deleted explicit UID, or
+invalid coordinate therefore leaves the item held and starts no ballistic
+route. A valid explicit lower entity uses its current server position; a valid
+targetless coordinate uses the bounded coordinate overload. Native same-floor
+throws retain their existing range clamp, events, physics, and zero-route path.
 
 ## Impacts And Embedding
 
@@ -127,4 +149,11 @@ three stress baselines.
 P2.4d3b adds targetless gun coordinates, pure-vertical physical flight,
 same-floor zero-route delegation, action guns, and projectile spells. The final
 consumer matrix passes 22/22 ballistic cases, 11/11 hitscan cases, and 164/164
+focused Z-level integration cases with no skips.
+
+P2.4d3c adds pre-ammo gun authority, per-shot burst revalidation, terminal
+explicit-target rejection, and the real pointer-input manual-throw path. Seven
+network throw cases cover lower entities, lower coordinates, same-floor parity,
+forged upper entities/coordinates, stale layers, and deleted UIDs. The final gate
+passes 51/51 focused combat cases, 4/4 native weapon/throw cases, and 182/182
 focused Z-level integration cases with no skips.

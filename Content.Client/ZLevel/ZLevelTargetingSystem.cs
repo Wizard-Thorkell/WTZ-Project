@@ -63,6 +63,9 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         if (function == ContentKeyFunctions.ExamineEntity)
             return ZLevelTargetingMode.VisibleCrossFloorExamine;
 
+        if (function == ContentKeyFunctions.ThrowItemInHand)
+            return ZLevelTargetingMode.VisibleCrossFloorRanged;
+
         if (function == EngineKeyFunctions.Use ||
             function == ContentKeyFunctions.ActivateItemInWorld ||
             function == ContentKeyFunctions.AltActivateItemInWorld)

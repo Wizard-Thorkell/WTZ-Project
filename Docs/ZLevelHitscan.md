@@ -15,10 +15,13 @@ logging, and presentation.
 2. The ordinary gun request carries an optional world Z with its planar
    coordinates. The server resolves entity layers from server state and
    independently validates targetless layers against the effective origin,
-   map, frame, downward direction, and visibility.
+   map, frame, downward direction, and visibility. This validation runs before
+   ammunition use and again before every burst follow-up.
 3. `HitscanBasicRaycastSystem` takes the origin world Z from the authoritative
    shooter transform. A cross-floor target must be on the same map and grid
-   frame, visible from the shooter, and within three-dimensional max range.
+   frame, visible from the shooter, and within three-dimensional max range. An
+   explicit target that was deleted, moved, hidden, raised, or otherwise became
+   invalid fails terminally instead of becoming a targetless planar trace.
 4. One caller-owned `ZLevelTraceBuffer` evaluates collision with the hitscan's
    existing mask and the `Projectile` boundary channel. The first closed deck
    terminates the result before geometry on the next floor is evaluated.
@@ -37,8 +40,11 @@ target legitimately.
 Same-floor shots retain their normal two-dimensional max-distance ray and Z 0
 behavior. Cross-floor shots use the target's server transform to select the
 destination world Z, or use the validated targetless coordinate layer when no
-entity was selected. Recoil direction still controls the planar line. Range is
-measured in XYZ with one floor equal to one world distance unit.
+entity was selected. For an explicit cross-floor entity, the gun also derives
+the planar direction from that current server transform, so a forged companion
+coordinate cannot redirect the ray. Recoil still applies after authoritative
+aim is established. Range is measured in XYZ with one floor equal to one world
+distance unit.
 
 Vertical traces currently require shooter and target to share one structural
 grid frame. That matches the ownership contract of `ZLevelTrace`; overlapping
@@ -47,7 +53,10 @@ translated, and rotated grids are resolved from their current transform and
 `ZLevelFrameComponent` origin when the shot executes.
 
 Invalid maps, non-finite coordinates, unresolved frames, and exhausted trace
-budgets fail without a hit. They do not fall back to an unfiltered 2D ray.
+budgets fail without a hit. Invalid explicit entities, stale selected layers,
+upward targets, visibility denial, and three-dimensional range failure do the
+same. None fall back to an unfiltered 2D ray or consume ammunition through the
+normal gun request.
 
 ## Presentation
 
@@ -99,3 +108,8 @@ projectile-specific closed boundaries,
 visibility denial, upward-target rejection, XYZ range, target-only obstacles,
 diagonal moving frames, vertical-crossing budget failure, and the
 collision-enabled allocation capture.
+
+P2.4d3c adds real client/server gun requests, per-shot burst revalidation, idle
+aim cleanup, authoritative entity direction, and fail-closed deleted/stale
+targets. The combined final matrix passes 51/51 hitscan/ballistic cases and the
+full focused Z-level suite passes 182/182 with no skips.

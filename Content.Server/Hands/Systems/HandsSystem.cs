@@ -15,6 +15,7 @@ using Content.Shared.Standing;
 using Content.Shared.Throwing;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameStates;
+using Robust.Shared.Input;
 using Robust.Shared.Input.Binding;
 using Robust.Shared.Map;
 using Robust.Shared.Physics.Components;
@@ -34,6 +35,8 @@ namespace Content.Server.Hands.Systems
         [Dependency] private readonly PullingSystem _pullingSystem = default!;
         [Dependency] private readonly ThrowingSystem _throwingSystem = default!;
         [Dependency] private readonly SharedZLevelBallisticSystem _zBallistics = default!;
+        [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
         private EntityQuery<PhysicsComponent> _physicsQuery;
 
@@ -107,12 +110,29 @@ namespace Content.Server.Hands.Systems
 
         #region interactions
 
-        private bool HandleThrowItem(ICommonSession? playerSession, EntityCoordinates coordinates, EntityUid entity)
+        private bool HandleThrowItem(in PointerInputCmdHandler.PointerInputCmdArgs args)
         {
-            if (playerSession?.AttachedEntity is not {Valid: true} player || !Exists(player) || !coordinates.IsValid(EntityManager))
+            if (args.Session?.AttachedEntity is not {Valid: true} player ||
+                !Exists(player) ||
+                !args.Coordinates.IsValid(EntityManager))
+            {
+                return false;
+            }
+
+            var requestedEntity = args.OriginalMessage switch
+            {
+                FullInputCmdMessage message => message.Uid.IsValid(),
+                ClientFullInputCmdMessage message => message.Uid.IsValid(),
+                _ => false,
+            };
+            if (requestedEntity && (!args.EntityUid.IsValid() || !Exists(args.EntityUid)))
                 return false;
 
-            return ThrowHeldItem(player, coordinates, target: entity);
+            return ThrowHeldItem(
+                player,
+                args.Coordinates,
+                target: requestedEntity ? args.EntityUid : null,
+                targetWorldZ: args.CoordinateLayer);
         }
 
         /// <summary>
@@ -122,12 +142,38 @@ namespace Content.Server.Hands.Systems
             EntityUid player,
             EntityCoordinates coordinates,
             float minDistance = 0.1f,
-            EntityUid? target = null)
+            EntityUid? target = null,
+            int? targetWorldZ = null)
         {
             if (ContainerSystem.IsEntityInContainer(player) ||
                 !TryComp(player, out HandsComponent? hands) ||
                 !TryGetActiveItem((player, hands), out var throwEnt) ||
                 !_actionBlockerSystem.CanThrow(player, throwEnt.Value))
+                return false;
+
+            if (!_zLevelInteraction.TryResolveCoordinateLayer(
+                    player,
+                    target,
+                    coordinates,
+                    targetWorldZ,
+                    true,
+                    out var resolvedTargetWorldZ))
+            {
+                return false;
+            }
+
+            var targetAllowed = target is { } selectedTarget
+                ? _zLevelInteraction.CanTargetVisibleEntity(player, selectedTarget)
+                : _zLevelInteraction.IsCoordinateOnEffectiveWorldLevel(
+                      player,
+                      coordinates,
+                      resolvedTargetWorldZ) ||
+                  _zLevelInteraction.CanTargetVisibleCoordinate(
+                      player,
+                      coordinates,
+                      resolvedTargetWorldZ,
+                      0f);
+            if (!targetAllowed)
                 return false;
 
             if (_timing.CurTime < hands.NextThrowTime)
@@ -144,9 +190,20 @@ namespace Content.Server.Hands.Systems
                 throwEnt = splitStack.Value;
             }
 
-            var direction = _transformSystem.ToMapCoordinates(coordinates).Position - _transformSystem.GetWorldPosition(player);
-            if (direction == Vector2.Zero)
+            var sourceWorldZ = _zLevels.GetWorldZLevel(player);
+            var targetPosition = target is { } authoritativeTarget && resolvedTargetWorldZ != sourceWorldZ
+                ? _transformSystem.GetMapCoordinates(authoritativeTarget).Position
+                : _transformSystem.ToMapCoordinates(coordinates).Position;
+            var direction = targetPosition - _transformSystem.GetWorldPosition(player);
+            if (resolvedTargetWorldZ != sourceWorldZ && direction.LengthSquared() <= float.Epsilon)
+            {
+                direction = _transformSystem.GetWorldRotation(player)
+                    .RotateVec(Vector2.UnitX) * minDistance;
+            }
+            else if (direction == Vector2.Zero)
+            {
                 return true;
+            }
 
             var length = direction.Length();
             var distance = Math.Clamp(length, minDistance, hands.ThrowRange);
@@ -167,8 +224,21 @@ namespace Content.Server.Hands.Systems
                 return false;
 
             _throwingSystem.TryThrow(ev.ItemUid, ev.Direction, ev.ThrowSpeed, ev.PlayerUid, compensateFriction: !HasComp<LandAtCursorComponent>(ev.ItemUid));
-            if (target is { } targetUid && Exists(targetUid))
+            var thrownWorldZ = _zLevels.GetWorldZLevel(ev.ItemUid);
+            if (target is { } targetUid &&
+                Exists(targetUid) &&
+                resolvedTargetWorldZ != thrownWorldZ)
+            {
                 _zBallistics.TryStartTrajectory(ev.ItemUid, targetUid, ev.Direction);
+            }
+            else if (target == null && resolvedTargetWorldZ != thrownWorldZ)
+            {
+                _zBallistics.TryStartTrajectory(
+                    ev.ItemUid,
+                    coordinates,
+                    resolvedTargetWorldZ,
+                    ev.Direction);
+            }
 
             return true;
         }

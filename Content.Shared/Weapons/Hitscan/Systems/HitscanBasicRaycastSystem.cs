@@ -114,19 +114,27 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
         var destinationWorldZ = originWorldZ;
         var frameUid = shooterTransform.GridUid;
 
-        if (args.Target is { } target &&
-            TryComp(target, out TransformComponent? targetTransform) &&
-            targetTransform.MapID == originMap.MapId)
+        if (args.Target is { } target)
         {
+            if (!TryComp(target, out TransformComponent? targetTransform) ||
+                targetTransform.MapID != originMap.MapId)
+            {
+                return false;
+            }
+
             var targetWorldZ = _zLevels.GetWorldZLevel(target);
             if (args.TargetWorldZ is { } selectedWorldZ && selectedWorldZ != targetWorldZ)
                 return false;
 
-            if (targetWorldZ != originWorldZ &&
-                frameUid is { } commonFrame &&
-                targetTransform.GridUid == commonFrame &&
-                _zVisibility.IsEntityVisibleFrom(target, originMap.MapId, originWorldZ))
+            if (targetWorldZ != originWorldZ)
             {
+                if (frameUid is not { } commonFrame ||
+                    targetTransform.GridUid != commonFrame ||
+                    !_zVisibility.IsEntityVisibleFrom(target, originMap.MapId, originWorldZ))
+                {
+                    return false;
+                }
+
                 var targetMap = _transform.GetMapCoordinates((target, targetTransform));
                 if (!IsFinite(targetMap.Position))
                     return false;
@@ -135,13 +143,13 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
                 var verticalDistance = (double) targetWorldZ - originWorldZ;
                 var traceDistance = Math.Sqrt(
                     (double) planarDistance * planarDistance + verticalDistance * verticalDistance);
-                if (traceDistance <= maxDistance)
-                {
-                    destinationPosition = planarDistance == 0f || directionLength == 0f
-                        ? targetMap.Position
-                        : originMap.Position + direction * planarDistance;
-                    destinationWorldZ = targetWorldZ;
-                }
+                if (!double.IsFinite(traceDistance) || traceDistance > maxDistance)
+                    return false;
+
+                destinationPosition = planarDistance == 0f || directionLength == 0f
+                    ? targetMap.Position
+                    : originMap.Position + direction * planarDistance;
+                destinationWorldZ = targetWorldZ;
             }
         }
         else if (args.TargetWorldZ is { } targetWorldZ && targetWorldZ != originWorldZ)

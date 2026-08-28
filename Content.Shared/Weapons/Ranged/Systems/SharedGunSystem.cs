@@ -163,30 +163,13 @@ public abstract partial class SharedGunSystem : EntitySystem
         if (gun.Owner != GetEntity(msg.Gun))
             return;
 
-        var coordinates = GetCoordinates(msg.Coordinates);
-        var target = GetEntity(msg.Target);
-        if (!_zLevelInteraction.TryResolveCoordinateLayer(
-                user.Value,
-                target,
-                coordinates,
-                msg.CoordinateLayer,
-                true,
-                out var targetWorldZ))
-        {
-            return;
-        }
-
-        if (target == null &&
-            !_zLevelInteraction.IsCoordinateOnEffectiveWorldLevel(user.Value, coordinates, targetWorldZ) &&
-            !_zLevelInteraction.CanTargetVisibleCoordinate(user.Value, coordinates, targetWorldZ, 0f))
-        {
-            return;
-        }
-
-        gun.Comp.ShootCoordinates = coordinates;
-        gun.Comp.Target = target;
-        gun.Comp.TargetWorldZ = targetWorldZ;
+        gun.Comp.ShootCoordinates = GetCoordinates(msg.Coordinates);
+        gun.Comp.Target = GetEntity(msg.Target);
+        gun.Comp.TargetWorldZ = msg.CoordinateLayer;
         AttemptShoot(user.Value, gun);
+        if (!gun.Comp.BurstActivated)
+            ClearShootTarget(gun.Comp);
+
         if (msg.Continuous)
             gun.Comp.ShotCounter = 0;
     }
@@ -245,14 +228,11 @@ public abstract partial class SharedGunSystem : EntitySystem
 
     private void StopShooting(Entity<GunComponent> ent)
     {
-        if (ent.Comp.ShotCounter == 0)
-            return;
-
+        var dirtyShotCounter = ent.Comp.ShotCounter != 0;
         ent.Comp.ShotCounter = 0;
-        ent.Comp.ShootCoordinates = null;
-        ent.Comp.Target = null;
-        ent.Comp.TargetWorldZ = null;
-        DirtyField(ent.AsNullable(), nameof(GunComponent.ShotCounter));
+        ClearShootTarget(ent.Comp);
+        if (dirtyShotCounter)
+            DirtyField(ent.AsNullable(), nameof(GunComponent.ShotCounter));
     }
 
     /// <summary>
@@ -270,6 +250,9 @@ public abstract partial class SharedGunSystem : EntitySystem
         gun.Comp.TargetWorldZ = targetWorldZ;
         var result = AttemptShoot(user, gun);
         gun.Comp.ShotCounter = 0;
+        if (!gun.Comp.BurstActivated)
+            ClearShootTarget(gun.Comp);
+
         DirtyField(gun.AsNullable(), nameof(GunComponent.ShotCounter));
         return result;
     }
@@ -285,11 +268,20 @@ public abstract partial class SharedGunSystem : EntitySystem
         gun.Comp.TargetWorldZ = null;
         var result = AttemptShoot(gun, gun);
         gun.Comp.ShotCounter = 0;
+        if (!gun.Comp.BurstActivated)
+            ClearShootTarget(gun.Comp);
+
         return result;
     }
 
     private bool AttemptShoot(EntityUid user, Entity<GunComponent> gun)
     {
+        if (!TryValidateShootTarget(user, gun))
+        {
+            CancelInvalidShootTarget(gun);
+            return false;
+        }
+
         if (gun.Comp.FireRateModified <= 0f ||
             !_actionBlockerSystem.CanAttack(user))
         {
@@ -456,6 +448,47 @@ public abstract partial class SharedGunSystem : EntitySystem
         if (shooterEv.Push)
             CauseImpulse(fromCoordinates, toCoordinates.Value, (user, userPhysics));
         return true;
+    }
+
+    private bool TryValidateShootTarget(EntityUid user, Entity<GunComponent> gun)
+    {
+        if (gun.Comp.ShootCoordinates is not { } coordinates ||
+            !_zLevelInteraction.TryResolveCoordinateLayer(
+                user,
+                gun.Comp.Target,
+                coordinates,
+                gun.Comp.TargetWorldZ,
+                true,
+                out var targetWorldZ))
+        {
+            return false;
+        }
+
+        var allowed = gun.Comp.Target is { } target
+            ? _zLevelInteraction.CanTargetVisibleEntity(user, target)
+            : _zLevelInteraction.IsCoordinateOnEffectiveWorldLevel(user, coordinates, targetWorldZ) ||
+              _zLevelInteraction.CanTargetVisibleCoordinate(user, coordinates, targetWorldZ, 0f);
+        if (!allowed)
+            return false;
+
+        gun.Comp.TargetWorldZ = targetWorldZ;
+        return true;
+    }
+
+    private void CancelInvalidShootTarget(Entity<GunComponent> gun)
+    {
+        gun.Comp.ShotCounter = 0;
+        gun.Comp.BurstActivated = false;
+        gun.Comp.BurstShotsCount = 0;
+        ClearShootTarget(gun.Comp);
+        Dirty(gun);
+    }
+
+    private static void ClearShootTarget(GunComponent gun)
+    {
+        gun.ShootCoordinates = null;
+        gun.Target = null;
+        gun.TargetWorldZ = null;
     }
 
     public void Shoot(

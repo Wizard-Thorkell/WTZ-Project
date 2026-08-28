@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/interaction-targeting`.
-- Active package: `P2.4d3c forged/stale request hardening and final P2 review`.
+- Active package: `P3.1 lighting/FOV architecture, baselines, and cache contract`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -42,8 +42,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P0 | Baselines, stress fixtures, metrics, budgets, and observability | Complete |
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
-| P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | In progress |
-| P3 | Z-aware lighting and FOV with bounded caches and budgets | Pending |
+| P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
+| P3 | Z-aware lighting and FOV with bounded caches and budgets | In progress |
 | P4 | Vertical sound propagation through cached portals | Pending |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
@@ -809,7 +809,7 @@ treated as Debug-run noise.
 | P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
 | P2.2 | Physical projectiles and thrown-entity traversal | Complete |
 | P2.3 | Explosions, fire, heat, and generated effects | Complete |
-| P2.4 | Central direct and remote interaction validation | In progress |
+| P2.4 | Central direct and remote interaction validation | Complete |
 
 P2.4 is split into independently gated subpackages:
 
@@ -822,7 +822,7 @@ P2.4 is split into independently gated subpackages:
 | P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | Complete |
 | P2.4d3a | Explicit lower-floor coordinate opt-in, visibility, frame, and range authority | Complete |
 | P2.4d3b | Coordinate aiming for guns, hitscan, projectiles, action guns, and projectile spells | Complete |
-| P2.4d3c | Forged/stale request hardening and final P2 automated/manual review | In progress |
+| P2.4d3c | Forged/stale request hardening and final P2 automated/manual review | Complete |
 
 ### P2.4 Contracts
 
@@ -1676,6 +1676,138 @@ P2.4 is split into independently gated subpackages:
   or overlapping-sprite readability. The final P2 manual matrix remains required.
 - Next package: harden forged and one-tick-stale gun requests, test lifecycle
   cleanup and terminal rejection, then run the final automated/manual P2 review.
+
+## Completed Package: P2.4d3c Forged/Stale Combat Authority And P2 Review
+
+### Scope
+
+- Revalidate the complete gun target immediately before ammo use and before
+  every follow-up burst shot, using the server-owned entity, world Z, map,
+  structural frame, visibility, and coordinate state.
+- Make deleted, stale, hidden, upper-floor, different-frame, and out-of-range
+  explicit targets terminal for guns and hitscan instead of falling back to a
+  planar coordinate shot.
+- Clear transient target state when a shot ends, stops, or becomes invalid, and
+  cancel an invalid burst without consuming its remaining ammunition.
+- Carry the pointer coordinate layer through the native manual-throw command,
+  enable visible lower-floor ranged selection, and authorize the target before
+  cooldown, stack splitting, dropping, or throwing the item.
+- Audit every gun, hitscan, and manual-throw producer/consumer and close the P2
+  automated and code-path review.
+
+### Contracts
+
+- A client-selected layer is context, never authority. An explicit entity must
+  still exist and its current server world Z must equal the requested layer.
+  An unresolved explicit UID remains an invalid entity request and cannot be
+  reinterpreted as targetless coordinates.
+- Rejected gun requests consume no ammo. Rejected manual throws leave the item
+  in the hand. Both paths perform zero vertical route work.
+- An explicit lower-floor entity supplies its planar aim from the current
+  server transform. A forged companion coordinate cannot redirect that shot or
+  throw. Targetless lower-floor coordinates retain their independent visibility
+  and frame checks.
+- Same-floor gunfire and throws keep native two-dimensional behavior and record
+  zero ballistic route attempts. Vertical routing remains lower-only and must
+  pass the independent `Projectile` boundary channel.
+- Burst aim is revalidated per shot. A moved or stale target cancels the burst,
+  resets counters and aim state, and preserves all unspent ammunition.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to combat/throw target authority,
+      lifecycle cleanup, focused network tests, and Z-level documentation.
+- [x] Invariant review: Z 0 and same-floor parity, world/local frame origins,
+      moving and different grids, explicit versus coordinate-only targets,
+      deleted identities, upward denial, visibility, range, burst lifecycle,
+      projectile boundaries, and pre-consumption rejection were reviewed.
+- [x] Automated verification: 51/51 focused hitscan/ballistic cases, 7/7 real
+      client/server manual-throw cases, 4/4 native weapon/throw cases, 24/24
+      historical interaction/action/DoAfter/pulling regressions, and 182/182
+      focused `ZLevel` integration cases pass with no skips. The complete
+      solution builds with zero errors and its established 711-warning baseline.
+- [x] Performance evidence: same-floor gun and throw requests record zero
+      ballistic attempts; invalid requests reject before ammo/drop and also
+      record zero attempts. All new validation is request or burst-shot driven,
+      with no global scan, retained collection, cache, or tick/frame loop.
+- [x] Documentation: authority, terminal failure, burst and throw lifecycle,
+      verification, decisions, and residual visual QA are recorded here and in
+      `Docs/ZLevel.md`, `Docs/ZLevelHitscan.md`, and
+      `Docs/ZLevelProjectiles.md`.
+- [x] Dependency check: no engine change is required; WTZ Project remains paired
+      with clean WTZ Engine commit
+      `ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c`.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risk, and the P3.1 handoff are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Harden Z-level combat request
+      authority` commit on `zlevel/interaction-targeting`; remote verification
+      follows the package commit.
+
+### Evidence
+
+- Real paired client/server commands prove lower entity and targetless-coordinate
+  gunfire, native same-floor fire, forged upper entity/coordinate rejection,
+  stale-layer rejection, different-frame rejection, and idle target cleanup.
+- Burst coverage proves all three valid shots preserve the authoritative target,
+  while a target that changes layer after the first shot cancels the remaining
+  two and leaves their ammunition intact.
+- Hitscan coverage proves deleted, hidden, upper, stale, different-frame, and
+  out-of-range explicit targets emit no trace rather than using a same-floor
+  decoy or planar fallback.
+- Seven real pointer-input throw cases prove lower entity and coordinate routes,
+  same-floor zero-route behavior, forged upper entity/coordinate rejection,
+  stale-layer rejection, deleted-UID rejection, and `Down`/`Up` input hygiene.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes in
+  1m25s with zero errors and the established dependency, vulnerability,
+  analyzer, and upstream-obsolescence warning baseline.
+
+### Decisions
+
+- Validate raw gun request state in the shared firing funnel so normal client
+  fire, action guns, signal guns, NPC fire, and burst continuation share one
+  authority rule rather than duplicating policy in projectile consumers.
+- Preserve an unresolved explicit network UID as a non-null invalid target.
+  This small distinction makes rejection terminal and prevents a stale entity
+  request from gaining the more permissive coordinate-only path.
+- Derive cross-floor entity aim from the entity's current server transform while
+  retaining native coordinate aim on the same floor. This closes forged-planar
+  redirection without changing ordinary SS14 cursor shooting.
+- Upgrade native hand throwing through the existing pointer-layer transport.
+  It validates before any irreversible hand or stack mutation and uses the same
+  bounded ballistic controller as projectile ammunition.
+
+### Mini Review
+
+- Finding: the final producer audit found that native manual throwing still used
+  the legacy pointer callback, discarded `CoordinateLayer`, and could drop an
+  item before discovering that its vertical target was invalid. The callback is
+  now layer-aware and all authority runs before item mutation.
+- Finding: the first network-throw test helper sent `Down` without `Up`. Reused
+  integration pairs correctly retained the pressed key and exposed the fixture
+  bug as a dirty-disposed skip. The helper now completes the real input cycle,
+  and the seven-case matrix passes with no order dependence or skips.
+- Finding: explicit hitscan targets that disappeared or failed vertical policy
+  previously degraded to a same-floor ray. Explicit-target failure is now
+  terminal from request validation through the final trace constructor.
+- Residual risk: headless automation cannot judge cursor feel, overlapping-sprite
+  readability, beam segmentation, or impact appearance. Those visual checks are
+  retained as an explicit P8 public-server hardening pass; the P2 code-path,
+  authority, network, native-regression, and full integration reviews are
+  complete.
+- Next package: establish P3.1 lighting/FOV ownership, visual baselines, metrics,
+  cache keys, invalidation events, and performance thresholds before projecting
+  light through lower-floor `Visibility` boundaries.
+
+## Phase P3 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | In progress |
+| P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | Pending |
+| P3.3 | Bounded lower-floor light/FOV projection and attenuation | Pending |
+| P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | Pending |
 
 P2.2 is split into independently gated subpackages:
 
@@ -2634,3 +2766,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4d2 | `Enable authored cross-floor entity interactions` | 25 authority, 24 native regression, 158 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3a | `Authorize visible lower-floor action coordinates` | 26 authority, 24 native regression, 159 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3b | `Aim projectiles at lower-floor coordinates` | 33 combat, 27 native interaction, 1 native weapon, 164 integration, full build, diff check | Complete |
+| 2026-08-28 | P2.4d3c | `Harden Z-level combat request authority` | 51 combat, 7 network throw, 4 native combat, 24 native interaction, 182 integration, full build, diff check | Complete |

@@ -220,7 +220,7 @@ public sealed class ZLevelHitscanTest : GameTest
     }
 
     [Test]
-    public async Task InvisibleCrossFloorTargetFallsBackToShooterFloor()
+    public async Task InvisibleCrossFloorTargetFailsClosedWithoutShooterFloorTrace()
     {
         var testMap = await Pair.CreateTestMap();
         EntityUid shooter = default;
@@ -250,8 +250,9 @@ public sealed class ZLevelHitscanTest : GameTest
                 Assert.That(data.HitEntity, Is.Null);
                 Assert.That(snapshot.VisibilityEntityQueries, Is.EqualTo(1));
                 Assert.That(snapshot.VisibilityBoundaryChecks, Is.EqualTo(1));
-                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
-                Assert.That(snapshot.TraceSegments, Is.EqualTo(1));
+                Assert.That(snapshot.TraceQueries, Is.Zero);
+                Assert.That(snapshot.TraceCompleted, Is.Zero);
+                Assert.That(snapshot.TraceSegments, Is.Zero);
                 Assert.That(snapshot.TraceBoundaryCrossings, Is.Zero);
             });
         });
@@ -291,8 +292,9 @@ public sealed class ZLevelHitscanTest : GameTest
             {
                 Assert.That(data.HitEntity, Is.Null);
                 Assert.That(snapshot.VisibilityEntityQueries, Is.EqualTo(1));
-                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
-                Assert.That(snapshot.TraceSegments, Is.EqualTo(1));
+                Assert.That(snapshot.TraceQueries, Is.Zero);
+                Assert.That(snapshot.TraceCompleted, Is.Zero);
+                Assert.That(snapshot.TraceSegments, Is.Zero);
                 Assert.That(snapshot.TraceBoundaryCrossings, Is.Zero);
             });
         });
@@ -328,9 +330,47 @@ public sealed class ZLevelHitscanTest : GameTest
                 Assert.That(data.HitEntity, Is.Null);
                 Assert.That(snapshot.VisibilityEntityQueries, Is.EqualTo(1));
                 Assert.That(snapshot.VisibilityEarlyRejections, Is.EqualTo(1));
-                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
-                Assert.That(snapshot.TraceSegments, Is.EqualTo(1));
+                Assert.That(snapshot.TraceQueries, Is.Zero);
+                Assert.That(snapshot.TraceCompleted, Is.Zero);
+                Assert.That(snapshot.TraceSegments, Is.Zero);
                 Assert.That(snapshot.TraceBoundaryCrossings, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task DeletedExplicitTargetFailsClosedWithoutPlanarFallback()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid shooter = default;
+        EntityUid deletedTarget = default;
+        EntityUid hitscan = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap, 0);
+            shooter = Spawn(testMap, null, new Vector2(0.5f, 0.5f), 0);
+            Spawn(testMap, "ZLevelHitscanObstacle", new Vector2(2.5f, 0.5f), 0);
+            deletedTarget = Spawn(testMap, "ZLevelHitscanObstacle", new Vector2(3.5f, 0.5f), 0);
+            hitscan = SpawnHitscan(testMap);
+            SEntMan.DeleteEntity(deletedTarget);
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            metrics.ResetCounters();
+            var data = Fire(hitscan, shooter, deletedTarget, Vector2.UnitX);
+            var snapshot = metrics.Snapshot();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(data.HitEntity, Is.Null);
+                Assert.That(snapshot.TraceQueries, Is.Zero);
+                Assert.That(snapshot.TraceCompleted, Is.Zero);
+                Assert.That(snapshot.TraceEntityHits, Is.Zero);
             });
         });
     }

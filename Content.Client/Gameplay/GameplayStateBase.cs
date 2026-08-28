@@ -214,6 +214,12 @@ namespace Content.Client.Gameplay
                     mapSystem.MapToGrid(uid, mousePosWorld) :
                     transformSystem.ToCoordinates(mousePosWorld);
                 coordinateLayer = targeting.GetPointerWorldZ(pointerEye, entityToClick);
+                if (func == ContentKeyFunctions.ThrowItemInHand &&
+                    entityToClick == null &&
+                    targeting.TryGetNearestVisibleLowerTileWorldZ(coordinates, out var lowerWorldZ))
+                {
+                    coordinateLayer = lowerWorldZ;
+                }
             }
             else
             {

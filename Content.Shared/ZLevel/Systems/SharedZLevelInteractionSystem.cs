@@ -267,6 +267,37 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
     }
 
     /// <summary>
+    /// Validates an entity selected for ranged targeting. Native same-floor
+    /// targeting remains available, while vertical targeting is limited to a
+    /// visible lower floor on the same structural frame.
+    /// </summary>
+    public bool CanTargetVisibleEntity(EntityUid user, EntityUid target)
+    {
+        if (!TryGetSpatialOrigin(user, target, out var origin) ||
+            !TryGetContext(origin, out var originContext) ||
+            !TryGetContext(target, out var targetContext) ||
+            originContext.MapCoordinates.MapId != targetContext.MapCoordinates.MapId)
+        {
+            return false;
+        }
+
+        if (originContext.WorldZ == targetContext.WorldZ)
+            return true;
+
+        if (targetContext.WorldZ >= originContext.WorldZ ||
+            originContext.GridUid is not { } originFrame ||
+            targetContext.GridUid != originFrame)
+        {
+            return false;
+        }
+
+        return _visibility.IsEntityVisibleFrom(
+            target,
+            originContext.MapCoordinates.MapId,
+            originContext.WorldZ);
+    }
+
+    /// <summary>
     /// Resolves and validates the gameplay layer attached to planar pointer coordinates.
     /// A target entity is authoritative for its layer. Coordinate-only requests remain
     /// on the effective interaction origin unless their owning subsystem explicitly opts in.

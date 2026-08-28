@@ -184,6 +184,16 @@ Implemented traversal and debug tooling:
   projectiles use the bounded ballistic controller, including a minimal planar
   physics step for an otherwise pure-vertical shot. Action guns and projectile
   spells forward the same contract.
+- The shared firing funnel revalidates entity identity, current world Z, map,
+  frame, visibility, and coordinate authority before ammo is consumed and before
+  every burst follow-up. Deleted, stale, hidden, upper, different-frame, and
+  out-of-range explicit targets are terminal; they cannot fall back to a planar
+  coordinate shot. Invalid or stopped fire also clears transient aim state.
+- Native hand throwing uses the same ranged pointer mode and coordinate-layer
+  transport. The server validates an explicit entity or targetless lower-floor
+  coordinate before cooldown, stack split, drop, or throw. Invalid requests keep
+  the item in hand, while same-floor throws retain native behavior and perform
+  no vertical route work.
 - Fireball and Dragon's Breath explicitly opt into visible lower-floor
   coordinates. Other world actions remain same-floor by default, and every shot
   must still pass the independent `Projectile` boundary channel.
@@ -259,6 +269,9 @@ Implemented authoritative Z-aware hitscan:
 - A targetless pointer can select the nearest visible non-empty lower surface.
   The server revalidates its world Z, frame, map, range, and visibility before
   tracing, so an empty sparse layer or forged coordinate cannot become a floor.
+- Explicit entity targets fail closed if their identity, current layer, map,
+  frame, visibility, direction, or three-dimensional range is no longer valid.
+  The trace constructor never substitutes a same-floor ray for such a failure.
 - Hitscan effects are split into ordered floor segments and stamped with their
   world Z on the client.
 - Upward targeting remains deferred until the viewport/FOV and input contracts
@@ -270,6 +283,9 @@ Implemented Z-aware physical projectile lifecycle:
   source-less projectiles preserve their explicitly authored floor.
 - Thrown entities inherit a valid thrower's world Z without changing Robust's
   established horizontal throw timing and distance.
+- Deliberate pointer throws can target a visible lower entity or the nearest
+  visible lower-floor surface. Entity aim uses the current server transform,
+  and rejection occurs before the held item is mutated.
 - Cross-floor physics overlap cannot produce an impact, including on grids with
   displaced vertical frame origins.
 - Impact effects carry world Z to the client, while embedded projectiles inherit
@@ -408,6 +424,12 @@ Final verification on 2026-08-10:
 - Content unit: 2 structural solver tests passed.
 - Content integration: 32 passed for movement, atmosphere, construction, power,
   hands, RCD, PVS, docking, and structural collapse.
+- Final P2 combat authority gate: 51/51 focused hitscan/ballistic cases, 7/7
+  real-network manual-throw cases, 4/4 native weapon/throw cases, 24/24 native
+  interaction/action/DoAfter/pulling regressions, and 182/182 focused Z-level
+  integration cases passed with no skips.
+- The final P2 full solution build completed in 1m25s with zero errors and the
+  established 711-warning dependency/analyzer baseline.
 - The displaced-frame regressions prove that pickup/drop and RCD validation use
   world Z across grids with different local origins.
 - Structural integration covers core propagation, vertical support, delayed
@@ -516,9 +538,12 @@ Major unfinished areas:
 - Hitscan, physical projectile lifecycle and flight, projectile actions, and
   authoritative explosion topology are Z-aware. Other area effects remain
   incomplete.
-- Visible lower-floor coordinate aiming is implemented for normal guns,
-  hitscan, action guns, and projectile spells. Forged/stale request hardening and
-  final manual UI/gameplay coverage remain in the P2 completion matrix.
+- Visible lower-floor entity and coordinate aiming is implemented for normal
+  guns, hitscan, physical projectiles, manual throws, action guns, and projectile
+  spells. Forged, deleted, stale, upper, hidden, different-frame, and range
+  failures are server-authoritative and terminal. Headless P2 verification is
+  complete; visual cursor, overlap, beam, and impact QA remains an explicit P8
+  public-server hardening task.
 - Grid lookup still begins from a 2D `MapCoordinates` selection in several
   engine APIs. Once a destination grid is known, callers now convert world Z to
   that grid's local frame correctly, but physically overlapping grids at the
@@ -756,11 +781,12 @@ inspection feel intentional across floors.
 
 Tasks:
 
-- [Partial] Audit all client click resolution paths. Pointer layer transport,
+- [Done automated/code-path] Audit all client click resolution paths. Pointer layer transport,
   frame selection, context-menu synthesis, drag replay, entity-target selection,
   same-floor-first click priority, and explicit visible lower-coordinate action
-  authority and gun/projectile consumers are covered; forged/stale request
-  hardening and the final manual matrix remain.
+  authority and gun/projectile/throw consumers are covered, including real
+  client/server forged, deleted, and stale request rejection. Visual cursor and
+  overlapping-sprite feel is deferred to the P8 in-game hardening matrix.
 - [Done server-side] Ensure same-floor interaction is the default for
   use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
   targeted DoAfters.

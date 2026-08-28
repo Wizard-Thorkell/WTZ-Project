@@ -6,10 +6,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using Content.Client.ZLevel;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.IntegrationTests.Tests.Helpers;
 using Content.Shared.Actions.Components;
+using Content.Shared.CombatMode;
+using Content.Shared.Damage.Components;
+using Content.Shared.Hands.Components;
+using Content.Shared.Input;
 using Content.Shared.Magic.Events;
 using Content.Shared.Projectiles;
 using Content.Shared.Throwing;
@@ -19,8 +24,10 @@ using Content.Shared.Weapons.Ranged.Systems;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
+using Robust.Client.Input;
 using Robust.Shared;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Input;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
@@ -85,6 +92,29 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
     count: 1
 
 - type: entity
+  parent: ZLevelBallisticTestGun
+  id: ZLevelBallisticNetworkGun
+  components:
+  - type: Gun
+    projectileSpeed: 0.5
+  - type: CombatMode
+
+- type: entity
+  parent: ZLevelBallisticTestGun
+  id: ZLevelBallisticBurstTestGun
+  components:
+  - type: Gun
+    burstFireRate: 30
+    shotsPerBurst: 3
+    selectedMode: Burst
+    availableModes:
+    - Burst
+  - type: BasicEntityAmmoProvider
+    proto: ZLevelBallisticProbeProjectile
+    capacity: 3
+    count: 3
+
+- type: entity
   parent: ZLevelBallisticProbeProjectile
   id: ZLevelBallisticSpreadProjectile
   components:
@@ -129,6 +159,675 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
     public sealed class BoundaryHitListenerSystem : TestListenerSystem<ZLevelBallisticBoundaryHitEvent>;
     public sealed class ThrowHitListenerSystem : TestListenerSystem<ThrowHitByEvent>;
     public sealed class AmmoShotListenerSystem : TestListenerSystem<AmmoShotEvent>;
+
+    [Test]
+    public async Task NetworkGunAcceptsVisibleLowerFloorEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity targetNet = default;
+        NetEntity coordinateNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 2);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            var forgedCoordinate = Spawn(testMap, null, new Vector2(8.25f, 0.5f), 0);
+            gunNet = SEntMan.GetNetEntity(gun);
+            targetNet = SEntMan.GetNetEntity(target);
+            coordinateNet = SEntMan.GetNetEntity(forgedCoordinate);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, coordinateNet, targetNet, FrameOrigin);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            var shots = SEntMan.System<AmmoShotListenerSystem>().GetEvents(gun).ToArray();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(shots, Has.Length.EqualTo(1));
+                Assert.That(shots[0].FiredProjectiles, Has.Count.EqualTo(1));
+                Assert.That(
+                    SEntMan.GetComponent<ZLevelBallisticTrajectoryComponent>(
+                        shots[0].FiredProjectiles.Single()).PlanarDistance,
+                    Is.EqualTo(4f).Within(0.0001f));
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.Zero);
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunAcceptsVisibleLowerFloorCoordinateWithoutEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity coordinateNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 2);
+            var coordinateEntity = Spawn(
+                testMap,
+                "ZLevelBallisticTarget",
+                new Vector2(4.25f, 0.5f),
+                0);
+            gunNet = SEntMan.GetNetEntity(gun);
+            coordinateNet = SEntMan.GetNetEntity(coordinateEntity);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, coordinateNet, null, FrameOrigin);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            var shots = SEntMan.System<AmmoShotListenerSystem>().GetEvents(gun).ToArray();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(shots, Has.Length.EqualTo(1));
+                Assert.That(shots[0].FiredProjectiles, Has.Count.EqualTo(1));
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.Zero);
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunPreservesNativeSameFloorEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity targetNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 1);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 1);
+            gunNet = SEntMan.GetNetEntity(gun);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, targetNet, targetNet, FrameOrigin + 1);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            var shots = SEntMan.System<AmmoShotListenerSystem>().GetEvents(gun).ToArray();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(shots, Has.Length.EqualTo(1));
+                Assert.That(shots[0].FiredProjectiles, Has.Count.EqualTo(1));
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.Zero);
+                Assert.That(metrics.BallisticRouteAttempts, Is.Zero);
+                Assert.That(metrics.BallisticRoutesStarted, Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunRejectsForgedUpperFloorEntityBeforeConsumingAmmo()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity targetNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 1);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 2);
+            gunNet = SEntMan.GetNetEntity(gun);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, targetNet, targetNet, FrameOrigin + 2);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<AmmoShotListenerSystem>().Count(gun), Is.Zero);
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.EqualTo(1));
+                Assert.That(SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts, Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunRejectsForgedUpperFloorCoordinateBeforeConsumingAmmo()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity coordinateNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 1);
+            var coordinateEntity = Spawn(
+                testMap,
+                "ZLevelBallisticTarget",
+                new Vector2(4.25f, 0.5f),
+                2);
+            gunNet = SEntMan.GetNetEntity(gun);
+            coordinateNet = SEntMan.GetNetEntity(coordinateEntity);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, coordinateNet, null, FrameOrigin + 2);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<AmmoShotListenerSystem>().Count(gun), Is.Zero);
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.EqualTo(1));
+                Assert.That(SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts, Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunRevalidatesStaleEntityLayerBeforeConsumingAmmo()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity targetNet = default;
+        EntityUid gun = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 2);
+            target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            gunNet = SEntMan.GetNetEntity(gun);
+            targetNet = SEntMan.GetNetEntity(target);
+        });
+        await Pair.RunTicksSync(5);
+
+        // Keep the client on its last Z0 state while authority moves the target.
+        await Server.WaitAssertion(() =>
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True));
+        await SendNetworkShoot(gunNet, targetNet, targetNet, FrameOrigin);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<AmmoShotListenerSystem>().Count(gun), Is.Zero);
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkGunRejectsEntityOnDifferentStructuralFrame()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        NetEntity targetNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 2);
+
+            var otherGrid = Server.ResolveDependency<IMapManager>().CreateGridEntity(testMap.MapId);
+            var map = SEntMan.System<SharedMapSystem>();
+            var otherGridComp = SEntMan.GetComponent<MapGridComponent>(otherGrid);
+            map.SetTile(otherGrid, otherGridComp, Vector2i.Zero, new Tile(1));
+            var target = SEntMan.SpawnEntity(
+                "ZLevelBallisticTarget",
+                new EntityCoordinates(otherGrid, new Vector2(0.25f, 0.5f)));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 0), Is.True);
+
+            gunNet = SEntMan.GetNetEntity(gun);
+            targetNet = SEntMan.GetNetEntity(target);
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkShoot(gunNet, targetNet, targetNet, 0);
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<AmmoShotListenerSystem>().Count(gun), Is.Zero);
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkStopClearsIdleGunTargetState()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity gunNet = default;
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            gun = SpawnNetworkGun(testMap, new Vector2(0.25f, 0.5f), 2);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            var component = SEntMan.GetComponent<GunComponent>(gun);
+#pragma warning disable RA0002
+            component.ShotCounter = 0;
+            component.ShootCoordinates = SEntMan.GetComponent<TransformComponent>(target).Coordinates;
+            component.Target = target;
+            component.TargetWorldZ = FrameOrigin;
+#pragma warning restore RA0002
+            gunNet = SEntMan.GetNetEntity(gun);
+        });
+        await Pair.RunTicksSync(5);
+
+        await Client.WaitPost(() =>
+            CEntMan.RaisePredictiveEvent(new RequestStopShootEvent { Gun = gunNet }));
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var component = SEntMan.GetComponent<GunComponent>(gun);
+            Assert.Multiple(() =>
+            {
+                Assert.That(component.ShotCounter, Is.Zero);
+                Assert.That(component.ShootCoordinates, Is.Null);
+                Assert.That(component.Target, Is.Null);
+                Assert.That(component.TargetWorldZ, Is.Null);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowAcceptsVisibleLowerFloorEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity coordinateNet = default;
+        NetEntity targetNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 2);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            var forgedCoordinate = Spawn(testMap, null, new Vector2(8.25f, 0.5f), 0);
+            coordinateNet = SEntMan.GetNetEntity(forgedCoordinate);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await Client.WaitAssertion(() =>
+            Assert.That(
+                CEntMan.System<ZLevelTargetingSystem>()
+                    .GetTargetingModeForInput(ContentKeyFunctions.ThrowItemInHand),
+                Is.EqualTo(ZLevelTargetingMode.VisibleCrossFloorRanged)));
+        await SendNetworkThrow(coordinateNet, targetNet, FrameOrigin);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.False);
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowAcceptsVisibleLowerFloorCoordinateWithoutEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity coordinateNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 2);
+            var coordinateEntity = Spawn(testMap, null, new Vector2(4.25f, 0.5f), 0);
+            coordinateNet = SEntMan.GetNetEntity(coordinateEntity);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkThrow(coordinateNet, null, FrameOrigin);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.False);
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowPreservesNativeSameFloorEntityTarget()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 1);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 1);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkThrow(targetNet, targetNet, FrameOrigin + 1);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.False);
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(item), Is.False);
+                Assert.That(metrics.BallisticRouteAttempts, Is.Zero);
+                Assert.That(metrics.BallisticRoutesStarted, Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowRejectsForgedUpperFloorEntityBeforeDroppingItem()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 1);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 2);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkThrow(targetNet, targetNet, FrameOrigin + 2);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.True);
+                Assert.That(SEntMan.HasComponent<ThrownItemComponent>(item), Is.False);
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(item), Is.False);
+                Assert.That(
+                    SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts,
+                    Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowRejectsForgedUpperFloorCoordinateBeforeDroppingItem()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity coordinateNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 1);
+            var coordinateEntity = Spawn(testMap, null, new Vector2(4.25f, 0.5f), 2);
+            coordinateNet = SEntMan.GetNetEntity(coordinateEntity);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await SendNetworkThrow(coordinateNet, null, FrameOrigin + 2);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.True);
+                Assert.That(SEntMan.HasComponent<ThrownItemComponent>(item), Is.False);
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(item), Is.False);
+                Assert.That(
+                    SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts,
+                    Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowRevalidatesStaleEntityLayerBeforeDroppingItem()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 2);
+            target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() =>
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True));
+        await SendNetworkThrow(targetNet, targetNet, FrameOrigin);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.True);
+                Assert.That(SEntMan.HasComponent<ThrownItemComponent>(item), Is.False);
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(item), Is.False);
+                Assert.That(
+                    SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts,
+                    Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task NetworkThrowRejectsDeletedExplicitTargetBeforeDroppingItem()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        EntityUid thrower = default;
+        EntityUid item = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            (thrower, item) = SpawnNetworkThrower(testMap, new Vector2(0.25f, 0.5f), 2);
+            target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+            targetNet = SEntMan.GetNetEntity(target);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+        });
+        await Pair.RunTicksSync(5);
+
+        await Server.WaitAssertion(() => SEntMan.DeleteEntity(target));
+        await SendNetworkThrow(targetNet, targetNet, FrameOrigin);
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsHolding(thrower, item), Is.True);
+                Assert.That(SEntMan.HasComponent<ThrownItemComponent>(item), Is.False);
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(item), Is.False);
+                Assert.That(
+                    SEntMan.System<SharedZLevelMetricsSystem>().Snapshot().BallisticRouteAttempts,
+                    Is.Zero);
+            });
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+        });
+    }
+
+    [Test]
+    public async Task CrossFloorBurstPreservesAuthoritativeTargetForEveryShot()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid gun = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<DamageableComponent>(source);
+            gun = Spawn(testMap, "ZLevelBallisticBurstTestGun", new Vector2(0.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<TestListenerComponent>(gun);
+            SEntMan.System<SharedTransformSystem>().SetParent(gun, source);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+            Assert.That(
+                SEntMan.System<Content.Server.Weapons.Ranged.Systems.GunSystem>().AttemptShoot(
+                    source,
+                    (gun, SEntMan.GetComponent<GunComponent>(gun)),
+                    SEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                    target),
+                Is.True);
+        });
+
+        for (var i = 0; i < 10; i++)
+            await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var shots = SEntMan.System<AmmoShotListenerSystem>().GetEvents(gun).ToArray();
+            var component = SEntMan.GetComponent<GunComponent>(gun);
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(shots, Has.Length.EqualTo(3));
+                Assert.That(shots.SelectMany(shot => shot.FiredProjectiles).Count(), Is.EqualTo(3));
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.Zero);
+                Assert.That(component.BurstActivated, Is.False);
+                Assert.That(component.ShootCoordinates, Is.Null);
+                Assert.That(component.Target, Is.Null);
+                Assert.That(component.TargetWorldZ, Is.Null);
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(3));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(3));
+            });
+        });
+    }
+
+    [Test]
+    public async Task CrossFloorBurstCancelsWhenTargetLayerBecomesStale()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid gun = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<DamageableComponent>(source);
+            gun = Spawn(testMap, "ZLevelBallisticBurstTestGun", new Vector2(0.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<TestListenerComponent>(gun);
+            SEntMan.System<SharedTransformSystem>().SetParent(gun, source);
+            target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 0);
+
+            Assert.That(
+                SEntMan.System<Content.Server.Weapons.Ranged.Systems.GunSystem>().AttemptShoot(
+                    source,
+                    (gun, SEntMan.GetComponent<GunComponent>(gun)),
+                    SEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                    target),
+                Is.True);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+        });
+
+        await RunTicksSync(3);
+
+        await Server.WaitAssertion(() =>
+        {
+            var component = SEntMan.GetComponent<GunComponent>(gun);
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<AmmoShotListenerSystem>().Count(gun), Is.EqualTo(1));
+                Assert.That(SEntMan.GetComponent<BasicEntityAmmoProviderComponent>(gun).Count, Is.EqualTo(2));
+                Assert.That(component.BurstActivated, Is.False);
+                Assert.That(component.BurstShotsCount, Is.Zero);
+                Assert.That(component.ShootCoordinates, Is.Null);
+                Assert.That(component.Target, Is.Null);
+                Assert.That(component.TargetWorldZ, Is.Null);
+            });
+        });
+    }
 
     [Test]
     public async Task OpenTrajectoryCrossesTwoLevelsAndHitsOnlyTargetFloor()
@@ -1226,6 +1925,93 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
         var entity = SEntMan.SpawnEntity(prototype, new EntityCoordinates(testMap.Grid, position));
         Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(entity, localZ), Is.True);
         return entity;
+    }
+
+    private EntityUid SpawnNetworkGun(TestMapData testMap, Vector2 position, int localZ)
+    {
+        Assert.That(ServerSession, Is.Not.Null);
+        var gun = Spawn(testMap, "ZLevelBallisticNetworkGun", position, localZ);
+        SEntMan.EnsureComponent<TestListenerComponent>(gun);
+        var combatMode = SEntMan.GetComponent<CombatModeComponent>(gun);
+        SEntMan.System<Content.Server.CombatMode.CombatModeSystem>()
+            .SetInCombatMode(gun, true, combatMode);
+        Server.PlayerMan.SetAttachedEntity(ServerSession!, gun);
+        return gun;
+    }
+
+    private (EntityUid Thrower, EntityUid Item) SpawnNetworkThrower(
+        TestMapData testMap,
+        Vector2 position,
+        int localZ)
+    {
+        Assert.That(ServerSession, Is.Not.Null);
+        var thrower = Spawn(testMap, "ZLevelBallisticThrower", position, localZ);
+        var item = Spawn(testMap, "Crowbar", position, localZ);
+        Assert.That(
+            SEntMan.System<Content.Server.Hands.Systems.HandsSystem>()
+                .TryPickupAnyHand(thrower, item, checkActionBlocker: false, animate: false),
+            Is.True);
+        Server.PlayerMan.SetAttachedEntity(ServerSession!, thrower);
+        return (thrower, item);
+    }
+
+    private bool IsHolding(EntityUid thrower, EntityUid item)
+    {
+        var hands = SEntMan.GetComponent<HandsComponent>(thrower);
+        return SEntMan.System<Content.Server.Hands.Systems.HandsSystem>()
+            .IsHolding((thrower, hands), item);
+    }
+
+    private async Task SendNetworkShoot(
+        NetEntity gunNet,
+        NetEntity coordinateEntityNet,
+        NetEntity? targetNet,
+        int? coordinateLayer)
+    {
+        await Client.WaitPost(() =>
+        {
+            var coordinateEntity = CEntMan.GetEntity(coordinateEntityNet);
+            var coordinates = CEntMan.GetComponent<TransformComponent>(coordinateEntity).Coordinates;
+            CEntMan.RaisePredictiveEvent(new RequestShootEvent
+            {
+                Gun = gunNet,
+                Coordinates = CEntMan.GetNetCoordinates(coordinates),
+                Target = targetNet,
+                CoordinateLayer = coordinateLayer,
+            });
+        });
+    }
+
+    private async Task SendNetworkThrow(
+        NetEntity coordinateEntityNet,
+        NetEntity? targetNet,
+        int? coordinateLayer)
+    {
+        await Client.WaitPost(() =>
+        {
+            var inputManager = Client.ResolveDependency<IInputManager>();
+            var input = CEntMan.System<Robust.Client.GameObjects.InputSystem>();
+            var coordinateEntity = CEntMan.GetEntity(coordinateEntityNet);
+            var function = ContentKeyFunctions.ThrowItemInHand;
+            var functionId = inputManager.NetworkBindMap.KeyFunctionID(function);
+
+            ClientFullInputCmdMessage Message(BoundKeyState state) => new(
+                CGameTiming.CurTick,
+                CGameTiming.TickFraction,
+                functionId)
+            {
+                State = state,
+                Coordinates = CEntMan.GetComponent<TransformComponent>(coordinateEntity).Coordinates,
+                CoordinateLayer = coordinateLayer,
+                Uid = targetNet is { } target ? CEntMan.GetEntity(target) : EntityUid.Invalid,
+            };
+
+            Assert.That(
+                input.HandleInputCommand(Client.Session, function, Message(BoundKeyState.Down)),
+                Is.False,
+                "A valid local throw command must be dispatched to the server.");
+            input.HandleInputCommand(Client.Session, function, Message(BoundKeyState.Up));
+        });
     }
 
     private void FireProjectile(EntityUid projectile, EntityUid source, EntityUid target, float speed)
