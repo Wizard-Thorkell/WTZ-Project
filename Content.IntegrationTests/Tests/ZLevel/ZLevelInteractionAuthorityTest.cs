@@ -4,7 +4,20 @@
 using System.Numerics;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Tests.Helpers;
+using Content.Server.Administration.Managers;
+using Content.Server.Silicons.StationAi;
+using Content.Server.Verbs;
+using Content.Shared.Actions;
+using Content.Shared.Actions.Components;
+using Content.Shared.Actions.Events;
+using Content.Shared.Containers.ItemSlots;
+using Content.Shared.DoAfter;
+using Content.Shared.DragDrop;
+using Content.Shared.Interaction;
+using Content.Shared.Interaction.Components;
 using Content.Shared.Maps;
+using Content.Shared.Silicons.StationAi;
+using Content.Shared.Verbs;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -12,10 +25,11 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.Serialization;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
-public sealed class ZLevelInteractionAuthorityTest : GameTest
+public sealed partial class ZLevelInteractionAuthorityTest : GameTest
 {
     private const int FrameOrigin = 5;
     private const int AllocationIterations = 4_096;
@@ -258,6 +272,378 @@ public sealed class ZLevelInteractionAuthorityTest : GameTest
         });
     }
 
+    [Test]
+    public async Task PhysicalVerbsRevalidateAtExecutionWithoutBlockingInspectionOrAdminUse()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var sameFloorTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var verbs = SEntMan.System<VerbSystem>();
+            var executions = 0;
+            Verb[] physicalVerbs =
+            [
+                new Verb(),
+                new InteractionVerb(),
+                new UtilityVerb(),
+                new InnateVerb(),
+                new AlternativeVerb(),
+                new ActivationVerb(),
+                new EquipmentVerb(),
+            ];
+
+            foreach (var verb in physicalVerbs)
+            {
+                verb.Act = () => executions++;
+                verbs.ExecuteVerb(verb, user, target);
+            }
+
+            verbs.ExecuteVerb(
+                new Verb
+                {
+                    Category = VerbCategory.Admin,
+                    Act = () => executions++,
+                },
+                user,
+                target);
+
+            Assert.That(executions, Is.Zero,
+                "Physical verbs and unauthenticated admin labels must reject a target on another world Z.");
+
+            foreach (var verb in physicalVerbs)
+                verbs.ExecuteVerb(verb, user, sameFloorTarget);
+            Assert.That(executions, Is.EqualTo(physicalVerbs.Length),
+                "All physical verb families must retain normal same-floor execution.");
+
+            verbs.ExecuteVerb(new ExamineVerb { Act = () => executions++ }, user, target);
+            verbs.ExecuteVerb(new VvVerb { Act = () => executions++ }, user, target);
+            verbs.ExecuteVerb(new InteractionVerb { Act = () => executions++ }, user, target, forced: true);
+
+            Assert.That(ServerSession, Is.Not.Null);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, user);
+            var adminManager = Server.ResolveDependency<IAdminManager>();
+            adminManager.PromoteHost(ServerSession!);
+            verbs.ExecuteVerb(
+                new Verb
+                {
+                    Category = VerbCategory.Admin,
+                    Act = () => executions++,
+                },
+                user,
+                target);
+            adminManager.DeAdmin(ServerSession!);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
+
+            Assert.That(executions, Is.EqualTo(physicalVerbs.Length + 4),
+                "Examine, VV, authenticated admin verbs, and explicit forced execution keep their remote semantics.");
+        });
+    }
+
+    [Test]
+    public async Task RejectedTargetActionsAreTerminalAndEntityTargetsRemainSameFloor()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var upperTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var action = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+#pragma warning disable RA0002
+            SEntMan.EnsureComponent<ActionComponent>(action).CheckCanInteract = false;
+            var targetAction = SEntMan.EnsureComponent<TargetActionComponent>(action);
+            targetAction.CheckCanAccess = false;
+            targetAction.Range = 0f;
+            SEntMan.EnsureComponent<EntityTargetActionComponent>(action).Event = new FunnelEntityActionEvent();
+#pragma warning restore RA0002
+
+            var actions = SEntMan.System<SharedActionsSystem>();
+            Assert.That(
+                actions.ValidateEntityTarget(
+                    user,
+                    upperTarget,
+                    (action, SEntMan.GetComponent<EntityTargetActionComponent>(action))),
+                Is.False,
+                "Disabling planar access checks must not opt an entity action into another floor.");
+
+            var validation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetEntity(upperTarget)),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref validation);
+            Assert.That(validation.Invalid, Is.True,
+                "A rejected entity target must stop the server request before action execution.");
+
+            var missingEntityValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    new NetEntity(int.MaxValue)),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref missingEntityValidation);
+            Assert.That(missingEntityValidation.Invalid, Is.True,
+                "An unknown network entity must be rejected before position or rotation lookup.");
+
+            var worldAction = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+#pragma warning disable RA0002
+            SEntMan.EnsureComponent<ActionComponent>(worldAction).CheckCanInteract = false;
+            var worldTarget = SEntMan.EnsureComponent<TargetActionComponent>(worldAction);
+            worldTarget.CheckCanAccess = false;
+            worldTarget.Range = 0.25f;
+            SEntMan.EnsureComponent<WorldTargetActionComponent>(worldAction).Event = new FunnelWorldActionEvent();
+#pragma warning restore RA0002
+            var farCoordinates = new EntityCoordinates(testMap.Grid, new Vector2(20f, 20f));
+            var worldValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(worldAction),
+                    SEntMan.GetNetCoordinates(farCoordinates)),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(worldAction, ref worldValidation);
+            Assert.That(worldValidation.Invalid, Is.True,
+                "A rejected world target must also be terminal instead of executing with an unset event target.");
+
+#pragma warning disable RA0002
+            worldTarget.Range = 0f;
+#pragma warning restore RA0002
+            var nonFiniteCoordinates = new EntityCoordinates(
+                testMap.Grid,
+                new Vector2(float.NaN, 0f));
+            var nonFiniteValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(worldAction),
+                    SEntMan.GetNetCoordinates(nonFiniteCoordinates)),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(worldAction, ref nonFiniteValidation);
+            Assert.That(nonFiniteValidation.Invalid, Is.True,
+                "Unlimited-range world actions must still reject non-finite coordinates.");
+        });
+    }
+
+    [Test]
+    public async Task BuiAttemptCannotCrossFloors()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            SEntMan.EnsureComponent<UserInterfaceComponent>(target);
+            var attempt = new BoundUserInterfaceMessageAttempt(
+                user,
+                target,
+                FunnelUiKey.Key,
+                new OpenBoundInterfaceMessage());
+
+            SEntMan.EventBus.RaiseLocalEvent(target, attempt);
+            Assert.That(attempt.Cancelled, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task DragDropRequestRevalidatesBothEntitiesOnServer()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity draggedNet = default;
+        NetEntity targetNet = default;
+        EntityUid dragged = default;
+        EntityUid target = default;
+        FunnelListenerSystem listener = default!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            Assert.That(ServerSession, Is.Not.Null);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, user);
+
+            dragged = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            target = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            SEntMan.AddComponent<FunnelListenerComponent>(dragged);
+            SEntMan.AddComponent<FunnelListenerComponent>(target);
+            draggedNet = SEntMan.GetNetEntity(dragged);
+            targetNet = SEntMan.GetNetEntity(target);
+            listener = SEntMan.System<FunnelListenerSystem>();
+            listener.Reset();
+        });
+        await Pair.RunTicksSync(5);
+
+        await Client.WaitPost(() =>
+            CEntMan.RaisePredictiveEvent(new DragDropRequestEvent(draggedNet, targetNet)));
+        await Pair.RunTicksSync(5);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(listener.DraggedEvents, Is.Zero);
+                Assert.That(listener.TargetEvents, Is.Zero);
+            });
+
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(dragged, 0), Is.True);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 0), Is.True);
+        });
+
+        await Client.WaitPost(() =>
+            CEntMan.RaisePredictiveEvent(new DragDropRequestEvent(draggedNet, targetNet)));
+        await Pair.RunTicksSync(5);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(listener.DraggedEvents, Is.EqualTo(1));
+                Assert.That(listener.TargetEvents, Is.EqualTo(1));
+            });
+            listener.Reset();
+        });
+    }
+
+    [Test]
+    public async Task TargetedDoAfterRejectsAnotherFloorDuringInitialValidation()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var upperTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var lowerTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var component = SEntMan.EnsureComponent<DoAfterComponent>(user);
+            var doAfter = SEntMan.System<SharedDoAfterSystem>();
+
+            var rejected = new DoAfterArgs(
+                SEntMan,
+                user,
+                TimeSpan.FromSeconds(10),
+                new FunnelDoAfterEvent(),
+                null,
+                upperTarget)
+            {
+                Broadcast = true,
+                DistanceThreshold = 1.5f,
+            };
+            Assert.That(doAfter.TryStartDoAfter(rejected, component), Is.False);
+
+            var accepted = new DoAfterArgs(
+                SEntMan,
+                user,
+                TimeSpan.FromSeconds(10),
+                new FunnelDoAfterEvent(),
+                null,
+                lowerTarget)
+            {
+                Broadcast = true,
+                DistanceThreshold = 1.5f,
+            };
+            Assert.That(doAfter.TryStartDoAfter(accepted, out var id, component), Is.True);
+            doAfter.Cancel(id, component, force: true);
+        });
+    }
+
+    [Test]
+    public async Task InteractionRelayUsesItsServerOwnedEntityAsSpatialOrigin()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var relay = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var upperTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var lowerTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<FunnelListenerComponent>(upperTarget);
+            SEntMan.AddComponent<FunnelListenerComponent>(lowerTarget);
+            SEntMan.AddComponent<InteractionRelayComponent>(user);
+            SEntMan.AddComponent<ComplexInteractionComponent>(relay);
+            var listener = SEntMan.System<FunnelListenerSystem>();
+            listener.Reset();
+            var interaction = SEntMan.System<SharedInteractionSystem>();
+            interaction.SetRelay(user, relay);
+
+            interaction.UserInteraction(
+                user,
+                SEntMan.GetComponent<TransformComponent>(upperTarget).Coordinates,
+                upperTarget);
+            interaction.UserInteraction(
+                user,
+                SEntMan.GetComponent<TransformComponent>(lowerTarget).Coordinates,
+                lowerTarget);
+
+            Assert.That(listener.HandEvents, Is.EqualTo(1),
+                "The relay may act on its own floor, but must not fall back to the controller body's floor.");
+            listener.Reset();
+        });
+    }
+
+    [Test]
+    public async Task StationAiEyePreservesWorldFloorAndCannotReopenBuiRangeAcrossFloors()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var core = SEntMan.SpawnEntity(
+                "PlayerStationAiEmpty",
+                new EntityCoordinates(testMap.Grid, new Vector2(0.5f, 0.5f)));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(core, 1), Is.True);
+            var brain = SEntMan.SpawnEntity(
+                "StationAiBrain",
+                new EntityCoordinates(testMap.Grid, new Vector2(0.5f, 0.5f)));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(brain, 1), Is.True);
+            var holder = SEntMan.GetComponent<StationAiHolderComponent>(core);
+            Assert.That(
+                SEntMan.System<ItemSlotsSystem>().TryInsert(core, holder.Slot, brain, null),
+                Is.True);
+
+            var stationAi = SEntMan.System<StationAiSystem>();
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var coreComponent = SEntMan.GetComponent<StationAiCoreComponent>(core);
+            Assert.That(coreComponent.RemoteEntity, Is.Not.Null);
+            Assert.That(zLevels.GetWorldZLevel(coreComponent.RemoteEntity!.Value), Is.EqualTo(FrameOrigin + 1));
+            Assert.That(zLevels.SetZLevelPosition(coreComponent.RemoteEntity.Value, 2), Is.True);
+
+            stationAi.SwitchRemoteEntityMode((core, coreComponent), false);
+            Assert.That(coreComponent.RemoteEntity, Is.Not.Null);
+            Assert.That(zLevels.GetWorldZLevel(coreComponent.RemoteEntity!.Value), Is.EqualTo(FrameOrigin + 2));
+            stationAi.SwitchRemoteEntityMode((core, coreComponent), true);
+            Assert.That(coreComponent.RemoteEntity, Is.Not.Null);
+            Assert.That(zLevels.GetWorldZLevel(coreComponent.RemoteEntity!.Value), Is.EqualTo(FrameOrigin + 2));
+
+            var bodyFloorTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            SEntMan.EnsureComponent<StationAiWhitelistComponent>(bodyFloorTarget);
+            var range = new BoundUserInterfaceCheckRangeEvent(
+                (bodyFloorTarget, SEntMan.GetComponent<TransformComponent>(bodyFloorTarget)),
+                FunnelUiKey.Key,
+                new InterfaceData("unused"),
+                (brain, SEntMan.GetComponent<TransformComponent>(brain)))
+            {
+                Result = BoundUserInterfaceRangeResult.Pass,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(bodyFloorTarget, ref range);
+            Assert.That(range.Result, Is.EqualTo(BoundUserInterfaceRangeResult.Fail));
+        });
+    }
+
     private void Configure(TestMapData testMap)
     {
         SEntMan.System<SharedZLevelMapSystem>().Configure(
@@ -330,5 +716,57 @@ public sealed class ZLevelInteractionAuthorityTest : GameTest
             1,
             opens,
             closes);
+    }
+
+    private sealed partial class FunnelEntityActionEvent : EntityTargetActionEvent;
+
+    private sealed partial class FunnelWorldActionEvent : WorldTargetActionEvent;
+
+    [Serializable, NetSerializable]
+    private sealed partial class FunnelDoAfterEvent : SimpleDoAfterEvent;
+
+    private enum FunnelUiKey : byte
+    {
+        Key,
+    }
+
+    [RegisterComponent]
+    public sealed partial class FunnelListenerComponent : Component;
+
+    public sealed class FunnelListenerSystem : EntitySystem
+    {
+        public int DraggedEvents { get; private set; }
+        public int TargetEvents { get; private set; }
+        public int HandEvents { get; private set; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            SubscribeLocalEvent<FunnelListenerComponent, DragDropDraggedEvent>(OnDragged);
+            SubscribeLocalEvent<FunnelListenerComponent, DragDropTargetEvent>(OnTarget);
+            SubscribeLocalEvent<FunnelListenerComponent, InteractHandEvent>(OnHand);
+        }
+
+        public void Reset()
+        {
+            DraggedEvents = 0;
+            TargetEvents = 0;
+            HandEvents = 0;
+        }
+
+        private void OnDragged(Entity<FunnelListenerComponent> ent, ref DragDropDraggedEvent args)
+        {
+            DraggedEvents++;
+        }
+
+        private void OnTarget(Entity<FunnelListenerComponent> ent, ref DragDropTargetEvent args)
+        {
+            TargetEvents++;
+        }
+
+        private void OnHand(Entity<FunnelListenerComponent> ent, ref InteractHandEvent args)
+        {
+            HandEvents++;
+        }
     }
 }

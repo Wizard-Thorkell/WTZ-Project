@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/interaction-metrics`.
-- Active package: `P2.4c interaction request-funnel audit`.
+- Active branch: `zlevel/interaction-funnels`.
+- Active package: `P2.4d client targeting and P2 completion review`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -817,8 +817,8 @@ P2.4 is split into independently gated subpackages:
 | --- | --- | --- |
 | P2.4a | Central spatial origin, same-floor authority, and opt-in trace primitive | Complete |
 | P2.4b | Interaction metrics and authored vertical portals | Complete |
-| P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | In progress |
-| P2.4d | Client targeting polish, regression matrix, and P2 completion review | Pending |
+| P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Complete |
+| P2.4d | Client targeting polish, regression matrix, and P2 completion review | In progress |
 
 ### P2.4 Contracts
 
@@ -1076,6 +1076,145 @@ P2.4 is split into independently gated subpackages:
 - Next package: audit and enforce execution-time authority across verbs, BUI,
   target actions, drag/drop, do-after, relay entities, and Station AI request
   paths without weakening authenticated admin capabilities.
+
+## Completed Package: P2.4c Native Interaction Request Funnels
+
+### Scope
+
+- Revalidate every physical verb family at execution time after the server
+  reconstructs the requested verb, including the generic base `Verb` used by
+  ordinary gameplay systems.
+- Preserve remote execution for examine, VV, explicit forced commands, and
+  generic administrative categories only when the executing entity belongs to
+  an authenticated active administrator.
+- Make rejected entity/world action targets terminal, enforce same-world-Z for
+  entity targets independently of planar access flags, and reject missing
+  entities or invalid/non-finite coordinates before rotation or effects.
+- Prove the existing server guards for BUI attempts, drag/drop against both
+  entities, finite-range targeted DoAfters, and interaction relays.
+- Prevent Station AI's optimized BUI range override from crossing floors and
+  preserve the old remote eye's world Z whenever its proxy mode is replaced.
+- Repair the native targeted-DoAfter fixture so it exercises a real spatial
+  context instead of relying on interaction inside `Nullspace`.
+
+### Acceptance Criteria
+
+- A stale or malicious verb request cannot execute any gameplay verb against an
+  entity on another world Z, while the same verb families retain same-floor
+  behavior and authenticated administration remains remote-capable.
+- Disabling `CheckCanAccess` cannot opt an entity-targeted action into another
+  floor, and every rejected or malformed target sets `ActionValidateEvent.Invalid`.
+- A real client-to-server drag/drop request emits neither dragged nor target
+  events unless both nominated entities share the user's world Z.
+- A targeted DoAfter with a finite distance threshold rejects another floor at
+  initial validation and accepts an equivalent same-floor target.
+- An interaction relay acts from the relay entity's floor, not from the
+  controller body, and BUI message attempts remain same-floor authoritative.
+- A Station AI eye moved away from its core's floor keeps that world Z through
+  both proxy mode switches and cannot use its range override on the body floor.
+
+### Explicit Deferrals
+
+- P2.4d owns normal client selection through authored vertical portals,
+  segmented obstruction, same-XY click priority, context-menu filtering, and
+  the final manual interaction matrix.
+- `NetCoordinates`/`EntityCoordinates` do not encode a selected world Z beyond
+  their planar parent. World-only actions therefore validate identity,
+  finiteness, map, range, and obstruction, but cannot yet authorize a distinct
+  lower-floor point without a P2.4d network/targeting contract.
+- DoAfters whose authors explicitly set `DistanceThreshold = null` retain their
+  remote or non-spatial semantics. Their initiating subsystem owns any physical
+  policy; the core does not reinterpret an intentional unlimited operation.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to verb/action/Station-AI authority,
+      request-funnel integration coverage, the native DoAfter fixture, and
+      Z-level documentation.
+- [x] Invariant review: Z 0 and same-floor parity, world/local frame origin,
+      remote eyes, relay origins, malformed network identities, admin
+      authentication, server reconstruction, and boundary-policy separation
+      were reviewed.
+- [x] Automated verification: 18/18 authority/funnel cases, 24/24 native
+      interaction/action/DoAfter/pulling regressions, and 151/151 focused
+      Z-level integration tests passed with no skips; the complete solution
+      compiled with zero errors.
+- [x] Performance evidence: all new checks are request/event-driven scalar
+      queries. They add no tick/frame loop or result collection; rejected verbs
+      return before logging/delegates, and action validity returns before
+      coordinate conversion or rotation.
+- [x] Documentation: funnel coverage, administrative exceptions, coordinate
+      limitations, tests, decisions, and residual risks are recorded here and
+      in `Docs/ZLevel.md`.
+- [x] Dependency check: `RobustToolbox` remains clean at
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea`; no WTZ Engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated working-tree changes are included.
+- [x] Mini review: findings and residual risks are recorded below.
+- [x] Commit: package prepared as the isolated `Harden native Z-level
+      interaction funnels` commit on `zlevel/interaction-funnels`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed in
+  1m38s with zero errors. Its 711 warnings match the existing dependency,
+  vulnerability, analyzer, and upstream obsolescence baseline.
+- `ZLevelInteractionAuthorityTest` passed 18/18 with no skips. Seven funnel
+  scenarios cover verb families/admin exceptions, terminal and malformed
+  action requests, BUI, real network drag/drop, DoAfter, relay origin, and a
+  Station AI eye on a different floor from its core.
+- The native regression matrix passed 24/24 with no skips, including the
+  corrected targeted-DoAfter test on a real map.
+- The complete focused Z-level integration matrix passed 151/151 with no
+  skips.
+
+### Decisions
+
+- Treat every verb except `ExamineVerb` and `VvVerb` as physical by default.
+  The base `Verb` is not an administrative type: gameplay uses it for pulling,
+  rotation, climbing, UI activation, spilling, and many other operations.
+- Permit remote generic admin verbs only after both server-owned category
+  reconstruction and active `IAdminManager` authentication. A client-supplied
+  category label or a de-adminned account cannot bypass floor authority.
+- Keep action target validation ordered as identity/coordinate validity,
+  authority/access, optional facing, then logging/event mutation. Rejection is
+  terminal and cannot continue with an unset event target.
+- Keep BUI, drag/drop, DoAfter, and relay policy in their existing native
+  funnels. The shared Z authority remains a small primitive instead of a new
+  parallel interaction dispatcher.
+- Preserve the old Station AI proxy's world Z, not the core's world Z, when
+  switching mode. XY coordinates and vertical context now describe the same
+  camera origin.
+
+### Mini Review
+
+- Finding: the first verb classification exempted base `Verb` under the
+  assumption that it represented generic admin commands. Repository-wide usage
+  showed extensive physical gameplay consumers, so the default was inverted
+  and authenticated admin categories became the narrow exception.
+- Finding: rejected action validators returned without setting `Invalid`,
+  allowing the outer action funnel to continue with an unset target. Both
+  entity and world paths are now terminal.
+- Finding: entity action validation attempted transform lookup/rotation before
+  proving a network entity existed, and unlimited world actions lacked an
+  explicit finite-coordinate check. Validation now precedes those effects.
+- Finding: the native DoAfter interaction test spawned targeted participants in
+  `Nullspace`. The stricter authority correctly rejected that context; moving
+  the fixture to a test map preserves production safety and the test's intent.
+- Finding: the initial Station AI regression kept eye and core on one floor and
+  could not distinguish correct eye preservation from copying the core Z. The
+  final case moves the eye to a separate floor before both replacements.
+- Residual risk: coordinate-only target messages cannot express a lower-floor
+  selection independently of their planar parent. P2.4d must solve the client
+  and network contract before enabling authored interaction portals.
+- Residual risk: context-menu presentation can still list a verb produced by a
+  subsystem that ignores `CanAccess`; execution is safe, but P2.4d owns the UI
+  filtering and same-XY priority polish.
+- Next package: define and validate the client/network floor-selection contract,
+  segmented interaction obstruction, context-menu filtering, and the final P2
+  manual/regression review.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2029,3 +2168,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.3c2 | `Keep generated effects on their Z levels` | 10 package, 132 integration, 2 unit, 3 baseline, full build, diff check | Complete |
 | 2026-08-27 | P2.4a | `Centralize native Z-level interaction authority` | 4 authority, 12 regression, 135 integration, full build, diff check | Complete |
 | 2026-08-27 | P2.4b | `Instrument native Z-level interaction policy` | 13 package, 21 regression, 144 integration, allocation, full build, diff check | Complete |
+| 2026-08-28 | P2.4c | `Harden native Z-level interaction funnels` | 18 authority/funnel, 24 native regression, 151 integration, full build, diff check | Complete |

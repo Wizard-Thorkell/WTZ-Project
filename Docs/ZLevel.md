@@ -134,6 +134,23 @@ Implemented traversal and debug tooling:
 - Interaction outcomes and physical checks are visible in `zlevelmetrics` and
   the Z-level debug overlay. Normal client use remains same-floor-only until
   cross-floor targeting and obstruction are enabled as one reviewed path.
+- Every gameplay verb family, including the generic `Verb` used by pulling,
+  rotation, UI activation, and other physical content, revalidates same-world-Z
+  authority at execution time. Examine, VV, explicit forced execution, and
+  authenticated administrative categories retain their remote semantics.
+- Entity-targeted actions remain same-floor even when planar access checks are
+  disabled. Rejected entity/world targets are terminal, and malformed entity or
+  non-finite coordinate requests are rejected before rotation or execution.
+- BUI requests, drag/drop, finite-range targeted DoAfters, and interaction
+  relays enter guarded server-owned funnels. A relay's entity and a remote eye,
+  rather than the controlling body, are the spatial origins they advertise.
+- Station AI proxy replacement preserves the old eye's world Z across
+  remote/physical mode switches, and its optimized BUI range override cannot
+  reopen access to the body's floor from a camera on another floor.
+- World-only action targets still carry planar `EntityCoordinates`, not a
+  selected world-Z value. They validate parent, finiteness, map, range, and
+  obstruction today; explicit lower-floor coordinate selection is reserved for
+  the reviewed client/network targeting contract.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
@@ -698,14 +715,18 @@ inspection feel intentional across floors.
 
 Tasks:
 
-- Audit all client click resolution paths.
-- Ensure same-floor interaction is the default for use/pickup/pull.
+- [Partial] Audit all client click resolution paths. Core execution funnels are
+  audited; lower-floor selection and click priority remain.
+- [Done server-side] Ensure same-floor interaction is the default for
+  use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
+  targeted DoAfters.
 - Allow cross-floor examine only through visible openings.
 - Keep admin inspection capable of deliberate cross-floor targeting.
 - Improve click priority when entities overlap in XY but differ in Z.
 - Add support for selecting lower-floor entities through holes without stealing
   normal same-floor clicks.
-- Ensure verbs only appear for valid floor contexts.
+- [Partial] Ensure verbs only appear for valid floor contexts. Execution is
+  authoritative; client menu filtering remains part of targeting polish.
 - Ensure construction/deconstruction interactions target active floor surfaces.
 - Add tests for same-XY entities on different floors.
 

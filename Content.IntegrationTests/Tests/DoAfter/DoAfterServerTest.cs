@@ -126,6 +126,7 @@ namespace Content.IntegrationTests.Tests.DoAfter
             var doAfterSystem = entityManager.System<SharedDoAfterSystem>();
             var interactionSystem = entityManager.System<SharedInteractionSystem>();
             var ev = new TestDoAfterEvent();
+            var testMap = await pair.CreateTestMap();
 
             EntityUid mob = default;
             EntityUid target = default;
@@ -137,20 +138,20 @@ namespace Content.IntegrationTests.Tests.DoAfter
             await server.WaitPost(() =>
             {
                 // Spawn two targets to interact with
-                target = entityManager.SpawnEntity("DoAfterDummy", MapCoordinates.Nullspace);
-                target2 = entityManager.SpawnEntity("DoAfterDummy", MapCoordinates.Nullspace);
+                target = entityManager.SpawnEntity("DoAfterDummy", testMap.GridCoords);
+                target2 = entityManager.SpawnEntity("DoAfterDummy", testMap.GridCoords);
 
                 // Spawn a mob which is interacting with the first target
-                mob = entityManager.SpawnEntity("DoAfterDummy", MapCoordinates.Nullspace);
+                mob = entityManager.SpawnEntity("DoAfterDummy", testMap.GridCoords);
                 var args = new DoAfterArgs(entityManager, mob, timing.TickPeriod * 5, ev, null, target) { Broadcast = true };
                 Assert.That(doAfterSystem.TryStartDoAfter(args));
 
                 // Spawn two more mobs which are interacting with the second target
-                mob2 = entityManager.SpawnEntity("DoAfterDummy", MapCoordinates.Nullspace);
+                mob2 = entityManager.SpawnEntity("DoAfterDummy", testMap.GridCoords);
                 var args2 = new DoAfterArgs(entityManager, mob2, timing.TickPeriod * 5, ev, null, target2) { Broadcast = true };
                 Assert.That(doAfterSystem.TryStartDoAfter(args2));
 
-                mob3 = entityManager.SpawnEntity("DoAfterDummy", MapCoordinates.Nullspace);
+                mob3 = entityManager.SpawnEntity("DoAfterDummy", testMap.GridCoords);
                 var args3 = new DoAfterArgs(entityManager, mob3, timing.TickPeriod * 5, ev, null, target2) { Broadcast = true };
                 Assert.That(doAfterSystem.TryStartDoAfter(args3));
             });

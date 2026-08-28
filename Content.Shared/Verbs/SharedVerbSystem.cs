@@ -2,6 +2,7 @@ using Content.Shared.ActionBlocker;
 using Content.Shared.Hands.Components;
 using Content.Shared.Interaction;
 using Content.Shared.Inventory.VirtualItem;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
 
@@ -11,6 +12,7 @@ namespace Content.Shared.Verbs
     {
         [Dependency] private readonly SharedInteractionSystem _interactionSystem = default!;
         [Dependency] private readonly ActionBlockerSystem _actionBlockerSystem = default!;
+        [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
         [Dependency] protected readonly SharedContainerSystem ContainerSystem = default!;
 
         public override void Initialize()
@@ -155,6 +157,22 @@ namespace Content.Shared.Verbs
         /// </remarks>
         public virtual void ExecuteVerb(Verb verb, EntityUid user, EntityUid target, bool forced = false)
         {
+            if (!CanExecuteVerb(verb, user, target, forced))
+                return;
+
+            ExecuteVerbCore(verb, user, target);
+        }
+
+        protected virtual bool CanExecuteVerb(Verb verb, EntityUid user, EntityUid target, bool forced)
+        {
+            if (forced || !RequiresDirectInteractionAuthority(verb))
+                return true;
+
+            return _zLevelInteraction.CanDirectlyInteract(user, target);
+        }
+
+        protected void ExecuteVerbCore(Verb verb, EntityUid user, EntityUid target)
+        {
             // invoke any relevant actions
             verb.Act?.Invoke();
 
@@ -173,6 +191,11 @@ namespace Content.Shared.Verbs
             // Perform any contact interactions
             if (verb.DoContactInteraction ?? (verb.DefaultDoContactInteraction && _interactionSystem.InRangeUnobstructed(user, target)))
                 _interactionSystem.DoContactInteraction(user, target);
+        }
+
+        private static bool RequiresDirectInteractionAuthority(Verb verb)
+        {
+            return verb is not ExamineVerb and not VvVerb;
         }
     }
 

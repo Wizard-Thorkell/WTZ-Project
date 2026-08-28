@@ -82,10 +82,34 @@ namespace Content.Server.Verbs
                 return;
             }
 
+            if (!CanExecuteVerb(verb, user, target, forced))
+                return;
+
             // first, lets log the verb. Just in case it ends up crashing the server or something.
             LogVerb(verb, user, target, forced);
 
-            base.ExecuteVerb(verb, user, target, forced);
+            ExecuteVerbCore(verb, user, target);
+        }
+
+        protected override bool CanExecuteVerb(Verb verb, EntityUid user, EntityUid target, bool forced)
+        {
+            if (!forced && IsAuthenticatedAdministrativeVerb(verb, user))
+                return true;
+
+            return base.CanExecuteVerb(verb, user, target, forced);
+        }
+
+        private bool IsAuthenticatedAdministrativeVerb(Verb verb, EntityUid user)
+        {
+            if (verb.GetType() != typeof(Verb) || !_adminMgr.IsAdmin(user))
+                return false;
+
+            var category = verb.Category;
+            return ReferenceEquals(category, VerbCategory.Admin) ||
+                   ReferenceEquals(category, VerbCategory.Debug) ||
+                   ReferenceEquals(category, VerbCategory.Smite) ||
+                   ReferenceEquals(category, VerbCategory.Tricks) ||
+                   ReferenceEquals(category, VerbCategory.Antag);
         }
 
         public void LogVerb(Verb verb, EntityUid user, EntityUid target, bool forced)

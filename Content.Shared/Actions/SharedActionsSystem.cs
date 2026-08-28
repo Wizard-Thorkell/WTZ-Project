@@ -12,6 +12,7 @@ using Content.Shared.Inventory.Events;
 using Content.Shared.Mind;
 using Content.Shared.Rejuvenate;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.GameStates;
 using Robust.Shared.Map;
@@ -32,6 +33,7 @@ public abstract partial class SharedActionsSystem : EntitySystem
     [Dependency] private   readonly SharedInteractionSystem _interaction = default!;
     [Dependency] private   readonly SharedTransformSystem _transform = default!;
     [Dependency] private   readonly SharedDoAfterSystem _doAfter = default!;
+    [Dependency] private   readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
 
     [Dependency] private readonly EntityQuery<ActionComponent> _actionQuery = default!;
     [Dependency] private readonly EntityQuery<ActionsComponent> _actionsQuery = default!;
@@ -361,14 +363,14 @@ public abstract partial class SharedActionsSystem : EntitySystem
         var user = args.User;
 
         var target = GetEntity(netTarget);
-
-        var targetWorldPos = _transform.GetWorldPosition(target);
+        if (!ValidateEntityTarget(user, target, ent))
+        {
+            args.Invalid = true;
+            return;
+        }
 
         if (ent.Comp.RotateOnUse)
-            _rotateToFace.TryFaceCoordinates(user, targetWorldPos);
-
-        if (!ValidateEntityTarget(user, target, ent))
-            return;
+            _rotateToFace.TryFaceCoordinates(user, _transform.GetWorldPosition(target));
 
         _adminLogger.Add(LogType.Action,
             $"{ToPrettyString(user):user} is performing the {Name(ent):action} action (provided by {ToPrettyString(args.Provider):provider}) targeted at {ToPrettyString(target):target}.");
@@ -386,12 +388,11 @@ public abstract partial class SharedActionsSystem : EntitySystem
 
         var user = args.User;
         var target = GetCoordinates(netTarget);
-
-        if (ent.Comp.RotateOnUse)
-            _rotateToFace.TryFaceCoordinates(user, _transform.ToMapCoordinates(target).Position);
-
         if (!ValidateWorldTarget(user, target, ent))
+        {
+            args.Invalid = true;
             return;
+        }
 
         // if the client specified an entity it needs to be valid
         var targetEntity = GetEntity(args.Input.EntityTarget);
@@ -402,6 +403,9 @@ public abstract partial class SharedActionsSystem : EntitySystem
             args.Invalid = true;
             return;
         }
+
+        if (ent.Comp.RotateOnUse)
+            _rotateToFace.TryFaceCoordinates(user, _transform.ToMapCoordinates(target).Position);
 
         _adminLogger.Add(LogType.Action,
             $"{ToPrettyString(user):user} is performing the {Name(ent):action} action (provided by {args.Provider}) targeting {targetEntity} at {target:target}.");
@@ -417,6 +421,9 @@ public abstract partial class SharedActionsSystem : EntitySystem
     {
         var (uid, comp) = ent;
         if (!target.IsValid() || Deleted(target))
+            return false;
+
+        if (!_zLevelInteraction.CanDirectlyInteract(user, target))
             return false;
 
         if (_whitelist.IsWhitelistFail(comp.Whitelist, target))
@@ -454,6 +461,9 @@ public abstract partial class SharedActionsSystem : EntitySystem
 
     private bool ValidateBaseTarget(EntityUid user, EntityCoordinates coords, Entity<TargetActionComponent> ent)
     {
+        if (!_transform.IsValid(coords))
+            return false;
+
         var comp = ent.Comp;
         if (comp.CheckCanAccess)
             return _interaction.InRangeUnobstructed(user, coords, range: comp.Range);

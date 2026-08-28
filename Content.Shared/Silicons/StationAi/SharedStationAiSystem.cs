@@ -65,6 +65,7 @@ public abstract partial class SharedStationAiSystem : EntitySystem
     [Dependency] private readonly StationAiVisionSystem _vision = default!;
     [Dependency] private readonly IPrototypeManager _protoManager = default!;
     [Dependency] private readonly MobStateSystem _mobState = default!;
+    [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     // StationAiHeld is added to anything inside of an AI core.
@@ -177,6 +178,9 @@ public abstract partial class SharedStationAiSystem : EntitySystem
             return;
 
         args.Result = BoundUserInterfaceRangeResult.Fail;
+
+        if (!_zLevelInteraction.CanDirectlyInteract(args.Actor, args.Target))
+            return;
 
         // Similar to the inrange check but more optimised so server doesn't die.
         var targetXform = Transform(args.Target);
@@ -404,14 +408,16 @@ public abstract partial class SharedStationAiSystem : EntitySystem
 
         ent.Comp.Remote = isRemote;
 
-        EntityCoordinates? coords = ent.Comp.RemoteEntity != null ? Transform(ent.Comp.RemoteEntity.Value).Coordinates : null;
-
         // Attach new eye
         var oldEye = ent.Comp.RemoteEntity;
+        var coords = oldEye != null ? Transform(oldEye.Value).Coordinates : (EntityCoordinates?) null;
+        var worldZ = oldEye != null
+            ? _zLevels.GetWorldZLevel(oldEye.Value)
+            : _zLevels.GetWorldZLevel(ent.Owner);
 
         ClearEye(ent);
 
-        if (SetupEye(ent, coords))
+        if (SetupEye(ent, coords, worldZ))
             AttachEye(ent);
 
         if (oldEye != null)
@@ -428,7 +434,10 @@ public abstract partial class SharedStationAiSystem : EntitySystem
             _eye.SetDrawFov(user.Value, !isRemote);
     }
 
-    protected bool SetupEye(Entity<StationAiCoreComponent> ent, EntityCoordinates? coords = null)
+    protected bool SetupEye(
+        Entity<StationAiCoreComponent> ent,
+        EntityCoordinates? coords = null,
+        int? worldZ = null)
     {
         if (_net.IsClient)
             return false;
@@ -447,6 +456,9 @@ public abstract partial class SharedStationAiSystem : EntitySystem
         if (proto != null)
         {
             ent.Comp.RemoteEntity = SpawnAtPosition(proto, coords.Value);
+            _zLevels.StampWorldZLevelPosition(
+                ent.Comp.RemoteEntity.Value,
+                worldZ ?? _zLevels.GetWorldZLevel(ent.Owner));
             Dirty(ent);
         }
 
