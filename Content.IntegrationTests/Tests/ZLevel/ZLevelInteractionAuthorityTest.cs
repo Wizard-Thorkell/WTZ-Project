@@ -635,6 +635,149 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
     }
 
     [Test]
+    public async Task OptedInWorldActionsRequireAVisibleLowerFloorCoordinate()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var action = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+#pragma warning disable RA0002
+            SEntMan.EnsureComponent<ActionComponent>(action).CheckCanInteract = false;
+            var targetAction = SEntMan.EnsureComponent<TargetActionComponent>(action);
+            targetAction.CheckCanAccess = false;
+            targetAction.Range = 1.1f;
+            var worldAction = SEntMan.EnsureComponent<WorldTargetActionComponent>(action);
+            worldAction.AllowCrossLevelCoordinates = true;
+            worldAction.Event = new FunnelWorldActionEvent();
+#pragma warning restore RA0002
+
+            var coordinates = new EntityCoordinates(testMap.Grid, new Vector2(0.5f, 0.5f));
+            var visibility = SEntMan.System<SharedZLevelVisibilitySystem>();
+
+            Assert.That(
+                visibility.TryGetNearestVisibleLowerTileWorldZ(
+                    coordinates,
+                    testMap.MapId,
+                    FrameOrigin + 1,
+                    out _),
+                Is.False,
+                "A closed floor must not become an implicit lower coordinate target.");
+
+            var closedValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetCoordinates(coordinates),
+                    FrameOrigin),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref closedValidation);
+            Assert.That(closedValidation.Invalid, Is.True,
+                "Opt-in alone must not bypass a closed visibility boundary.");
+
+            SetBoundary(
+                testMap,
+                Vector2i.Zero,
+                0,
+                opens: ZLevelBoundaryChannels.Visibility);
+
+            Assert.That(
+                visibility.TryGetNearestVisibleLowerTileWorldZ(
+                    coordinates,
+                    testMap.MapId,
+                    FrameOrigin + 1,
+                    out var lowerWorldZ),
+                Is.True);
+            Assert.That(lowerWorldZ, Is.EqualTo(FrameOrigin));
+
+            var openValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetCoordinates(coordinates),
+                    lowerWorldZ),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref openValidation);
+            var worldEvent = SEntMan.GetComponent<WorldTargetActionComponent>(action).Event;
+            Assert.Multiple(() =>
+            {
+                Assert.That(openValidation.Invalid, Is.False,
+                    "An authored visible lower surface inside 3D range should be accepted.");
+                Assert.That(worldEvent, Is.Not.Null);
+                Assert.That(worldEvent!.TargetWorldZ, Is.EqualTo(FrameOrigin));
+            });
+
+            var aboveValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetCoordinates(coordinates),
+                    FrameOrigin + 2),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref aboveValidation);
+            Assert.That(aboveValidation.Invalid, Is.True,
+                "Coordinate-only action targeting remains downward-only.");
+
+#pragma warning disable RA0002
+            targetAction.Range = 0.9f;
+#pragma warning restore RA0002
+            var outOfRangeValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetCoordinates(coordinates),
+                    FrameOrigin),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(action, ref outOfRangeValidation);
+            Assert.That(outOfRangeValidation.Invalid, Is.True,
+                "The range check must include both planar and vertical distance.");
+
+#pragma warning disable RA0002
+            targetAction.Range = 0f;
+#pragma warning restore RA0002
+            var extremeLayerValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(action),
+                    SEntMan.GetNetCoordinates(coordinates),
+                    int.MinValue),
+                User = user,
+                Provider = user,
+            };
+            Assert.DoesNotThrow(() =>
+                SEntMan.EventBus.RaiseLocalEvent(action, ref extremeLayerValidation));
+            Assert.That(extremeLayerValidation.Invalid, Is.True,
+                "An extreme forged layer must be rejected before frame arithmetic.");
+
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            map.SetZLevelTile(
+                testMap.Grid,
+                grid,
+                new ZLevelTileIndices(0, 0, 0),
+                Tile.Empty);
+            Assert.That(
+                visibility.TryGetNearestVisibleLowerTileWorldZ(
+                    coordinates,
+                    testMap.MapId,
+                    FrameOrigin + 1,
+                    out _),
+                Is.False,
+                "A sparse empty layer must not be exposed as an implicit target.");
+        });
+    }
+
+    [Test]
     public async Task BuiAttemptCannotCrossFloors()
     {
         var testMap = await Pair.CreateTestMap();

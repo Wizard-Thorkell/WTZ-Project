@@ -26,4 +26,11 @@ public sealed partial class WorldTargetActionComponent : Component
     /// </summary>
     [DataField, AutoNetworkedField]
     public bool RotateOnUse = true;
+
+    /// <summary>
+    /// Allows this action to deliberately target a visible lower-floor coordinate.
+    /// The consuming event remains responsible for applying its own boundary channel.
+    /// </summary>
+    [DataField, AutoNetworkedField]
+    public bool AllowCrossLevelCoordinates;
 }

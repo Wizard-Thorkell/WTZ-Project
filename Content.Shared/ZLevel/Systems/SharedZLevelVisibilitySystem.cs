@@ -68,8 +68,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
             return true;
         }
 
-        if ((entityWorldZ > viewerWorldZ && !allowAbove) ||
-            Math.Abs(entityWorldZ - viewerWorldZ) > _maxVisibleLevelDistance)
+        if (!IsWorldLevelWithinRange(viewerWorldZ, entityWorldZ, allowAbove))
         {
             _metrics.RecordVisibilityEarlyRejection();
             return false;
@@ -97,6 +96,74 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
         return IsTileVisibleFrom(gridUid, grid, tile, viewerWorldZ, entityLocalZ, allowAbove);
     }
 
+    /// <summary>
+    /// Checks whether a coordinate identifies a non-empty tile visible from a
+    /// viewer's world level on the same structural frame.
+    /// </summary>
+    public bool IsCoordinateVisibleFrom(
+        EntityCoordinates coordinates,
+        int targetWorldZ,
+        MapId viewerMap,
+        int viewerWorldZ,
+        bool allowAbove = false)
+    {
+        if (!TryResolveCoordinateTile(coordinates, viewerMap, out var gridUid, out var grid, out var tile))
+            return false;
+
+        if (!IsWorldLevelWithinRange(viewerWorldZ, targetWorldZ, allowAbove))
+            return false;
+
+        var targetLocalZ = _transform.WorldToLocalZLevel(gridUid, targetWorldZ);
+        if (_map.IsZLevelTileEmpty(
+                gridUid,
+                grid,
+                new ZLevelTileIndices(tile.X, tile.Y, targetLocalZ)))
+        {
+            return false;
+        }
+
+        return IsTileVisibleFrom(gridUid, grid, tile, viewerWorldZ, targetLocalZ, allowAbove);
+    }
+
+    /// <summary>
+    /// Resolves the nearest visible lower-floor surface under a pointer.
+    /// Empty sparse layers are skipped and never become implicit targets.
+    /// </summary>
+    public bool TryGetNearestVisibleLowerTileWorldZ(
+        EntityCoordinates coordinates,
+        MapId viewerMap,
+        int viewerWorldZ,
+        out int targetWorldZ)
+    {
+        targetWorldZ = default;
+        if (!TryResolveCoordinateTile(coordinates, viewerMap, out var gridUid, out var grid, out var tile))
+            return false;
+
+        var viewerLocalZ = _transform.WorldToLocalZLevel(gridUid, viewerWorldZ);
+        for (var distance = 1; distance <= _maxVisibleLevelDistance; distance++)
+        {
+            var candidateLocalZ = viewerLocalZ - distance;
+            if (_map.IsZLevelTileEmpty(
+                    gridUid,
+                    grid,
+                    new ZLevelTileIndices(tile.X, tile.Y, candidateLocalZ)) ||
+                !IsTileVisibleFrom(
+                    gridUid,
+                    grid,
+                    tile,
+                    viewerWorldZ,
+                    candidateLocalZ))
+            {
+                continue;
+            }
+
+            targetWorldZ = _transform.LocalToWorldZLevel(gridUid, candidateLocalZ);
+            return true;
+        }
+
+        return false;
+    }
+
     public bool IsTileVisibleFrom(
         EntityUid gridUid,
         MapGridComponent grid,
@@ -114,8 +181,7 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
             return true;
         }
 
-        if ((targetWorldZ > viewerWorldZ && !allowAbove) ||
-            Math.Abs(targetWorldZ - viewerWorldZ) > _maxVisibleLevelDistance)
+        if (!IsWorldLevelWithinRange(viewerWorldZ, targetWorldZ, allowAbove))
         {
             _metrics.RecordVisibilityEarlyRejection();
             return false;
@@ -129,5 +195,49 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
             viewerLocalZ,
             targetLocalZ,
             ZLevelBoundaryChannels.Visibility);
+    }
+
+    private bool TryResolveCoordinateTile(
+        EntityCoordinates coordinates,
+        MapId viewerMap,
+        out EntityUid gridUid,
+        out MapGridComponent grid,
+        out Vector2i tile)
+    {
+        gridUid = default;
+        grid = default!;
+        tile = default;
+        if (!coordinates.IsValid(EntityManager))
+            return false;
+
+        var mapCoordinates = _transform.ToMapCoordinates(coordinates);
+        if (mapCoordinates.MapId == MapId.Nullspace ||
+            mapCoordinates.MapId != viewerMap)
+        {
+            return false;
+        }
+
+        var coordinateGrid = _gridQuery.HasComp(coordinates.EntityId)
+            ? coordinates.EntityId
+            : _transform.GetGrid(coordinates);
+        if (coordinateGrid is not { } resolvedGrid ||
+            !_gridQuery.TryComp(resolvedGrid, out var resolvedGridComp) ||
+            !_transformQuery.TryComp(resolvedGrid, out var gridTransform) ||
+            gridTransform.MapID != viewerMap)
+        {
+            return false;
+        }
+
+        gridUid = resolvedGrid;
+        grid = resolvedGridComp;
+        tile = _map.TileIndicesFor(gridUid, grid, mapCoordinates);
+        return true;
+    }
+
+    private bool IsWorldLevelWithinRange(int viewerWorldZ, int targetWorldZ, bool allowAbove)
+    {
+        var difference = (long) targetWorldZ - viewerWorldZ;
+        return (allowAbove || difference <= 0) &&
+               Math.Abs(difference) <= _maxVisibleLevelDistance;
     }
 }

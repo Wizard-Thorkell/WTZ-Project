@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using Content.Client.ZLevel;
 using Content.Shared.Actions;
 using Content.Shared.Actions.Components;
 using Content.Shared.Charges.Systems;
@@ -34,6 +35,7 @@ namespace Content.Client.Actions
         [Dependency] private readonly IResourceManager _resources = default!;
         [Dependency] private readonly MetaDataSystem _metaData = default!;
         [Dependency] private readonly ISerializationManager _serialization = default!;
+        [Dependency] private readonly ZLevelTargetingSystem _zLevelTargeting = default!;
 
         public event Action<EntityUid>? OnActionAdded;
         public event Action<EntityUid>? OnActionRemoved;
@@ -322,6 +324,13 @@ namespace Content.Client.Actions
             var coords = args.Input.Coordinates;
             var coordinateLayer = args.Input.CoordinateLayer;
             var user = args.User;
+
+            if (comp.AllowCrossLevelCoordinates &&
+                args.Input.EntityUid is not { Valid: true } &&
+                _zLevelTargeting.TryGetNearestVisibleLowerTileWorldZ(coords, out var lowerWorldZ))
+            {
+                coordinateLayer = lowerWorldZ;
+            }
 
             if (!TryValidateWorldTarget(user, coords, ent, coordinateLayer, out var targetWorldZ))
                 return;

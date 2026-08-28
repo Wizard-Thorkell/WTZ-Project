@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/interaction-targeting`.
-- Active package: `P2.4d3 empty-tile actions/projectiles and final P2 regression review`.
+- Active package: `P2.4d3b coordinate aiming for projectile consumers`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -820,7 +820,9 @@ P2.4 is split into independently gated subpackages:
 | P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Complete |
 | P2.4d1 | Pointer coordinate-layer transport, frame ownership, and server authority | Complete |
 | P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | Complete |
-| P2.4d3 | Empty-tile actions/projectiles and final P2 regression review | In progress |
+| P2.4d3a | Explicit lower-floor coordinate opt-in, visibility, frame, and range authority | Complete |
+| P2.4d3b | Coordinate aiming for guns, hitscan, projectiles, action guns, and projectile spells | In progress |
+| P2.4d3c | Forged/stale request hardening and final P2 automated/manual review | Pending |
 
 ### P2.4 Contracts
 
@@ -1455,6 +1457,113 @@ P2.4 is split into independently gated subpackages:
 - Next package: define explicit empty-tile opt-in policy for world actions and
   projectiles, test forged/stale coordinate layers, then execute the final P2
   automated and manual regression review.
+
+## Completed Package: P2.4d3a Visible Lower-Floor Action Coordinates
+
+### Scope
+
+- Add an explicit networked opt-in to world-target actions without changing the
+  same-floor default of any existing action prototype.
+- Resolve the nearest non-empty lower-floor tile under a targetless pointer only
+  through an authored `Visibility` path, skipping sparse empty layers.
+- Validate the selected world Z independently on client and server using the
+  effective interaction origin, map, structural frame, downward direction, and
+  combined planar/discrete-Z range.
+- Preserve native same-floor action validation exactly; cross-floor coordinate
+  authority is a separate branch used only by opted-in consumers.
+
+### Contracts
+
+- `AllowCrossLevelCoordinates` grants permission to request a coordinate layer;
+  it never grants permission to cross a gameplay boundary by itself. The event
+  consumer must still trace its own channel, such as `Projectile`.
+- Implicit selection is downward-only and bounded by the configured visibility
+  distance. A closed deck, another frame, another map, an upper layer, an
+  out-of-range point, or an absent destination tile is rejected.
+- The selected layer is world Z. Frame origins are applied only when resolving
+  the destination tile, never serialized as a local deck index.
+- No production prototype opts in during this package. Guns and projectile
+  actions remain same-floor until P2.4d3b supplies their complete firing path.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to world-action opt-in, coordinate
+      visibility/authority helpers, client selection, one focused integration
+      case, and Z-level documentation.
+- [x] Invariant review: Z 0 parity, same-floor native delegation, translated and
+      rotated frames, world-Z origins, remote-view origins, downward direction,
+      sparse layers, range, and independent boundary channels were reviewed.
+- [x] Automated verification: 26/26 interaction-authority cases, 24/24 native
+      interaction/action/DoAfter/pulling regressions, and 159/159 focused
+      `ZLevel` integration cases pass with no skips; the complete solution
+      compiles with zero errors and its established 711-warning baseline.
+- [x] Performance evidence: lower-floor discovery is click-driven, performs at
+      most the configured visibility distance (hard-capped at 32) in scalar tile
+      checks, and adds no tick/frame loop, retained collection, or cache.
+- [x] Documentation: opt-in ownership, target rules, channel separation,
+      evidence, deferrals, and review findings are recorded here and in
+      `Docs/ZLevel.md`.
+- [x] Dependency check: no engine change is required; WTZ Project remains paired
+      with clean WTZ Engine commit
+      `ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c`.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risks, and the P2.4d3b handoff are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Authorize visible lower-floor
+      action coordinates` commit on `zlevel/interaction-targeting`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `ZLevelInteractionAuthorityTest` passes 26/26. The new case proves that opt-in
+  cannot bypass a closed deck, that a visibility opening exposes the correct
+  frame-origin-adjusted lower world Z, and that upward, out-of-range, and sparse
+  empty destinations are rejected. An unlimited-range action also rejects
+  `int.MinValue` before frame arithmetic without throwing.
+- The reconstructed historical native matrix passes 24/24, covering click use,
+  planar obstruction/range, pulling, construction actions, action lifecycle,
+  normal DoAfters, cancellation, and retractable-item actions.
+- `dotnet test ... --filter "FullyQualifiedName~ZLevel"` passes 159/159 with no
+  skips. The prior 158 cases remain green and the new authority case adds one.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes in
+  1m21s with zero errors and the established 711 dependency, vulnerability,
+  analyzer, and upstream-obsolescence warnings.
+
+### Decisions
+
+- Put the capability on `WorldTargetActionComponent`, where prototype authors
+  must deliberately request it, instead of weakening every pointer coordinate.
+- Use visibility only to select and authorize a destination surface. Projectile,
+  interaction, explosion, or other consumers continue to own their independent
+  boundary channel and effect rules.
+- Require a real destination tile. Missing sparse storage represents empty space
+  and must not become an invisible aim plane.
+- Keep production consumers out of this package so their trajectory and network
+  authority can be reviewed together in P2.4d3b.
+
+### Mini Review
+
+- Finding: `EntityQuery.TryComp` exposes a nullable `out` value under the current
+  annotations. Assigning the resolved grid component after the guarded query
+  removed the package's only newly introduced nullable build error.
+- Finding: the historical 24-case native matrix was not written as a command in
+  the ledger. Reconstructing it from its documented coverage produced the exact
+  prior count and is recorded explicitly in this package's evidence.
+- Finding: repository-wide search confirms the new opt-in appears only in the
+  component, validation paths, and focused test; no production action silently
+  changed behavior.
+- Finding: integer subtraction in the prior visibility distance check could
+  overflow for an extreme untrusted layer. The shared helper now widens to
+  `long` and rejects the request before local-frame conversion.
+- Residual risk: normal gun requests and projectile events do not yet transport
+  or consume a targetless lower world Z. P2.4d3b owns those paths and must apply
+  the same server-owned authority before enabling production prototypes.
+- Residual risk: real-client forged and one-tick-stale coordinate requests need
+  a final paired-server matrix. P2.4d3c owns that hardening and the full P2
+  manual review.
+- Next package: carry world Z through normal gun requests and every projectile
+  consumer, then start coordinate trajectories through the `Projectile` trace.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2411,3 +2520,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4c | `Harden native Z-level interaction funnels` | 18 authority/funnel, 24 native regression, 151 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d1 | `Carry authoritative floors through pointer targets` | 20 authority, 24 native regression, 153 integration, 2 engine, full build, diff check | Complete |
 | 2026-08-28 | P2.4d2 | `Enable authored cross-floor entity interactions` | 25 authority, 24 native regression, 158 integration, full build, diff check | Complete |
+| 2026-08-28 | P2.4d3a | `Authorize visible lower-floor action coordinates` | 26 authority, 24 native regression, 159 integration, full build, diff check | Complete |

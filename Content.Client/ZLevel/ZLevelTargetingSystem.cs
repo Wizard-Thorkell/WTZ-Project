@@ -176,6 +176,18 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         return GetViewerContext(eye).WorldZLevel;
     }
 
+    public bool TryGetNearestVisibleLowerTileWorldZ(
+        EntityCoordinates coordinates,
+        out int targetWorldZ)
+    {
+        var viewer = GetViewerContext();
+        return _visibility.TryGetNearestVisibleLowerTileWorldZ(
+            coordinates,
+            viewer.MapId,
+            viewer.WorldZLevel,
+            out targetWorldZ);
+    }
+
     /// <summary>
     /// Selects the structural frame that should own planar pointer coordinates.
     /// This avoids an arbitrary overlapping grid being selected by a 2D lookup.

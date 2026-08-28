@@ -477,13 +477,23 @@ public abstract partial class SharedActionsSystem : EntitySystem
                 null,
                 target,
                 requestedWorldZ,
-                false,
+                ent.Comp.AllowCrossLevelCoordinates,
                 out targetWorldZ))
         {
             return false;
         }
 
         var targetAction = Comp<TargetActionComponent>(ent);
+        if (!_zLevelInteraction.IsCoordinateOnEffectiveWorldLevel(user, target, targetWorldZ))
+        {
+            return ent.Comp.AllowCrossLevelCoordinates &&
+                   _zLevelInteraction.CanTargetVisibleCoordinate(
+                       user,
+                       target,
+                       targetWorldZ,
+                       targetAction.Range);
+        }
+
         return ValidateBaseTarget(user, target, (ent, targetAction));
     }
 

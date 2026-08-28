@@ -6,6 +6,7 @@ using Content.Shared.Physics;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 
 namespace Content.Shared.ZLevel.Systems;
 
@@ -20,6 +21,7 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
     [Dependency] private readonly SharedZLevelTraceSystem _trace = default!;
+    [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
 
     private readonly ZLevelTraceBuffer _traceBuffer = new();
     private EntityQuery<EyeComponent> _eyeQuery;
@@ -191,6 +193,77 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
                TryGetContext(target, out var targetContext) &&
                originContext.MapCoordinates.MapId == targetContext.MapCoordinates.MapId &&
                originContext.WorldZ == targetContext.WorldZ;
+    }
+
+    public bool IsCoordinateOnEffectiveWorldLevel(
+        EntityUid user,
+        EntityCoordinates coordinates,
+        int targetWorldZ)
+    {
+        if (!coordinates.IsValid(EntityManager) ||
+            !TryGetSpatialOrigin(user, null, out var origin) ||
+            !TryGetContext(origin, out var originContext))
+        {
+            return false;
+        }
+
+        var targetMap = _transform.ToMapCoordinates(coordinates);
+        return IsFinite(targetMap.Position) &&
+               targetMap.MapId == originContext.MapCoordinates.MapId &&
+               targetWorldZ == originContext.WorldZ;
+    }
+
+    /// <summary>
+    /// Validates an explicit targetless coordinate on a visible lower-floor
+    /// surface. The consuming subsystem still owns its gameplay boundary channel.
+    /// </summary>
+    public bool CanTargetVisibleCoordinate(
+        EntityUid user,
+        EntityCoordinates coordinates,
+        int targetWorldZ,
+        float maximumRange)
+    {
+        if (!float.IsFinite(maximumRange) ||
+            !coordinates.IsValid(EntityManager) ||
+            !TryGetSpatialOrigin(user, null, out var origin) ||
+            !TryGetContext(origin, out var originContext))
+        {
+            return false;
+        }
+
+        var targetMap = _transform.ToMapCoordinates(coordinates);
+        if (!IsFinite(targetMap.Position) ||
+            targetMap.MapId != originContext.MapCoordinates.MapId ||
+            targetWorldZ >= originContext.WorldZ)
+        {
+            return false;
+        }
+
+        var coordinateFrame = HasComp<MapGridComponent>(coordinates.EntityId)
+            ? coordinates.EntityId
+            : _transform.GetGrid(coordinates);
+        if (originContext.GridUid is not { } originFrame ||
+            coordinateFrame != originFrame)
+        {
+            return false;
+        }
+
+        if (maximumRange > 0f)
+        {
+            var planar = Vector2.Distance(
+                originContext.MapCoordinates.Position,
+                targetMap.Position);
+            var vertical = (double) targetWorldZ - originContext.WorldZ;
+            var distance = Math.Sqrt((double) planar * planar + vertical * vertical);
+            if (!double.IsFinite(distance) || distance > maximumRange)
+                return false;
+        }
+
+        return _visibility.IsCoordinateVisibleFrom(
+            coordinates,
+            targetWorldZ,
+            originContext.MapCoordinates.MapId,
+            originContext.WorldZ);
     }
 
     /// <summary>

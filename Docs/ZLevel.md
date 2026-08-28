@@ -138,13 +138,17 @@ Implemented traversal and debug tooling:
   grid or active viewport grid, and preserves it through context-menu and
   short-click drag replay paths. This avoids an arbitrary planar grid lookup
   when several decks or moving frames overlap in XY.
-- Entity targets authoritatively own their world Z. Coordinate-only targets use
-  the active view floor on the client and the effective interaction origin on
-  the server. The server independently checks finite coordinates, map identity,
-  target identity, target world Z, and remote-eye or relay origin before use.
+- Entity targets authoritatively own their world Z. Coordinate-only targets are
+  same-floor by default, but a world action may explicitly opt into the nearest
+  visible non-empty lower-floor surface under a targetless pointer. The server
+  independently checks finite coordinates, map and structural-frame identity,
+  downward direction, combined XY/Z range, selected world Z, and the effective
+  remote-eye or relay origin before use.
 - World-target actions carry the selected layer through prediction and expose
   the validated value as `WorldTargetActionEvent.TargetWorldZ`. Existing callers
-  that omit the optional layer retain same-floor behavior.
+  that omit the optional layer retain same-floor behavior. The action opt-in
+  authorizes only destination selection; each consumer must still validate its
+  own boundary channel before producing an effect.
 - Normal pointer use, world activation, and alternate use always prefer a
   current-floor entity over overlapping sprites. When no current-floor target
   wins, they can deliberately select the nearest visible lower-floor entity.
@@ -172,8 +176,10 @@ Implemented traversal and debug tooling:
   remote/physical mode switches, and its optimized BUI range override cannot
   reopen access to the body's floor from a camera on another floor.
 - World-only action targets now preserve an explicit selected world Z alongside
-  planar `EntityCoordinates`, but remain same-floor by policy. Opt-in lower-floor
-  empty-tile actions are reserved for the reviewed vertical targeting package.
+  planar `EntityCoordinates`. Opted-in actions can select a visible lower tile,
+  while closed decks, upper targets, different frames, out-of-range points, and
+  sparse empty layers are rejected. No production action prototype opts in yet;
+  gun, hitscan, and projectile consumers are the next reviewed package.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
@@ -742,8 +748,9 @@ Tasks:
 
 - [Partial] Audit all client click resolution paths. Pointer layer transport,
   frame selection, context-menu synthesis, drag replay, entity-target selection,
-  and same-floor-first click priority are covered; coordinate-only consumers
-  remain for the final P2 package.
+  same-floor-first click priority, and explicit visible lower-coordinate action
+  authority are covered; gun/projectile consumers and forged-request hardening
+  remain for the final P2 packages.
 - [Done server-side] Ensure same-floor interaction is the default for
   use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
   targeted DoAfters.
