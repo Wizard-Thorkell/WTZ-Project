@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/interaction-authority`.
-- Active package: `P2.4b interaction metrics and deliberate vertical consumers`.
+- Active branch: `zlevel/interaction-metrics`.
+- Active package: `P2.4c interaction request-funnel audit`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -816,8 +816,8 @@ P2.4 is split into independently gated subpackages:
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P2.4a | Central spatial origin, same-floor authority, and opt-in trace primitive | Complete |
-| P2.4b | Interaction metrics and deliberate vertical consumers | In progress |
-| P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Pending |
+| P2.4b | Interaction metrics and authored vertical portals | Complete |
+| P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | In progress |
 | P2.4d | Client targeting polish, regression matrix, and P2 completion review | Pending |
 
 ### P2.4 Contracts
@@ -955,6 +955,127 @@ P2.4 is split into independently gated subpackages:
 - Next package: instrument interaction-policy outcomes, remove duplicate guard
   work in nested range overloads, and migrate only deliberate vertical consumers
   backed by `Interaction`-channel tests.
+
+## Completed Package: P2.4b Interaction Metrics And Authored Portals
+
+### Scope
+
+- Classify every entity-facing authority result as same-level or vertical
+  allowed, or invalid-context, map, range, level, frame, or trace rejected.
+- Count server-owned remote origins and physical same-floor checks separately,
+  expose the snapshot through `zlevelmetrics`, and add a compact client debug
+  overlay line.
+- Require every explicit vertical authorization to provide a positive finite
+  maximum range; remove the ambiguous public policy overload and its unbounded
+  default.
+- Remove duplicate authority work from nested entity-range overloads while
+  preserving the guard before Station AI and other range overrides.
+- Author the independent `Interaction` channel on stairs and ladders, and verify
+  the existing mapping policy for openings, shafts, grates, and sealed limits.
+
+### Acceptance Criteria
+
+- `InteractionAllowed + InteractionRejected == InteractionQueries`, and each
+  tested decision increments exactly one terminal category.
+- Physical checks do not redirect through a remote eye and are not mixed into
+  entity policy-query totals.
+- Invalid entities, different maps, out-of-range/non-finite requests, different
+  world levels, different frames, and rejected traces are distinguishable.
+- Openings, shafts, stairs, and ladders authorize a one-level bounded trace;
+  grates and sealed boundaries reject the same request.
+- The same-level warmed authority path performs no trace and allocates zero
+  managed bytes across 4,096 measured checks.
+- Normal use targeting remains same-floor-only; authoring a portal does not by
+  itself expose lower-floor gameplay targets.
+
+### Explicit Deferrals
+
+- P2.4c owns execution-time authority for verbs, BUI requests, target actions,
+  drag/drop, do-after, relays, and specialized remote request funnels.
+- P2.4d owns client selection through authored portals, segmented obstruction,
+  click priority, manual gameplay validation, and P2 completion review.
+- P8 owns high-player-count interaction-rate profiling. Counters intentionally
+  measure authority API checks rather than attempting to infer unique clicks.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to interaction metrics, authority API
+      hardening, duplicate range work, authored portal channels, tests, and
+      documentation.
+- [x] Invariant review: Z 0, remote eyes, physical ownership, transformed world
+      frames, different maps/grids, boundary-channel independence, finite range,
+      server authority, and client targeting separation were reviewed.
+- [x] Automated verification: 13/13 authority and metrics cases, 21/21 focused
+      interaction/range/pulling regressions, and 144/144 focused Z-level
+      integration tests passed with no skips; the complete solution compiled
+      with zero errors.
+- [x] Performance evidence: 4,096 warmed same-level checks allocated zero bytes,
+      emitted 4,096 same-level decisions, and performed zero traces. Metrics are
+      scalar main-thread increments; nested entity-range validation no longer
+      records the same guard twice.
+- [x] Documentation: bounded API semantics, metric interpretation, portal
+      policy, current client limitation, tests, and residual risks are recorded
+      here and in `Docs/ZLevel.md` and `Docs/ZLevelTrace.md`.
+- [x] Dependency check: `RobustToolbox` remains clean at
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea`; no WTZ Engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings and residual risks are recorded below.
+- [x] Commit: package prepared as the isolated `Instrument native Z-level
+      interaction policy` commit on `zlevel/interaction-metrics`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed with
+  zero errors. Its 711 warnings are existing dependency, vulnerability,
+  analyzer, and upstream obsolescence warnings.
+- The 13/13 package matrix covers every metric category, reset behavior, remote
+  and physical counts, strict finite range, seven real boundary prototypes, and
+  allocation behavior.
+- The final interaction matrix passed 21/21 and includes legacy planar range,
+  obstruction, containers, pulling, all core interaction entry points, remote
+  XY origins, and explicit portal authority.
+- The complete focused Z-level integration matrix passed 144/144 with no skips.
+
+### Decisions
+
+- Count authority checks rather than player inputs. Public entry points remain
+  independently defended, so one click may legitimately produce several checks.
+- Keep rejection taxonomy in the shared authority and expose only aggregate
+  snapshot fields. Consumers do not record policy decisions manually.
+- Require explicit finite range before checking same-level or vertical success
+  through the opt-in API, preventing accidental unlimited shaft interaction.
+- Author portal capability now, but do not switch normal client use to it until
+  segmented obstruction and lower-floor targeting can be validated together.
+- Treat grates as visible/permeable but not directly usable through. Their
+  `Interaction` channel remains closed unless a later content design explicitly
+  changes that rule.
+
+### Mini Review
+
+- Finding: the initial structure-only inventory missed mapper boundary markers.
+  The expanded audit proved openings and shafts already authored interaction,
+  while grates and sealed markers intentionally did not.
+- Finding: the explicit API's zero-range default meant unbounded reach. Removing
+  the policy overload and requiring a positive finite range makes every future
+  consumer state its reach budget.
+- Finding: the first different-frame test was rejected by XY range before frame
+  policy. Increasing only that fixture's range now proves the intended ordered
+  classification without weakening production limits.
+- Finding: the shallow entity-range overload validated authority and then called
+  a public overload that validated it again. A private core preserves overrides
+  and removes duplicate metrics and query work.
+- Residual risk: trace rejection aggregates closed boundaries, trace budgets,
+  and invalid trace completion; the adjacent trace metrics retain the detailed
+  termination reason.
+- Residual risk: authored interaction portals are intentionally dormant for
+  normal clicks. P2.4d must add segmented obstruction and client selection in
+  the same package before players can use entities through them.
+- Next package: audit and enforce execution-time authority across verbs, BUI,
+  target actions, drag/drop, do-after, relay entities, and Station AI request
+  paths without weakening authenticated admin capabilities.
 
 P2.2 is split into independently gated subpackages:
 
@@ -1907,3 +2028,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.3c1 | `Layer decals across Z levels` | 4 decal, 5 map format, 109 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.3c2 | `Keep generated effects on their Z levels` | 10 package, 132 integration, 2 unit, 3 baseline, full build, diff check | Complete |
 | 2026-08-27 | P2.4a | `Centralize native Z-level interaction authority` | 4 authority, 12 regression, 135 integration, full build, diff check | Complete |
+| 2026-08-27 | P2.4b | `Instrument native Z-level interaction policy` | 13 package, 21 regression, 144 integration, allocation, full build, diff check | Complete |

@@ -5,6 +5,18 @@ using System.Diagnostics;
 
 namespace Content.Shared.ZLevel.Systems;
 
+internal enum ZLevelInteractionDecision : byte
+{
+    SameLevelAllowed,
+    VerticalAllowed,
+    InvalidContextRejected,
+    DifferentMapRejected,
+    RangeRejected,
+    DifferentLevelRejected,
+    FrameRejected,
+    TraceRejected,
+}
+
 /// <summary>
 /// Collects process-local Z-level diagnostics without coupling subsystem behavior.
 /// Counters are main-thread only and can be reset between benchmark runs.
@@ -61,6 +73,19 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _traceTimestampTicks;
     private long _traceLastTimestampTicks;
     private long _traceMaxTimestampTicks;
+
+    private long _interactionQueries;
+    private long _interactionRemoteOriginQueries;
+    private long _interactionSameLevelAllowed;
+    private long _interactionVerticalAllowed;
+    private long _interactionInvalidContextRejected;
+    private long _interactionDifferentMapRejected;
+    private long _interactionRangeRejected;
+    private long _interactionDifferentLevelRejected;
+    private long _interactionFrameRejected;
+    private long _interactionTraceRejected;
+    private long _interactionPhysicalQueries;
+    private long _interactionPhysicalRejected;
 
     private long _ballisticRouteAttempts;
     private long _ballisticRoutesStarted;
@@ -244,6 +269,51 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _traceMaxTimestampTicks = Math.Max(_traceMaxTimestampTicks, elapsedTimestampTicks);
     }
 
+    internal void RecordInteractionDecision(ZLevelInteractionDecision decision, bool remoteOrigin)
+    {
+        _interactionQueries++;
+        if (remoteOrigin)
+            _interactionRemoteOriginQueries++;
+
+        switch (decision)
+        {
+            case ZLevelInteractionDecision.SameLevelAllowed:
+                _interactionSameLevelAllowed++;
+                break;
+            case ZLevelInteractionDecision.VerticalAllowed:
+                _interactionVerticalAllowed++;
+                break;
+            case ZLevelInteractionDecision.InvalidContextRejected:
+                _interactionInvalidContextRejected++;
+                break;
+            case ZLevelInteractionDecision.DifferentMapRejected:
+                _interactionDifferentMapRejected++;
+                break;
+            case ZLevelInteractionDecision.RangeRejected:
+                _interactionRangeRejected++;
+                break;
+            case ZLevelInteractionDecision.DifferentLevelRejected:
+                _interactionDifferentLevelRejected++;
+                break;
+            case ZLevelInteractionDecision.FrameRejected:
+                _interactionFrameRejected++;
+                break;
+            case ZLevelInteractionDecision.TraceRejected:
+                _interactionTraceRejected++;
+                break;
+            default:
+                _interactionInvalidContextRejected++;
+                break;
+        }
+    }
+
+    internal void RecordPhysicalInteractionCheck(bool allowed)
+    {
+        _interactionPhysicalQueries++;
+        if (!allowed)
+            _interactionPhysicalRejected++;
+    }
+
     public void RecordBallisticRouteAttempt()
     {
         _ballisticRouteAttempts++;
@@ -392,6 +462,18 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             TimestampTicksToMilliseconds(_traceTimestampTicks),
             TimestampTicksToMilliseconds(_traceLastTimestampTicks),
             TimestampTicksToMilliseconds(_traceMaxTimestampTicks),
+            _interactionQueries,
+            _interactionRemoteOriginQueries,
+            _interactionSameLevelAllowed,
+            _interactionVerticalAllowed,
+            _interactionInvalidContextRejected,
+            _interactionDifferentMapRejected,
+            _interactionRangeRejected,
+            _interactionDifferentLevelRejected,
+            _interactionFrameRejected,
+            _interactionTraceRejected,
+            _interactionPhysicalQueries,
+            _interactionPhysicalRejected,
             _ballisticRouteAttempts,
             _ballisticRoutesStarted,
             _ballisticRoutesCompleted,
@@ -476,6 +558,18 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _traceTimestampTicks = 0;
         _traceLastTimestampTicks = 0;
         _traceMaxTimestampTicks = 0;
+        _interactionQueries = 0;
+        _interactionRemoteOriginQueries = 0;
+        _interactionSameLevelAllowed = 0;
+        _interactionVerticalAllowed = 0;
+        _interactionInvalidContextRejected = 0;
+        _interactionDifferentMapRejected = 0;
+        _interactionRangeRejected = 0;
+        _interactionDifferentLevelRejected = 0;
+        _interactionFrameRejected = 0;
+        _interactionTraceRejected = 0;
+        _interactionPhysicalQueries = 0;
+        _interactionPhysicalRejected = 0;
         _ballisticRouteAttempts = 0;
         _ballisticRoutesStarted = 0;
         _ballisticRoutesCompleted = 0;
@@ -565,6 +659,18 @@ public readonly record struct ZLevelMetricsSnapshot(
     double TraceMilliseconds,
     double TraceLastMilliseconds,
     double TraceMaxMilliseconds,
+    long InteractionQueries,
+    long InteractionRemoteOriginQueries,
+    long InteractionSameLevelAllowed,
+    long InteractionVerticalAllowed,
+    long InteractionInvalidContextRejected,
+    long InteractionDifferentMapRejected,
+    long InteractionRangeRejected,
+    long InteractionDifferentLevelRejected,
+    long InteractionFrameRejected,
+    long InteractionTraceRejected,
+    long InteractionPhysicalQueries,
+    long InteractionPhysicalRejected,
     long BallisticRouteAttempts,
     long BallisticRoutesStarted,
     long BallisticRoutesCompleted,
@@ -605,6 +711,9 @@ public readonly record struct ZLevelMetricsSnapshot(
     public double GravityAverageBuildMilliseconds => Average(GravityBuildMilliseconds, GravityBuilds);
     public double PvsAverageRefreshMilliseconds => Average(PvsRefreshMilliseconds, PvsRefreshes);
     public double TraceAverageMilliseconds => Average(TraceMilliseconds, TraceQueries);
+    public long InteractionAllowed => InteractionSameLevelAllowed + InteractionVerticalAllowed;
+    public long InteractionRejected => InteractionQueries - InteractionAllowed;
+    public long InteractionPhysicalAllowed => InteractionPhysicalQueries - InteractionPhysicalRejected;
     public long BallisticRoutesRejected => BallisticRouteAttempts - BallisticRoutesStarted;
     public double ExplosionVerticalCacheHitPercent => Percentage(
         ExplosionVerticalCacheHits,

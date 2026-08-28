@@ -147,19 +147,26 @@ public sealed class ZLevelDebugOverlay : Overlay
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 84f),
+            $"interact q:{metrics.InteractionQueries} allow:{metrics.InteractionAllowed} " +
+            $"vertical:{metrics.InteractionVerticalAllowed} reject:{metrics.InteractionRejected} " +
+            $"remote:{metrics.InteractionRemoteOriginQueries}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 98f),
             $"ballistic try:{metrics.BallisticRouteAttempts} start:{metrics.BallisticRoutesStarted} " +
             $"done:{metrics.BallisticRoutesCompleted} reject:{metrics.BallisticRoutesRejected}",
             metricsColor);
         args.ScreenHandle.DrawString(
             _font,
-            metricsPosition + new Vector2(0f, 98f),
+            metricsPosition + new Vector2(0f, 112f),
             $"ballistic cross:{metrics.BallisticCrossings} closed:{metrics.BallisticClosedBoundaries} " +
             $"collide:{metrics.BallisticCollisionCancellations} invalid:{metrics.BallisticInvalidCancellations} " +
             $"flush:{metrics.BallisticContactFlushes}",
             metricsColor);
         args.ScreenHandle.DrawString(
             _font,
-            metricsPosition + new Vector2(0f, 112f),
+            metricsPosition + new Vector2(0f, 126f),
             $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
             $"tiles:{_traceSystem.MaxTileVisits} hits:{_traceSystem.MaxEntityHits}",
             metricsColor);

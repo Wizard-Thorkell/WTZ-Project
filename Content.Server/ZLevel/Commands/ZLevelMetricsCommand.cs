@@ -82,6 +82,18 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"  trace output: segments={metrics.TraceSegments}, tiles={metrics.TraceTileVisits}, " +
             $"hits={metrics.TraceEntityHits}, crossings={metrics.TraceBoundaryCrossings}");
         shell.WriteLine(
+            $"  interaction: queries={metrics.InteractionQueries}, allowed={metrics.InteractionAllowed} " +
+            $"(same={metrics.InteractionSameLevelAllowed}, vertical={metrics.InteractionVerticalAllowed}), " +
+            $"rejected={metrics.InteractionRejected}, remote-origins={metrics.InteractionRemoteOriginQueries}");
+        shell.WriteLine(
+            $"  interaction rejects: invalid={metrics.InteractionInvalidContextRejected}, " +
+            $"map={metrics.InteractionDifferentMapRejected}, range={metrics.InteractionRangeRejected}, " +
+            $"level={metrics.InteractionDifferentLevelRejected}, frame={metrics.InteractionFrameRejected}, " +
+            $"trace={metrics.InteractionTraceRejected}");
+        shell.WriteLine(
+            $"  interaction physical: queries={metrics.InteractionPhysicalQueries}, " +
+            $"allowed={metrics.InteractionPhysicalAllowed}, rejected={metrics.InteractionPhysicalRejected}");
+        shell.WriteLine(
             $"  ballistic: attempts={metrics.BallisticRouteAttempts}, started={metrics.BallisticRoutesStarted}, " +
             $"completed={metrics.BallisticRoutesCompleted}, rejected={metrics.BallisticRoutesRejected}");
         shell.WriteLine(

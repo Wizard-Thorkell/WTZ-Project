@@ -150,14 +150,25 @@ geometric trace primitive:
   a remote eye; pulling and held-item ownership use this path.
 - `CanInteractThroughOpenBoundary` is the explicit opt-in for vertical use. It
   requires one common frame and a completed trace through the `Interaction`
-  channel. It does not replace the consumer's normal accessibility, range, or
-  obstruction checks.
+  channel. Its maximum range is mandatory, positive, and finite. It does not
+  replace the consumer's normal accessibility or obstruction checks.
 
 A server-owned `EyeComponent.Target` supplies both the world Z and XY origin for
 world interaction. Self, held/equipped items, direct parent/child targets, and
 same-container operations remain local to the actor. Core interaction entry
 points reject another world Z even when range checks are bypassed; examine and
 authenticated administrative inspection retain their separate capabilities.
+
+Every authority check records a process-local outcome. `zlevelmetrics` reports
+same-level and vertical accepts, invalid/map/range/level/frame/trace rejects,
+remote-eye origins, and physical checks separately. These are API-check counts,
+not unique player inputs, because self-defending nested interaction entry points
+may authorize more than once during one complete click flow.
+
+Mapping openings and shafts author the `Interaction` channel. Stairs and ladders
+also author it; grate and sealed boundaries deliberately do not. Normal client
+use remains same-floor-only until cross-floor targeting and obstruction are
+enabled together, so authored portals alone cannot make a hidden entity usable.
 
 ## Current Limits
 

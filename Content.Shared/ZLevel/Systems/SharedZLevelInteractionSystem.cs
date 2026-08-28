@@ -9,28 +9,13 @@ using Robust.Shared.Map;
 namespace Content.Shared.ZLevel.Systems;
 
 /// <summary>
-/// Selects how an entity-to-entity interaction may cross world Z levels.
-/// </summary>
-public enum ZLevelInteractionPolicy : byte
-{
-    /// <summary>
-    /// The effective interaction origin and target must occupy the same world Z level.
-    /// </summary>
-    SameWorldLevel,
-
-    /// <summary>
-    /// Different world Z levels require a completed trace through open Interaction boundaries.
-    /// </summary>
-    OpenBoundaryTrace,
-}
-
-/// <summary>
 /// Central spatial authority for direct and explicitly vertical interactions.
 /// Gameplay interaction rules remain owned by their normal systems.
 /// </summary>
 public sealed class SharedZLevelInteractionSystem : EntitySystem
 {
     [Dependency] private readonly SharedContainerSystem _containers = default!;
+    [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
     [Dependency] private readonly SharedZLevelTraceSystem _trace = default!;
@@ -75,42 +60,56 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
     /// </summary>
     public bool AreOnSameWorldLevel(EntityUid first, EntityUid second)
     {
-        return TryGetContext(first, out var firstContext) &&
-               TryGetContext(second, out var secondContext) &&
-               firstContext.MapCoordinates.MapId == secondContext.MapCoordinates.MapId &&
-               firstContext.WorldZ == secondContext.WorldZ;
+        var allowed = TryGetContext(first, out var firstContext) &&
+                      TryGetContext(second, out var secondContext) &&
+                      firstContext.MapCoordinates.MapId == secondContext.MapCoordinates.MapId &&
+                      firstContext.WorldZ == secondContext.WorldZ;
+        _metrics.RecordPhysicalInteractionCheck(allowed);
+        return allowed;
     }
 
     /// <summary>
     /// Applies the selected vertical policy from the user's effective spatial origin to a target.
     /// A positive range is measured in combined XY and discrete-Z units.
     /// </summary>
-    public bool CanInteract(
+    private bool CanInteract(
         EntityUid user,
         EntityUid target,
-        ZLevelInteractionPolicy policy = ZLevelInteractionPolicy.SameWorldLevel,
+        bool allowVertical,
         float maximumRange = 0f)
     {
-        if (!TryGetSpatialOrigin(user, target, out var origin) ||
-            !TryGetContext(origin, out var originContext) ||
-            !TryGetContext(target, out var targetContext) ||
-            originContext.MapCoordinates.MapId != targetContext.MapCoordinates.MapId)
+        if (!TryGetSpatialOrigin(user, target, out var origin))
         {
-            return false;
+            return RecordDecision(ZLevelInteractionDecision.InvalidContextRejected, false);
         }
 
+        var remoteOrigin = origin != user;
+        if (!TryGetContext(origin, out var originContext) ||
+            !TryGetContext(target, out var targetContext))
+        {
+            return RecordDecision(ZLevelInteractionDecision.InvalidContextRejected, remoteOrigin);
+        }
+
+        if (originContext.MapCoordinates.MapId != targetContext.MapCoordinates.MapId)
+            return RecordDecision(ZLevelInteractionDecision.DifferentMapRejected, remoteOrigin);
+
+        if (allowVertical && (!float.IsFinite(maximumRange) || maximumRange <= 0f))
+            return RecordDecision(ZLevelInteractionDecision.RangeRejected, remoteOrigin);
+
         if (maximumRange > 0f && GetDistance(originContext, targetContext) > maximumRange)
-            return false;
+            return RecordDecision(ZLevelInteractionDecision.RangeRejected, remoteOrigin);
 
         if (originContext.WorldZ == targetContext.WorldZ)
-            return true;
+            return RecordDecision(ZLevelInteractionDecision.SameLevelAllowed, remoteOrigin);
 
-        if (policy != ZLevelInteractionPolicy.OpenBoundaryTrace ||
-            originContext.GridUid is not { } frameUid ||
+        if (!allowVertical)
+            return RecordDecision(ZLevelInteractionDecision.DifferentLevelRejected, remoteOrigin);
+
+        if (originContext.GridUid is not { } frameUid ||
             targetContext.GridUid != frameUid ||
             !_transformQuery.TryComp(frameUid, out var frameTransform))
         {
-            return false;
+            return RecordDecision(ZLevelInteractionDecision.FrameRejected, remoteOrigin);
         }
 
         var originLocal = _transform.ToCoordinates(
@@ -122,7 +121,7 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         if (!_trace.TryCreateGridPoint(frameUid, originLocal, originContext.LocalZ, out var traceOrigin) ||
             !_trace.TryCreateGridPoint(frameUid, targetLocal, targetContext.LocalZ, out var traceTarget))
         {
-            return false;
+            return RecordDecision(ZLevelInteractionDecision.FrameRejected, remoteOrigin);
         }
 
         var request = new ZLevelTraceRequest(
@@ -131,17 +130,21 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
             ZLevelBoundaryChannels.Interaction,
             Options: ZLevelTraceOptions.None,
             BoundaryFrameUid: frameUid);
-        return _trace.Trace(request, _traceBuffer).ReachedDestination;
+        return RecordDecision(
+            _trace.Trace(request, _traceBuffer).ReachedDestination
+                ? ZLevelInteractionDecision.VerticalAllowed
+                : ZLevelInteractionDecision.TraceRejected,
+            remoteOrigin);
     }
 
     public bool CanDirectlyInteract(EntityUid user, EntityUid target)
     {
-        return CanInteract(user, target);
+        return CanInteract(user, target, false);
     }
 
-    public bool CanInteractThroughOpenBoundary(EntityUid user, EntityUid target, float maximumRange = 0f)
+    public bool CanInteractThroughOpenBoundary(EntityUid user, EntityUid target, float maximumRange)
     {
-        return CanInteract(user, target, ZLevelInteractionPolicy.OpenBoundaryTrace, maximumRange);
+        return CanInteract(user, target, true, maximumRange);
     }
 
     private bool IsActorLocalTarget(EntityUid user, EntityUid target)
@@ -199,6 +202,13 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         var delta = target.MapCoordinates.Position - origin.MapCoordinates.Position;
         var deltaZ = (double) target.WorldZ - origin.WorldZ;
         return (float) Math.Sqrt(delta.LengthSquared() + deltaZ * deltaZ);
+    }
+
+    private bool RecordDecision(ZLevelInteractionDecision decision, bool remoteOrigin)
+    {
+        _metrics.RecordInteractionDecision(decision, remoteOrigin);
+        return decision is ZLevelInteractionDecision.SameLevelAllowed or
+            ZLevelInteractionDecision.VerticalAllowed;
     }
 
     private readonly record struct InteractionSpatialContext(

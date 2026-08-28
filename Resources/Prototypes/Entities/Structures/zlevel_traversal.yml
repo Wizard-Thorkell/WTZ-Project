@@ -38,6 +38,7 @@
     - Sound
     - Projectile
     - Explosion
+    - Interaction
 
 - type: entity
   id: ZLevelStairsDown
@@ -79,6 +80,7 @@
     - Sound
     - Projectile
     - Explosion
+    - Interaction
 
 - type: entity
   id: ZLevelLadder
@@ -120,3 +122,4 @@
     - Sound
     - Projectile
     - Explosion
+    - Interaction

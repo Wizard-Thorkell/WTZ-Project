@@ -728,7 +728,7 @@ namespace Content.Shared.Interaction
                 return ev.InRange;
             }
 
-            return InRangeUnobstructed(origin,
+            return InRangeUnobstructedCore(origin,
                 other,
                 other.Comp.Coordinates,
                 other.Comp.LocalRotation,
@@ -778,12 +778,35 @@ namespace Content.Shared.Interaction
             bool popup = false,
             bool overlapCheck = true)
         {
-            if (!_zLevelInteraction.TryGetSpatialOrigin(origin, other, out var spatialOrigin) ||
-                !_zLevelInteraction.CanDirectlyInteract(origin, other) ||
-                !TryComp(spatialOrigin, out TransformComponent? spatialTransform))
-            {
+            if (!_zLevelInteraction.CanDirectlyInteract(origin, other))
                 return false;
-            }
+
+            return InRangeUnobstructedCore(
+                origin,
+                other,
+                otherCoordinates,
+                otherAngle,
+                range,
+                collisionMask,
+                predicate,
+                popup,
+                overlapCheck);
+        }
+
+        private bool InRangeUnobstructedCore(
+            Entity<TransformComponent?> origin,
+            Entity<TransformComponent?> other,
+            EntityCoordinates otherCoordinates,
+            Angle otherAngle,
+            float range,
+            CollisionGroup collisionMask,
+            Ignored? predicate,
+            bool popup,
+            bool overlapCheck)
+        {
+            if (!_zLevelInteraction.TryGetSpatialOrigin(origin, other, out var spatialOrigin) ||
+                !TryComp(spatialOrigin, out TransformComponent? spatialTransform))
+                return false;
 
             Ignored combinedPredicate = e =>
                 e == origin.Owner || e == spatialOrigin || (predicate?.Invoke(e) ?? false);

@@ -125,6 +125,15 @@ Implemented traversal and debug tooling:
 - Stairs and ladders declare directed traversal channels on the boundary they
   connect; traversal no longer bypasses ceiling checks through a special
   boolean parameter.
+- Stairs, ladders, floor openings, and shafts author the independent
+  `Interaction` channel. Grates and sealed boundaries remain closed to direct
+  use across floors.
+- `SharedZLevelInteractionSystem` centralizes physical checks, same-world-Z
+  authority, server-owned remote-eye origins, and bounded opt-in traces through
+  authored interaction portals.
+- Interaction outcomes and physical checks are visible in `zlevelmetrics` and
+  the Z-level debug overlay. Normal client use remains same-floor-only until
+  cross-floor targeting and obstruction are enabled as one reviewed path.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.

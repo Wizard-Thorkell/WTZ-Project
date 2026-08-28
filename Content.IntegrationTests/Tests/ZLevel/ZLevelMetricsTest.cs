@@ -102,6 +102,13 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.VisibilityTileQueries, Is.Zero);
                 Assert.That(resetSnapshot.GravityQueries, Is.Zero);
                 Assert.That(resetSnapshot.PvsRefreshes, Is.Zero);
+                Assert.That(resetSnapshot.InteractionQueries, Is.Zero);
+                Assert.That(resetSnapshot.InteractionRemoteOriginQueries, Is.Zero);
+                Assert.That(resetSnapshot.InteractionAllowed, Is.Zero);
+                Assert.That(resetSnapshot.InteractionRejected, Is.Zero);
+                Assert.That(resetSnapshot.InteractionPhysicalQueries, Is.Zero);
+                Assert.That(resetSnapshot.InteractionPhysicalAllowed, Is.Zero);
+                Assert.That(resetSnapshot.InteractionPhysicalRejected, Is.Zero);
                 Assert.That(resetSnapshot.BallisticRouteAttempts, Is.Zero);
                 Assert.That(resetSnapshot.BallisticRoutesStarted, Is.Zero);
                 Assert.That(resetSnapshot.BallisticRoutesCompleted, Is.Zero);
