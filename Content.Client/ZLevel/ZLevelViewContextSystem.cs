@@ -52,7 +52,7 @@ public sealed class ZLevelViewContextSystem : EntitySystem
         if (fallback is { } fallbackUid && TryResolve(fallbackUid, eye.Position.MapId, out context))
             return true;
 
-        context = new ZLevelViewContext(null, eye.Position.MapId, 0, 0);
+        context = new ZLevelViewContext(null, eye.Position.MapId, eye.WorldZLevel, eye.WorldZLevel);
         return eye.Position.MapId != MapId.Nullspace;
     }
 

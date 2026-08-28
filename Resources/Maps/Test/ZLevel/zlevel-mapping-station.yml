@@ -5,7 +5,7 @@ meta:
   forkId: ""
   forkVersion: ""
   time: 08/10/2026 14:06:24
-  entityCount: 82
+  entityCount: 85
 maps:
 - 1
 grids:
@@ -777,4 +777,44 @@ entities:
       zLevel: 1
     - type: ZLevelKinematics
       grounded: True
+- proto: AlwaysPoweredLightExterior
+  entities:
+  - uid: 83
+    components:
+    - type: MetaData
+      name: Z0 lighting baseline (red)
+    - type: Transform
+      pos: 3.5,1.5
+      parent: 2
+    - type: PointLight
+      energy: 2
+      color: '#FF4040FF'
+      radius: 3
+    - type: ZLevelPosition
+  - uid: 84
+    components:
+    - type: MetaData
+      name: Z1 lighting baseline (green)
+    - type: Transform
+      pos: 3.5,1.5
+      parent: 2
+    - type: PointLight
+      energy: 2
+      color: '#40FF70FF'
+      radius: 3
+    - type: ZLevelPosition
+      zLevel: 1
+  - uid: 85
+    components:
+    - type: MetaData
+      name: Z2 lighting baseline (blue)
+    - type: Transform
+      pos: 3.5,1.5
+      parent: 2
+    - type: PointLight
+      energy: 2
+      color: '#4080FFFF'
+      radius: 3
+    - type: ZLevelPosition
+      zLevel: 2
 ...

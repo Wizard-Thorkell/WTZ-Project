@@ -403,7 +403,9 @@ Implemented versioned mapping and placement:
   directly in the mapping panel.
 - `Resources/Maps/Test/ZLevel/zlevel-mapping-station.yml` is the canonical
   three-floor authoring fixture. Its fourth tile layer is a roof over the top
-  playable floor.
+  playable floor. Three overlapping red, green, and blue point lights provide
+  a deterministic per-floor rendering baseline described in
+  `Docs/ZLevelLighting.md`.
 
 Final verification on 2026-08-10:
 
@@ -532,7 +534,9 @@ Major unfinished areas:
   are isolated.
 - Upper-floor fire audio and burned decals are suppressed until sound/effects
   gain a Z-aware spatial contract.
-- Lighting and FOV are not native to floors.
+- Active-floor tiles, point lights, and FOV occluders are selected natively by
+  world Z. Cross-floor light projection, attenuation, and frame budgets remain
+  P3 work; see `Docs/ZLevelLighting.md`.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
 - Hitscan, physical projectile lifecycle and flight, projectile actions, and

@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/interaction-targeting`.
-- Active package: `P3.1 lighting/FOV architecture, baselines, and cache contract`.
+- Active branch: `zlevel/lighting-fov`.
+- Active package: `P3.2 chunked vertical aperture/emitter cache and targeted invalidation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1804,10 +1804,132 @@ P2.4 is split into independently gated subpackages:
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | In progress |
-| P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | Pending |
+| P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | Complete |
+| P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | In progress |
 | P3.3 | Bounded lower-floor light/FOV projection and attenuation | Pending |
 | P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | Pending |
+
+## Completed Package: P3.1 Native Active-Floor Rendering Contract
+
+### Scope
+
+- Carry the entity-backed eye's world Z into Robust rendering without replacing
+  the normal map position or viewport.
+- Render the active sparse tile layer through Clyde's native grid mesh instead
+  of using the Content overlay as a substitute for every non-zero floor.
+- Filter point lights, FOV occluders, and occluder neighbor faces by world Z
+  before existing frame budgets are consumed.
+- Key and invalidate GPU mesh entries by grid, chunk, and local Z, including
+  upper-only sparse chunks and complete GPU object cleanup.
+- Expose local render counters and establish a deterministic three-color visual
+  fixture plus a repeatable manual baseline procedure.
+
+### Acceptance Criteria
+
+- Z 0 retains the normal native tile, light, shadow, and FOV path.
+- A displaced grid converts the eye's world Z to its own local layer; overlapping
+  grids compare lights and occluders in world Z.
+- Changing floors cannot reuse another layer's tile or edge mesh.
+- Tile edits, replication, empty-layer transitions, and grid deletion invalidate
+  only the relevant cached layer and neighboring edge meshes.
+- A chunk containing only non-zero tiles remains spatially discoverable, shrinks
+  after removals, and survives map save/load.
+- Off-floor lights and occluders are rejected before native light/geometry limits.
+- Content no longer redraws the active layer, but keeps lower-floor and mapping
+  preview composition until P3.3 owns vertical projection.
+- The canonical map contains one red, green, and blue light at the same XY on
+  local Z 0, 1, and 2 and validates their floor state during map loading.
+
+### Evidence
+
+- WTZ Engine `Robust.Client` builds with zero errors. All 135 client integration
+  tests and all 29 client unit tests pass, including entity-eye world-Z tracking
+  and same/different-world-Z occluder neighbors.
+- Robust shared serialization passes 4/4, including sparse upper-only grid AABB
+  expansion, contraction, save, and reload. Z-level chunk replication passes
+  1/1 across a real server/client pair.
+- The complete Content test filter containing `ZLevel` passes 182/182 with no
+  skips. The canonical-map fixture load passes and validates all three lights.
+- The complete solution build passes with zero errors and the established
+  711-warning dependency, vulnerability, analyzer, and upstream-obsolescence
+  baseline.
+- The 3-, 6-, and 10-floor server baselines pass 3/3. Measured phases retain
+  6,336 allocated bytes, 100% warm boundary-cache hits, and zero evictions;
+  measured times were 8.951 ms, 15.845 ms, and 26.769 ms respectively.
+- Renderer-specific counters are available through `zlevelrendermetrics` and
+  `zlevel.debug_overlay`. The headless harness cannot produce trustworthy GL
+  pixels, so color/shadow screenshots use the versioned manual fixture and
+  procedure in `Docs/ZLevelLighting.md`.
+
+### Decisions
+
+- Keep one normal viewport. Clyde renders exactly the active native grid layer;
+  Content only composites policy-approved non-active layers.
+- Store `WorldZLevel` on `IEye`, update it from the effective eye target every
+  frame, and let every grid convert that value through its `ZLevelFrame` origin.
+- Use `(grid, chunk, local Z)` as the GPU mesh key. A cache keyed only by chunk
+  can display stale floors when the eye traverses vertically.
+- Filter lights and occluders before their existing limits so hidden floors do
+  not starve the active floor's quality budget.
+- Recompute grid spatial bounds from the union of base and sparse Z-layer chunk
+  bounds. Z-only floors must be discoverable by the native grid query.
+- Move `ZLevelPositionChangedEvent` beside the engine component and use generated
+  post-network-state events to refresh client occluder adjacency.
+- Defer aperture indexing, lower-floor light projection, attenuation, eviction
+  budgets, and fail-soft quality policy to P3.2 through P3.4.
+
+### Completion Gate
+
+- [x] Scope check: the engine diff is limited to eye/render/map primitives and
+      their tests; the project diff is limited to Content composition, metrics,
+      fixture validation, and documentation.
+- [x] Invariant review: Z 0 parity, local/world frame origins, overlapping and
+      moving grids, sparse Z-only chunks, network state, cache invalidation, and
+      native light/occluder limits were reviewed.
+- [x] Automated verification: 135 engine client integration, 29 engine client
+      unit, 4 serialization, 1 replication, 182 Content Z-level, 3 baseline, and
+      the full solution build pass with no failures or skips.
+- [x] Performance evidence: server baselines remain allocation-stable and fully
+      warm; local GPU-layer hits/misses, retained entries, draws, and Z rejections
+      are now observable for the P3.2/P3.4 measurements.
+- [x] Documentation: architecture, cache ownership, fixture, manual procedure,
+      commands, deliberate limits, and results are recorded here and in
+      `Docs/ZLevelLighting.md`.
+- [x] Dependency check: WTZ Engine commit
+      `17f6c8f8d763c2b6afa8d136cbb87c88934f0372` is committed, pushed, clean,
+      and paired by the project submodule pointer.
+- [x] Git check: engine and project `git diff --check` pass apart from checkout
+      line-ending notices; generated baseline artifacts remain ignored.
+- [x] Mini review: findings, residual risks, and the P3.2 handoff are recorded
+      below.
+- [x] Commit: engine saved as `Render active grid layers by world Z`; project
+      package prepared as `Make active-floor rendering world-Z aware`.
+
+### Mini Review
+
+- Finding: the native Clyde grid renderer always read `MapChunk` Z 0. Upper
+  floors appeared only because Content manually drew their tiles, which meant
+  native tile lighting and edge rendering never followed the player.
+- Finding: filtering final occluder geometry was insufficient because neighbor
+  faces had already merged occluders from different floors. Adjacency now also
+  requires equal world Z and refreshes after local or replicated Z changes.
+- Finding: sparse chunks containing only upper-floor tiles did not contribute to
+  the grid AABB, so native culling could omit them even with a correct mesh path.
+- Finding: deleting cached chunks previously omitted the edge VAO/VBO/EBO. The
+  layer-aware cleanup now releases both normal and edge GPU objects.
+- Residual risk: automated tests validate render inputs, cache ownership, and
+  lifecycle but cannot inspect real GL pixels. The canonical RGB fixture makes
+  the remaining color, shadow, and transient-flash pass deterministic.
+- Residual risk: visible lower floors intentionally receive no projected point
+  light yet. P3.2 and P3.3 must derive bounded projection from `Visibility`
+  openings without reintroducing multi-viewport rendering.
+- Residual risk: the GPU layer cache has lifecycle cleanup but no independent
+  capacity/eviction budget. P3.4 will choose policy from measured live counters.
+- Residual risk: `MapTextOverlay` is still a general 2D map overlay without a Z
+  filter. The visual fixture deliberately uses real light sprites; the broader
+  overlay audit belongs to P3.4 rendering hardening.
+- Next package: build a chunked cache of vertical visibility apertures and light
+  emitters with revisioned, targeted invalidation and measurable cold/hot paths.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2767,3 +2889,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4d3a | `Authorize visible lower-floor action coordinates` | 26 authority, 24 native regression, 159 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3b | `Aim projectiles at lower-floor coordinates` | 33 combat, 27 native interaction, 1 native weapon, 164 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3c | `Harden Z-level combat request authority` | 51 combat, 7 network throw, 4 native combat, 24 native interaction, 182 integration, full build, diff check | Complete |
+| 2026-08-28 | P3.1 | `Make active-floor rendering world-Z aware` | 135 engine client integration, 29 engine unit, 4 serialization, 1 replication, 182 Content Z-level, 3 baseline, full build, diff check | Complete |

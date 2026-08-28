@@ -17,6 +17,7 @@ using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Player;
 using Robust.Shared.Utility;
+using Robust.Server.GameObjects;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
@@ -94,6 +95,10 @@ public sealed class ZLevelMapFormatTest : GameTest
                 .Where(entry => ((TransformComponent) entry.Component).GridUid == grid.Owner)
                 .Select(entry => entry.Uid)
                 .ToArray();
+            var lightFixtures = entities
+                .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "AlwaysPoweredLightExterior" &&
+                    entMan.HasComponent<PointLightComponent>(uid))
+                .ToArray();
 
             Assert.Multiple(() =>
             {
@@ -107,6 +112,19 @@ public sealed class ZLevelMapFormatTest : GameTest
                 Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "WallSolid"), Is.EqualTo(72));
                 Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID is
                     "ZLevelStairsUp" or "ZLevelStairsDown"), Is.EqualTo(4));
+                Assert.That(lightFixtures, Has.Length.EqualTo(3));
+                Assert.That(lightFixtures.Select(uid => transform.GetZLevel((
+                        uid,
+                        entMan.GetComponent<TransformComponent>(uid),
+                        entMan.GetComponentOrNull<ZLevelPositionComponent>(uid)))),
+                    Is.EquivalentTo(new[] { 0, 1, 2 }));
+                Assert.That(lightFixtures.Select(uid => entMan.GetComponent<PointLightComponent>(uid).Color),
+                    Is.EquivalentTo(new[]
+                    {
+                        Color.FromHex("#FF4040FF"),
+                        Color.FromHex("#40FF70FF"),
+                        Color.FromHex("#4080FFFF"),
+                    }));
                 Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 1), 0, 1,
                     ZLevelBoundaryChannels.Atmosphere), Is.False);
                 Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(2, 2), 0, 1,

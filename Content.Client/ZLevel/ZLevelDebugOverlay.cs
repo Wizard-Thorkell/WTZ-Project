@@ -27,6 +27,7 @@ namespace Content.Client.ZLevel;
 public sealed class ZLevelDebugOverlay : Overlay
 {
     [Dependency] private readonly IEntityManager _entityManager = default!;
+    [Dependency] private readonly IClyde _clyde = default!;
     [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly IPlayerManager _playerManager = default!;
     [Dependency] private readonly IResourceCache _resourceCache = default!;
@@ -170,6 +171,15 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"trace budget crossings:{_traceSystem.MaxVerticalCrossings} " +
             $"tiles:{_traceSystem.MaxTileVisits} hits:{_traceSystem.MaxEntityHits}",
             metricsColor);
+
+        var render = _clyde.ZLevelRenderStats;
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 140f),
+            $"render layers:{render.GridLayersDrawn} chunks:{render.GridChunksDrawn} " +
+            $"cache layers:{render.CachedGridChunkLayers} hit:{render.GridChunkCacheHitPercent:0.0}% " +
+            $"z-reject light:{render.LightsRejectedByZ} occ:{render.OccludersRejectedByZ}",
+            metricsColor);
     }
 
     private void DrawWorld(in OverlayDrawArgs args, int playerWorldZ, MapId mapId)
@@ -199,7 +209,8 @@ public sealed class ZLevelDebugOverlay : Overlay
         var highestZ = MappingPreviewEnabled ? playerLocalZ + 1 : playerLocalZ;
         for (var z = lowestZ; z <= highestZ; z++)
         {
-            if (z == 0)
+            // Clyde renders the active layer natively; this overlay only composites other visible layers.
+            if (z == playerLocalZ)
                 continue;
 
             var minX = (int)Math.Floor(gridBounds.Left / grid.Comp.TileSize) - 1;
