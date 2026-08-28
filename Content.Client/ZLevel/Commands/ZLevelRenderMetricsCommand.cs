@@ -23,11 +23,13 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
     {
         var cache = _entityManager.System<ZLevelLightingCacheSystem>();
         var projection = _entityManager.System<ZLevelLightingProjectionSystem>();
+        var tileProjection = _entityManager.System<ZLevelTileProjectionSystem>();
         if (args.Length == 1 && args[0].Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             cache.ResetMetrics();
             projection.ResetMetrics();
-            shell.WriteLine("Reset local vertical-lighting counters.");
+            tileProjection.ResetMetrics();
+            shell.WriteLine("Reset local vertical-rendering counters.");
             return;
         }
 
@@ -89,5 +91,40 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"{projected.RenderVertices}/{projected.RenderDrawCalls}, avg/last/max=" +
             $"{projected.AverageRenderMilliseconds:0.000}/{projected.LastRenderMilliseconds:0.000}/" +
             $"{projected.MaxRenderMilliseconds:0.000}ms");
+
+        var tiles = tileProjection.Snapshot();
+        shell.WriteLine(
+            $"vertical tiles: frames/preview={tiles.Frames}/{tiles.MappingFrames}, grids=" +
+            $"{tiles.GridCandidates}, chunks candidate/complete/projected=" +
+            $"{tiles.ChunkCandidates}/{tiles.ChunksCompleted}/{tiles.ChunksProjected}, " +
+            $"visits/tiles={tiles.TileVisits}/{tiles.TilesProjected}");
+        shell.WriteLine(
+            $"vertical tile build: layers/builds={tiles.ApertureLayers}/{tiles.ApertureBuilds}, " +
+            $"current batches/tiles={tiles.CurrentBatches}/{tiles.CurrentTiles}, avg/last/max=" +
+            $"{tiles.AverageBuildMilliseconds:0.000}/{tiles.LastBuildMilliseconds:0.000}/" +
+            $"{tiles.MaxBuildMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"vertical tile budget used/max chunk/layer/build/tile=" +
+            $"{tiles.NormalBudget.CurrentChunksUsed}/{tiles.NormalBudget.MaxChunksPerFrame}," +
+            $"{tiles.NormalBudget.CurrentApertureLayersUsed}/" +
+            $"{tiles.NormalBudget.MaxApertureLayersPerFrame}," +
+            $"{tiles.NormalBudget.CurrentApertureBuildsUsed}/" +
+            $"{tiles.NormalBudget.MaxApertureBuildsPerFrame}," +
+            $"{tiles.NormalBudget.CurrentTileVisitsUsed}/{tiles.NormalBudget.MaxTileVisitsPerFrame}; " +
+            $"preview chunk/tile={tiles.MappingBudget.CurrentChunksUsed}/" +
+            $"{tiles.MappingBudget.MaxChunksPerFrame}," +
+            $"{tiles.MappingBudget.CurrentTileVisitsUsed}/{tiles.MappingBudget.MaxTileVisitsPerFrame}");
+        shell.WriteLine(
+            $"vertical tile budget exhaustions normal chunk/layer/build/tile=" +
+            $"{tiles.NormalBudget.ChunkExhaustions}/{tiles.NormalBudget.ApertureLayerExhaustions}/" +
+            $"{tiles.NormalBudget.ApertureBuildExhaustions}/{tiles.NormalBudget.TileVisitExhaustions}; " +
+            $"preview chunk/tile={tiles.MappingBudget.ChunkExhaustions}/" +
+            $"{tiles.MappingBudget.TileVisitExhaustions}");
+        shell.WriteLine(
+            $"vertical tile draw: frames/preview={tiles.RenderFrames}/{tiles.MappingRenderFrames}, " +
+            $"batches/tiles={tiles.RenderBatches}/{tiles.RenderTiles}, vertices/calls=" +
+            $"{tiles.RenderVertices}/{tiles.RenderDrawCalls}, avg/last/max=" +
+            $"{tiles.AverageRenderMilliseconds:0.000}/{tiles.LastRenderMilliseconds:0.000}/" +
+            $"{tiles.MaxRenderMilliseconds:0.000}ms");
     }
 }

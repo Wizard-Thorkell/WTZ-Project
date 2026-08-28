@@ -115,6 +115,60 @@ public sealed partial class CCVars
             8_192,
             CVar.CLIENTONLY | CVar.ARCHIVE);
 
+    /// <summary>
+    /// Maximum lower-floor tile chunks composed per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTileProjectionMaxChunksPerFrame =
+        CVarDef.Create(
+            "zlevel.tile_projection_max_chunks_per_frame",
+            128,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum adjacent aperture layers composed for lower-floor tiles per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTileProjectionMaxApertureLayersPerFrame =
+        CVarDef.Create(
+            "zlevel.tile_projection_max_aperture_layers_per_frame",
+            4_096,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum cold aperture chunks built for lower-floor tiles per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTileProjectionMaxApertureBuildsPerFrame =
+        CVarDef.Create(
+            "zlevel.tile_projection_max_aperture_builds_per_frame",
+            32,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum lower-floor tile slots inspected per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelTileProjectionMaxTileVisitsPerFrame =
+        CVarDef.Create(
+            "zlevel.tile_projection_max_tile_visits_per_frame",
+            16_384,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum adjacent mapping-preview chunks composed per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelMappingPreviewMaxChunksPerFrame =
+        CVarDef.Create(
+            "zlevel.mapping_preview_max_chunks_per_frame",
+            128,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum adjacent mapping-preview tile slots inspected per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelMappingPreviewMaxTileVisitsPerFrame =
+        CVarDef.Create(
+            "zlevel.mapping_preview_max_tile_visits_per_frame",
+            16_384,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
     public static readonly CVarDef<bool> ZLevelDebugOverlay =
         CVarDef.Create("zlevel.debug_overlay", false, CVar.CLIENTONLY | CVar.ARCHIVE);
 }

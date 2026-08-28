@@ -199,16 +199,49 @@ the stack deterministically.
 
 Lower-floor tile/FOV composition deliberately does not consume these light
 budgets. Sharing one pool would allow dense lights to leave visible lower tiles
-black. P3.4b will give tile composition its own limits and nearest-first
-selection while retaining the shared aperture cache.
+black. P3.4b gives tile composition its own limits and nearest-first selection
+while retaining the shared aperture cache.
+
+## P3.4b Tile/FOV And Mapping Budgets
+
+`ZLevelTileProjectionSystem` owns retained plans for normal lower-floor tiles and
+adjacent mapping preview. The two modes have independent per-client-frame pools,
+and neither consumes the lighting planner's allowance:
+
+| CVar | Default | Hard maximum | Charged work |
+| --- | ---: | ---: | --- |
+| `zlevel.tile_projection_max_chunks_per_frame` | 128 | 4,096 | Normal lower-floor chunks considered |
+| `zlevel.tile_projection_max_aperture_layers_per_frame` | 4,096 | 1,000,000 | Normal adjacent boundary layers composed |
+| `zlevel.tile_projection_max_aperture_builds_per_frame` | 32 | 4,096 | Normal cold aperture chunks built |
+| `zlevel.tile_projection_max_tile_visits_per_frame` | 16,384 | 1,000,000 | Normal tile slots inspected |
+| `zlevel.mapping_preview_max_chunks_per_frame` | 128 | 4,096 | Adjacent preview chunks considered |
+| `zlevel.mapping_preview_max_tile_visits_per_frame` | 16,384 | 1,000,000 | Adjacent preview tile slots inspected |
+
+Normal planning visits the nearest lower floor first. On one floor it orders
+intersecting grids by distance from the viewport center and UID, then visits
+chunks from the viewport's center outward in deterministic diagonals. Mapping
+preview processes the adjacent lower floor before the adjacent upper floor.
+Completed batches are sorted by ascending world Z for far-to-near drawing after
+selection, so draw order cannot alter budget priority.
+
+Each chunk is transactional. A layer, cold-build, or tile-visit failure publishes
+none of that chunk's tiles; earlier complete chunks remain. Work already spent
+still consumes the frame pool. Mapping preview intentionally bypasses apertures
+because it is an authoring view, but it retains the same whole-chunk tile-visit
+policy. Both modes share the aperture cache with lighting without sharing work
+budgets.
+
+The overlay now builds one retained vertex batch and one draw call per projected
+chunk instead of issuing one draw call per tile. Grid, context, batch, tile, and
+geometry lists are caller-owned and reused after warm-up.
 
 ## Shared Aperture FOV Composition
 
 Lower-floor tile composition and projected light consume the same composed
-aperture chunks. `ZLevelDebugOverlay` now walks 16 by 16 chunks, composes each
-lower-to-viewer stack once, and rejects closed bits before reading or drawing
-tiles. This replaces repeated authoritative boundary queries for every tile and
-prevents the visible lower scene from disagreeing with its light mask.
+aperture chunks. `ZLevelTileProjectionSystem` walks 16 by 16 chunks, composes
+each lower-to-viewer stack once, and rejects closed bits before reading or
+drawing tiles. This replaces repeated authoritative boundary queries for every
+tile and prevents the visible lower scene from disagreeing with its light mask.
 
 The active floor's normal horizontal FOV remains owned by Clyde. Vertical
 visibility only selects which lower columns can participate; it does not create
@@ -237,7 +270,12 @@ vertices and draw calls, plus build and render timings.
 P3.4a adds current used/maximum values and cumulative exhaustion counts for
 candidate, emitter, aperture-layer, cold-build, and run budgets.
 
-Run `zlevelrendermetrics reset` to reset cumulative Content lighting counters.
+P3.4b adds grid/chunk candidates, completed/projected chunks, aperture and tile
+work, current batches/tiles, normal and preview used/maximum values, exhaustion
+counts, draw batches/vertices/calls, and build/render timings.
+
+Run `zlevelrendermetrics reset` to reset cumulative Content vertical-rendering
+counters.
 Retained cache entries and native per-frame Clyde counters are not destroyed by
 this command.
 
@@ -313,6 +351,16 @@ between projection calls in one frame. The combined `ZLevelLighting` filter
 also reruns all P3.2 and P3.3 cache, movement, shader, attenuation, allocation,
 and depth regressions.
 
+## P3.4b Tile Projection Fixture
+
+`ZLevelTileProjectionTest` validates complete aperture stacks, moving and rotated
+frames, far-to-near retained order, nearest-floor, nearest-grid, and center-chunk
+priority, normal layer/cold-build/tile-visit rollback, independent
+mapping-preview pools, lower-before-upper preview priority, same-frame sharing,
+CVar clamps, and warmed planner/geometry buffer reuse. The combined lighting and
+tile filter reruns all 32 P3.2 through P3.4b cases against their shared aperture
+cache.
+
 ## Current Deliberate Limits
 
 - Only the active floor contributes native point-light shadow maps and FOV
@@ -323,11 +371,13 @@ and depth regressions.
   gameplay policy and is not inferred by this compositor.
 - Upper floors remain hidden from a lower viewer unless mapping preview is
   active. Upward player-facing FOV and targeting are still separate policy work.
-- Lower-tile/FOV composition and mapping preview do not yet have independent
-  frame budgets. P3.4b owns their nearest-first, whole-unit fail-soft policy.
 - Lights and occluders on different overlapping grids compare world Z, not each
   grid's local Z.
 - The emitter candidate budget bounds point-light entry visits after native
   grid-tree selection. A viewport intersecting extreme numbers of moving grids
   still pays the engine's spatial tree-selection cost; P8 stress profiling will
   determine whether that native stage needs its own budget.
+- Tile projection also uses Robust's approximate intersecting-grid query before
+  its own chunk budget. Pathological counts of overlapping moving grids remain a
+  P8 profiling target even though per-grid chunk, aperture, and tile work is now
+  bounded.

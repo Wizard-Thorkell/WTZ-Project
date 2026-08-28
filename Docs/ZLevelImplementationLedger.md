@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/lighting-hardening`.
-- Active package: `P3.4 frame budgets, fail-soft degradation, visual regressions, and hardening`.
+- Active package: `P3.4c lower-floor shadows and visual regression hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1807,7 +1807,9 @@ P2.4 is split into independently gated subpackages:
 | P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | Complete |
 | P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | Complete |
 | P3.3 | Bounded lower-floor light/FOV projection and attenuation | Complete |
-| P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | In progress |
+| P3.4a | Lighting retention, frame budgets, and whole-emitter fail-soft behavior | Complete |
+| P3.4b | Independent lower-tile/FOV and mapping-preview budgets and batching | Complete |
+| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
 
@@ -2300,6 +2302,126 @@ P2.4 is split into independently gated subpackages:
   selection. P8 stress profiling must cover pathological moving-grid overlap.
 - Next package: bound lower-tile/FOV and mapping-preview composition without
   allowing light work to starve scene visibility.
+
+## Completed Package: P3.4b Bounded Tile/FOV And Mapping Composition
+
+### Scope
+
+- Extract lower-floor and adjacent-preview tile selection from
+  `ZLevelDebugOverlay` into a retained, directly testable projection system.
+- Give normal lower-tile/FOV composition and mapping preview independent
+  per-client-frame chunk and tile pools; add aperture-layer and cold-build pools
+  only to normal visibility composition.
+- Process normal floors nearest-first, grids nearest the viewport first, and
+  chunks center-out; process lower mapping preview before upper preview.
+- Reject an incomplete chunk before publishing any of its tiles while retaining
+  earlier complete chunks and charging work already performed.
+- Batch tile geometry into one draw call per projected chunk and reuse planner,
+  tile, batch, and vertex buffers after warm-up.
+- Expose controls, work, exhaustion, batching, and timings through
+  `zlevelrendermetrics` and the debug overlay.
+
+### Acceptance Criteria
+
+- Clyde's active floor remains native and consumes none of the Content tile or
+  mapping budgets.
+- Normal lower tiles use the same complete aperture stacks as projected light;
+  mapping preview remains an authoring view and deliberately bypasses them.
+- Light, normal-tile, and mapping-preview work cannot starve each other's pools.
+- Under a limit, the nearest lower floor, nearest grid, center chunk, and lower
+  adjacent preview receive deterministic priority.
+- Layer, cold-build, chunk, or tile-visit exhaustion never exposes a partial
+  chunk; completed work remains stable and counters increment at most once per
+  category in one frame.
+- Moving and rotated grid frames retain correct local tiles and ascending world-Z
+  draw order.
+- Repeated warmed planning and geometry do not allocate proportionally to frame
+  count, and draw calls scale with projected chunks rather than visible tiles.
+
+### Evidence
+
+- The thirteen dedicated P3.4b cases pass 13/13. They cover complete aperture
+  stacks, translated and rotated frames, ascending world-Z output, nearest-floor
+  and nearest-grid/center-chunk priority, whole-chunk tile-visit rollback,
+  progressive cold cache warming, layer exhaustion, independent preview pools,
+  lower-before-upper preview, normal and preview frame sharing, CVar clamps, and
+  buffer reuse.
+- The combined P3.2 through P3.4b lighting/tile matrix passes 32/32 against the
+  shared aperture cache. The complete Content filter containing `ZLevel` passes
+  215/215 with no failures or skips; structural unit tests pass 2/2.
+- Generated 3-, 6-, and 10-floor server baselines pass 3/3 with 6,336 measured
+  bytes, 100% warm boundary-cache hits, and zero evictions. Measured times were
+  10.951, 14.803, and 25.142 ms respectively.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes with
+  zero errors and 711 established dependency, vulnerability, analyzer, and
+  upstream-obsolescence warnings.
+- The warmed planner and geometry loops each remain within their fixed 512-byte
+  runtime-bookkeeping allowance across 100 iterations. The renderer now issues
+  one draw call per non-empty projected chunk instead of one per tile.
+
+### Decisions
+
+- Keep selection and budget policy in `ZLevelTileProjectionSystem`; the overlay
+  resolves atlas regions and submits retained batches but no longer walks map
+  storage or visibility boundaries itself.
+- Give normal and preview modes separate `IGameTiming.CurFrame` pools and keep
+  both separate from lighting. Dense lights and authoring preview therefore
+  cannot erase normal lower-floor scene visibility.
+- Charge every clipped tile slot in a chunk before scanning it. This conservative
+  upper bound is deterministic, makes publication transactional, and avoids a
+  second unbudgeted discovery pass.
+- Order planning for quality, then sort accepted batches separately for drawing.
+  Nearest-first degradation and far-to-near composition are distinct concerns.
+- Let mapping preview bypass apertures but retain chunk and tile limits. It must
+  show adjacent authored floors through closed decks without becoming unbounded.
+- Reuse Robust's approximate intersecting-grid query and retained result list.
+  Native tree selection remains outside the Content chunk budget and is a P8
+  stress target for pathological moving-grid overlap.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to client tile/FOV and mapping planning,
+      rendering batches, local CVars, diagnostics, tests, and P3 documentation.
+- [x] Invariant review: active-floor ownership, Z 0, authored map ranges,
+      world/local frame origins, translated and rotated grids, complete aperture
+      stacks, normal/preview separation, and deterministic priority are covered.
+- [x] Automated verification: 13/13 dedicated, 32/32 combined lighting/tile,
+      215/215 cumulative Z-level integration, 2/2 structural unit, 3/3 baseline,
+      and a zero-error full solution build pass.
+- [x] Performance evidence: finite work controls and live counters bound chunks,
+      layers, cold builds, and tile visits; hot planner/geometry allocation and
+      server stress baselines remain green; draw calls are chunk-batched.
+- [x] Documentation: controls, ordering, atomicity, batching, metrics, tests,
+      limitations, and next work are recorded here and in
+      `Docs/ZLevelLighting.md`.
+- [x] Dependency check: WTZ Engine remains clean at
+      `9d63eec79515c766a875f0d32803250298ddbcde`; no paired engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices; generated baseline artifacts remain ignored and only declared
+      package files are included.
+- [x] Mini review: findings, residual risks, and P3.4c are recorded below.
+- [x] Commit: package prepared as `Bound Z-level tile projection work` on
+      `zlevel/lighting-hardening`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: the former overlay issued one primitive submission for every visible
+  lower tile. Retained chunk geometry reduces this to one submission per
+  non-empty chunk without changing atlas variants or tint policy.
+- Finding: transactional checks occur before tile insertion, so an exhausted
+  chunk cannot leak a partially scanned row or aperture mask into the frame.
+- Finding: normal and mapping modes can both run in one client frame without
+  consuming one another's allowances; light projection remains a third pool.
+- Residual risk: lower-floor walls still do not cast source-specific shadows into
+  projected light. P3.4c owns that policy and its visual cost controls.
+- Residual risk: headless tests validate inputs, ordering, geometry, and resource
+  contracts but cannot judge final GL pixels, shadow shape, tint, or transient
+  flashes. The canonical RGB fixture still requires real screenshot capture.
+- Residual risk: approximate native intersecting-grid selection precedes the
+  chunk budget. Extreme overlapping moving-grid counts require P8 profiling.
+- Next package: implement bounded lower-floor shadow composition, capture the
+  canonical visual regression set, and harden any remaining Z-unaware overlays.
 
 P2.2 is split into independently gated subpackages:
 
@@ -3263,3 +3385,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.2 | `Cache vertical lighting inputs` | 6 package, 188 Content Z-level, 136/29 engine client, 1026/446 engine shared, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.3 | `Project lower-floor Z-level lighting` | 6 projection, 11 projection/cache, 194 Content Z-level, 136/30 engine client, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4a | `Bound Z-level lighting projection work` | 8 package, 19 lighting, 202 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
+| 2026-08-28 | P3.4b | `Bound Z-level tile projection work` | 13 package, 32 lighting/tile, 215 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
