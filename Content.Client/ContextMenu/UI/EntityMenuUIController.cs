@@ -11,6 +11,7 @@ using Content.Shared.Examine;
 using Content.Shared.IdentityManagement;
 using Content.Shared.Input;
 using Content.Shared.Verbs;
+using Content.Shared.ZLevel.Components;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
 using Robust.Client.Input;
@@ -157,6 +158,10 @@ namespace Content.Client.ContextMenu.UI
                 {
                     State = BoundKeyState.Down,
                     Coordinates = _entityManager.GetComponent<TransformComponent>(entity.Value).Coordinates,
+                    CoordinateLayer = _xform.GetWorldZLevel((
+                        entity.Value,
+                        _entityManager.GetComponent<TransformComponent>(entity.Value),
+                        _entityManager.GetComponentOrNull<ZLevelPositionComponent>(entity.Value))),
                     ScreenCoordinates = args.PointerLocation,
                     Uid = entity.Value,
                 };

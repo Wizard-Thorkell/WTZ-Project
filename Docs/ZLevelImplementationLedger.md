@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/interaction-funnels`.
-- Active package: `P2.4d client targeting and P2 completion review`.
+- Active branch: `zlevel/interaction-targeting`.
+- Active package: `P2.4d2 cross-floor entity targeting and segmented obstruction`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -818,7 +818,9 @@ P2.4 is split into independently gated subpackages:
 | P2.4a | Central spatial origin, same-floor authority, and opt-in trace primitive | Complete |
 | P2.4b | Interaction metrics and authored vertical portals | Complete |
 | P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Complete |
-| P2.4d | Client targeting polish, regression matrix, and P2 completion review | In progress |
+| P2.4d1 | Pointer coordinate-layer transport, frame ownership, and server authority | Complete |
+| P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | In progress |
+| P2.4d3 | Empty-tile actions/projectiles and final P2 regression review | Pending |
 
 ### P2.4 Contracts
 
@@ -834,6 +836,9 @@ P2.4 is split into independently gated subpackages:
 - Low-level coordinate and physics helpers remain 2D primitives. Entity-facing
   interaction entry points own the floor policy so specialized consumers can
   state deliberate exceptions instead of inheriting one implicitly.
+- Robust input transports one optional opaque coordinate layer and has no
+  knowledge of Z-level policy. WTZ Content interprets that layer as world Z and
+  revalidates it against server-owned target and spatial-origin state.
 
 ## Completed Package: P2.4a Central Interaction Authority
 
@@ -1215,6 +1220,128 @@ P2.4 is split into independently gated subpackages:
 - Next package: define and validate the client/network floor-selection contract,
   segmented interaction obstruction, context-menu filtering, and the final P2
   manual/regression review.
+
+## Completed Package: P2.4d1 Pointer Coordinate-Layer Authority
+
+### Scope
+
+- Add an optional opaque `CoordinateLayer` to Robust pointer input messages and
+  preserve it through local/network conversion and pointer-handler arguments.
+- Interpret the layer as world Z only in WTZ Content. Entity targets own their
+  selected world Z; coordinate-only requests remain on the effective spatial
+  origin unless a future owning subsystem explicitly opts in.
+- Resolve viewport coordinates relative to the target grid first and the active
+  viewer grid second, avoiding arbitrary planar grid selection at overlapping
+  XY positions and preserving moving-frame ownership.
+- Carry validated world Z through world-target action prediction and expose it
+  as `WorldTargetActionEvent.TargetWorldZ`.
+- Stamp manually synthesized context-menu input and preserve the layer when a
+  short drag is replayed as an ordinary click.
+
+### Contracts
+
+- `CoordinateLayer` is an engine transport primitive, not an engine Z-level
+  feature. Robust never interprets, clamps, or compares it.
+- The Content contract uses world Z, including a grid's
+  `ZLevelFrameComponent.Origin`; local deck indices are never sent as pointer
+  authority.
+- A server-owned entity target must exist on the requested layer and on the
+  coordinate map. A targetless coordinate must match the effective actor,
+  remote-eye, or relay origin unless the consumer deliberately opts in.
+- Missing layers preserve compatibility by inferring the target's authoritative
+  world Z or the effective origin's world Z.
+- This package transports and validates selection only. It does not authorize
+  physical cross-floor use; P2.4d2 owns visible targeting, portal policy, and
+  segmented obstruction.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to pointer/action layer transport,
+      frame-aware coordinate ownership, server validation, focused tests,
+      documentation, and the paired WTZ Engine revision.
+- [x] Invariant review: Z 0 compatibility, world/local frame origins,
+      overlapping grids, remote spatial origins, entity versus coordinate-only
+      targets, stale prediction, and same-floor policy were reviewed.
+- [x] Automated verification: 20/20 authority cases, 24/24 native regressions,
+      153/153 focused Z-level integration cases, and 2/2 engine message tests
+      passed with no skips; the complete project solution built with zero
+      errors.
+- [x] Performance evidence: the hot path adds one nullable scalar to pointer
+      messages and bounded transform/Z checks per request. It adds no tick or
+      frame loop, cache, retained collection, or per-target scan.
+- [x] Documentation: transport ownership, validation order, test evidence,
+      engine pairing, deferrals, and review findings are recorded here and in
+      `Docs/ZLevel.md`.
+- [x] Dependency check: WTZ Project now points at WTZ Engine commit
+      `ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c` on
+      `zlevel/pointer-coordinate-layer`; the engine branch was pushed and its
+      remote SHA was verified.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and the engine worktree is clean at the paired commit.
+- [x] Mini review: findings, explicit deferrals, and the next package are
+      recorded below.
+- [x] Commit: package prepared as the isolated `Carry authoritative floors
+      through pointer targets` commit on `zlevel/interaction-targeting`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed in
+  1m22s with zero errors and the established 711-warning dependency,
+  vulnerability, analyzer, and upstream-obsolescence baseline.
+- `ZLevelInteractionAuthorityTest` passed 20/20 with no skips. Its real network
+  cases prove that a synchronized world layer preserves normal use while a
+  one-tick stale client selection is independently rejected by the server.
+- The unchanged native interaction/action/DoAfter/pulling matrix passed 24/24
+  with no skips, proving omitted layers retain established behavior.
+- The complete focused Z-level integration matrix passed 153/153 with no skips.
+- `InputCmdMessageTest` passed 2/2 with no skips. Focused WTZ Engine client and
+  server builds also passed with zero errors (135 and 63 baseline warnings).
+- A full standalone engine solution build could not include optional
+  `Robust.Client.WebView`/CefGlue projects because their local
+  `project.assets.json` files have not been restored. The changed Shared,
+  Client, and Server engine projects and the complete WTZ Project solution all
+  compiled successfully.
+
+### Decisions
+
+- Keep the engine field generic so other content can attach an integer layer
+  without importing WTZ geometry or policy into Robust.
+- Send world Z rather than local Z. This makes a pointer selection stable across
+  translated/rotated grids and unambiguous when frame origins differ.
+- Prefer the selected entity's grid as the coordinate frame, then the active
+  viewer's grid, and only then use the existing planar fallback. Identity and
+  coordinates now describe the same structural frame.
+- Treat entity identity as authoritative for its floor. Coordinate-only targets
+  stay same-floor in this package so a forged integer cannot create a new
+  lower-floor interaction capability.
+- Preserve the field in all production message reconstruction paths, including
+  context-menu synthesis and drag-to-click replay.
+
+### Mini Review
+
+- Finding: viewport input previously called planar `TryFindGridAt`, which could
+  select an unrelated overlapping grid even after Z-aware entity targeting had
+  chosen the correct entity. Target/view frame ownership now resolves first.
+- Finding: the drag system rebuilt quick-click messages and silently omitted the
+  new layer. The completion audit found and fixed both local and network replay
+  forms before commit.
+- Finding: the first moving-frame test values used local `0/1` while the fixture
+  origin was world Z five. Correcting the assertions to `5/6` made frame-origin
+  semantics part of the regression instead of accidentally testing Z 0.
+- Finding: pointer tests that left `Use` pressed depended on runner ordering.
+  Explicit release plus one synchronized tick now gives 20/20 results with no
+  skips in the complete authority class.
+- Residual risk: visible lower-floor entities are not yet candidates for normal
+  use, same-XY priority is not finalized, and context menus can still present a
+  physical verb whose execution later rejects. P2.4d2 owns all three together
+  with `Interaction`-channel portal and segmented obstruction checks.
+- Residual risk: an empty lower-floor tile has no entity identity from which to
+  derive a layer. P2.4d3 owns explicit opt-in world actions/projectiles and the
+  final P2 matrix.
+- Next package: implement same-floor-first entity selection, bounded visible
+  lower-floor candidates, authoritative open-boundary use, segmented native
+  obstruction, and matching context-menu filtering.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2169,3 +2296,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.4a | `Centralize native Z-level interaction authority` | 4 authority, 12 regression, 135 integration, full build, diff check | Complete |
 | 2026-08-27 | P2.4b | `Instrument native Z-level interaction policy` | 13 package, 21 regression, 144 integration, allocation, full build, diff check | Complete |
 | 2026-08-28 | P2.4c | `Harden native Z-level interaction funnels` | 18 authority/funnel, 24 native regression, 151 integration, full build, diff check | Complete |
+| 2026-08-28 | P2.4d1 | `Carry authoritative floors through pointer targets` | 20 authority, 24 native regression, 153 integration, 2 engine, full build, diff check | Complete |

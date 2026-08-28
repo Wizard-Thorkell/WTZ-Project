@@ -320,6 +320,7 @@ public sealed class DragDropSystem : SharedDragDropSystem
                             {
                                 State = replayMsg.State,
                                 Coordinates = clientInput.Coordinates,
+                                CoordinateLayer = clientInput.CoordinateLayer,
                                 ScreenCoordinates = clientInput.ScreenCoordinates,
                                 Uid = clientInput.Uid,
                             };
@@ -328,7 +329,7 @@ public sealed class DragDropSystem : SharedDragDropSystem
                             replayMsg = new FullInputCmdMessage(args.OriginalMessage.Tick,
                                 args.OriginalMessage.SubTick,
                                 replayMsg.InputFunctionId, replayMsg.State, fullInput.Coordinates, fullInput.ScreenCoordinates,
-                                fullInput.Uid);
+                                fullInput.Uid, fullInput.CoordinateLayer);
                             break;
                         default:
                             throw new ArgumentOutOfRangeException();

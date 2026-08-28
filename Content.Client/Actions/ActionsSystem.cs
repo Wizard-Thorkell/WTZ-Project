@@ -320,9 +320,10 @@ namespace Content.Client.Actions
             var (uid, comp) = ent;
             var action = args.Action;
             var coords = args.Input.Coordinates;
+            var coordinateLayer = args.Input.CoordinateLayer;
             var user = args.User;
 
-            if (!ValidateWorldTarget(user, coords, ent))
+            if (!TryValidateWorldTarget(user, coords, ent, coordinateLayer, out var targetWorldZ))
                 return;
 
             // optionally send the clicked entity too, if it matches its whitelist etc
@@ -341,13 +342,18 @@ namespace Content.Client.Actions
                 if (comp.Event is {} ev)
                 {
                     ev.Target = coords;
+                    ev.TargetWorldZ = targetWorldZ;
                     ev.Entity = targetEnt;
                 }
 
                 PerformAction((user, user.Comp), (uid, action));
             }
             else
-                RaisePredictiveEvent(new RequestPerformActionEvent(GetNetEntity(uid), GetNetEntity(targetEnt), GetNetCoordinates(coords)));
+                RaisePredictiveEvent(new RequestPerformActionEvent(
+                    GetNetEntity(uid),
+                    GetNetEntity(targetEnt),
+                    GetNetCoordinates(coords),
+                    targetWorldZ));
 
             args.FoundTarget = true;
         }

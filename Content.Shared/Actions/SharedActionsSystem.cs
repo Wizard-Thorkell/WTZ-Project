@@ -12,6 +12,7 @@ using Content.Shared.Inventory.Events;
 using Content.Shared.Mind;
 using Content.Shared.Rejuvenate;
 using Content.Shared.Whitelist;
+using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.GameStates;
@@ -388,7 +389,12 @@ public abstract partial class SharedActionsSystem : EntitySystem
 
         var user = args.User;
         var target = GetCoordinates(netTarget);
-        if (!ValidateWorldTarget(user, target, ent))
+        if (!TryValidateWorldTarget(
+                user,
+                target,
+                ent,
+                args.Input.CoordinateLayer,
+                out var targetWorldZ))
         {
             args.Invalid = true;
             return;
@@ -413,6 +419,7 @@ public abstract partial class SharedActionsSystem : EntitySystem
         if (ent.Comp.Event is {} ev)
         {
             ev.Target = target;
+            ev.TargetWorldZ = targetWorldZ;
             ev.Entity = targetEntity;
         }
     }
@@ -455,6 +462,27 @@ public abstract partial class SharedActionsSystem : EntitySystem
 
     public bool ValidateWorldTarget(EntityUid user, EntityCoordinates target, Entity<WorldTargetActionComponent> ent)
     {
+        return TryValidateWorldTarget(user, target, ent, null, out _);
+    }
+
+    public bool TryValidateWorldTarget(
+        EntityUid user,
+        EntityCoordinates target,
+        Entity<WorldTargetActionComponent> ent,
+        int? requestedWorldZ,
+        out int targetWorldZ)
+    {
+        if (!_zLevelInteraction.TryResolveCoordinateLayer(
+                user,
+                null,
+                target,
+                requestedWorldZ,
+                false,
+                out targetWorldZ))
+        {
+            return false;
+        }
+
         var targetAction = Comp<TargetActionComponent>(ent);
         return ValidateBaseTarget(user, target, (ent, targetAction));
     }
@@ -538,6 +566,10 @@ public abstract partial class SharedActionsSystem : EntitySystem
         if (ent.Comp.Event is {} ev)
         {
             ev.Target = Transform(args.Target).Coordinates;
+            ev.TargetWorldZ = _transform.GetWorldZLevel((
+                args.Target,
+                Transform(args.Target),
+                CompOrNull<ZLevelPositionComponent>(args.Target)));
             // only set Entity if the action also has EntityTargetAction
             ev.Entity = HasComp<EntityTargetActionComponent>(ent) ? args.Target : null;
             args.Handled = true;

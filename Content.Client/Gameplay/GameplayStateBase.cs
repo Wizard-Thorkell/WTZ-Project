@@ -186,26 +186,34 @@ namespace Content.Client.Gameplay
 
             EntityCoordinates coordinates = default;
             EntityUid? entityToClick = null;
+            int? coordinateLayer = null;
             if (args.Viewport is IViewportControl vp && kArgs.PointerLocation.IsValid)
             {
                 var mousePosWorld = vp.PixelToMap(kArgs.PointerLocation.Position);
-                var targetingMode = _entitySystemManager.GetEntitySystem<ZLevelTargetingSystem>()
-                    .GetTargetingModeForInput(func);
+                var targeting = _entitySystemManager.GetEntitySystem<ZLevelTargetingSystem>();
+                var targetingMode = targeting.GetTargetingModeForInput(func);
+                IEye? pointerEye;
 
                 if (vp is ScalingViewport svp)
                 {
-                    entityToClick = GetClickedEntity(mousePosWorld, svp.Eye, targetingMode);
+                    pointerEye = svp.Eye;
+                    entityToClick = GetClickedEntity(mousePosWorld, pointerEye, targetingMode);
                 }
                 else
                 {
-                    entityToClick = GetClickedEntity(mousePosWorld, _eyeManager.CurrentEye, targetingMode);
+                    pointerEye = _eyeManager.CurrentEye;
+                    entityToClick = GetClickedEntity(mousePosWorld, pointerEye, targetingMode);
                 }
+
                 var transformSystem = _entitySystemManager.GetEntitySystem<SharedTransformSystem>();
                 var mapSystem = _entitySystemManager.GetEntitySystem<MapSystem>();
 
-                coordinates = _mapManager.TryFindGridAt(mousePosWorld, out var uid, out _) ?
+                coordinates = targeting.TryGetPointerFrame(pointerEye, entityToClick, out var pointerFrame) ?
+                    mapSystem.MapToGrid(pointerFrame, mousePosWorld) :
+                    _mapManager.TryFindGridAt(mousePosWorld, out var uid, out _) ?
                     mapSystem.MapToGrid(uid, mousePosWorld) :
                     transformSystem.ToCoordinates(mousePosWorld);
+                coordinateLayer = targeting.GetPointerWorldZ(pointerEye, entityToClick);
             }
             else
             {
@@ -216,6 +224,7 @@ namespace Content.Client.Gameplay
             {
                 State = kArgs.State,
                 Coordinates = coordinates,
+                CoordinateLayer = coordinateLayer,
                 ScreenCoordinates = kArgs.PointerLocation,
                 Uid = entityToClick ?? default,
             }; // TODO make entityUid nullable

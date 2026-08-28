@@ -139,6 +139,50 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         return IsEntityTargetable(entity, ZLevelTargetingMode.VisibleCrossFloorExamine);
     }
 
+    /// <summary>
+    /// Resolves the world layer selected by a pointer target. Entity targets own
+    /// their layer; coordinate-only targets stay on the active view layer.
+    /// </summary>
+    public int GetPointerWorldZ(IEye? eye, EntityUid? target)
+    {
+        if (target is { } targetUid && _transformQuery.TryComp(targetUid, out var targetTransform))
+        {
+            return _transform.GetWorldZLevel((
+                targetUid,
+                targetTransform,
+                CompOrNull<ZLevelPositionComponent>(targetUid)));
+        }
+
+        return GetViewerContext(eye).WorldZLevel;
+    }
+
+    /// <summary>
+    /// Selects the structural frame that should own planar pointer coordinates.
+    /// This avoids an arbitrary overlapping grid being selected by a 2D lookup.
+    /// </summary>
+    public bool TryGetPointerFrame(IEye? eye, EntityUid? target, out EntityUid frameUid)
+    {
+        if (target is { } targetUid &&
+            _transformQuery.TryComp(targetUid, out var targetTransform) &&
+            targetTransform.GridUid is { } targetGrid)
+        {
+            frameUid = targetGrid;
+            return true;
+        }
+
+        var viewer = GetViewerContext(eye).Viewer;
+        if (viewer is { } viewerUid &&
+            _transformQuery.TryComp(viewerUid, out var viewerTransform) &&
+            viewerTransform.GridUid is { } viewerGrid)
+        {
+            frameUid = viewerGrid;
+            return true;
+        }
+
+        frameUid = default;
+        return false;
+    }
+
     private bool IsEntityTargetable(EntityUid entity, ZLevelViewContext viewer, ZLevelTargetingMode mode)
     {
         if (!_transformQuery.TryComp(entity, out var xform) ||

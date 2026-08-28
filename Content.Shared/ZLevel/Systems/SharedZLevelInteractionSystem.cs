@@ -147,6 +147,54 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         return CanInteract(user, target, true, maximumRange);
     }
 
+    /// <summary>
+    /// Resolves and validates the gameplay layer attached to planar pointer coordinates.
+    /// A target entity is authoritative for its layer. Coordinate-only requests remain
+    /// on the effective interaction origin unless their owning subsystem explicitly opts in.
+    /// </summary>
+    public bool TryResolveCoordinateLayer(
+        EntityUid user,
+        EntityUid? target,
+        EntityCoordinates coordinates,
+        int? requestedWorldZ,
+        bool allowCrossLevelCoordinates,
+        out int worldZ)
+    {
+        worldZ = default;
+        if (!coordinates.IsValid(EntityManager) ||
+            !TryGetSpatialOrigin(user, target, out var origin) ||
+            !TryGetContext(origin, out var originContext))
+        {
+            return false;
+        }
+
+        var mapCoordinates = _transform.ToMapCoordinates(coordinates);
+        if (mapCoordinates.MapId == MapId.Nullspace ||
+            mapCoordinates.MapId != originContext.MapCoordinates.MapId ||
+            !IsFinite(mapCoordinates.Position))
+        {
+            return false;
+        }
+
+        InteractionSpatialContext? targetContext = null;
+        if (target is { } targetUid)
+        {
+            if (!TryGetContext(targetUid, out var resolvedTarget) ||
+                resolvedTarget.MapCoordinates.MapId != mapCoordinates.MapId)
+            {
+                return false;
+            }
+
+            targetContext = resolvedTarget;
+        }
+
+        worldZ = requestedWorldZ ?? targetContext?.WorldZ ?? originContext.WorldZ;
+        if (targetContext is { } resolved && worldZ != resolved.WorldZ)
+            return false;
+
+        return allowCrossLevelCoordinates || worldZ == originContext.WorldZ;
+    }
+
     private bool IsActorLocalTarget(EntityUid user, EntityUid target)
     {
         if (user == target)
@@ -202,6 +250,11 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         var delta = target.MapCoordinates.Position - origin.MapCoordinates.Position;
         var deltaZ = (double) target.WorldZ - origin.WorldZ;
         return (float) Math.Sqrt(delta.LengthSquared() + deltaZ * deltaZ);
+    }
+
+    private static bool IsFinite(Vector2 value)
+    {
+        return float.IsFinite(value.X) && float.IsFinite(value.Y);
     }
 
     private bool RecordDecision(ZLevelInteractionDecision decision, bool remoteOrigin)

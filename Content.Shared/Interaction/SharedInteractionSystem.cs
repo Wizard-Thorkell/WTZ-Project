@@ -119,13 +119,17 @@ namespace Content.Shared.Interaction
 
             CommandBinds.Builder
                 .Bind(ContentKeyFunctions.AltActivateItemInWorld,
-                    new PointerInputCmdHandler(HandleAltUseInteraction))
+                    new PointerInputCmdHandler((in PointerInputCmdHandler.PointerInputCmdArgs args) =>
+                        HandleAltUseInteraction(args.Session, args.Coordinates, args.EntityUid, args.CoordinateLayer)))
                 .Bind(EngineKeyFunctions.Use,
-                    new PointerInputCmdHandler(HandleUseInteraction))
+                    new PointerInputCmdHandler((in PointerInputCmdHandler.PointerInputCmdArgs args) =>
+                        HandleUseInteraction(args.Session, args.Coordinates, args.EntityUid, args.CoordinateLayer)))
                 .Bind(ContentKeyFunctions.ActivateItemInWorld,
-                    new PointerInputCmdHandler(HandleActivateItemInWorld))
+                    new PointerInputCmdHandler((in PointerInputCmdHandler.PointerInputCmdArgs args) =>
+                        HandleActivateItemInWorld(args.Session, args.Coordinates, args.EntityUid, args.CoordinateLayer)))
                 .Bind(ContentKeyFunctions.TryPullObject,
-                    new PointerInputCmdHandler(HandleTryPullObject))
+                    new PointerInputCmdHandler((in PointerInputCmdHandler.PointerInputCmdArgs args) =>
+                        HandleTryPullObject(args.Session, args.Coordinates, args.EntityUid, args.CoordinateLayer)))
                 .Register<SharedInteractionSystem>();
 
             _rateLimit.Register(RateLimitKey,
@@ -263,9 +267,13 @@ namespace Content.Shared.Interaction
                 PredictedQueueDel(uid);
         }
 
-        private bool HandleTryPullObject(ICommonSession? session, EntityCoordinates coords, EntityUid uid)
+        private bool HandleTryPullObject(
+            ICommonSession? session,
+            EntityCoordinates coords,
+            EntityUid uid,
+            int? coordinateLayer = null)
         {
-            if (!ValidateClientInput(session, coords, uid, out var userEntity))
+            if (!ValidateClientInput(session, coords, uid, coordinateLayer, false, out var userEntity))
             {
                 Log.Info($"TryPullObject input validation failed");
                 return true;
@@ -294,7 +302,8 @@ namespace Content.Shared.Interaction
             var item = GetEntity(msg.ItemUid);
 
             // client sanitization
-            if (!TryComp(item, out TransformComponent? itemXform) || !ValidateClientInput(args.SenderSession, itemXform.Coordinates, item, out var user))
+            if (!TryComp(item, out TransformComponent? itemXform) ||
+                !ValidateClientInput(args.SenderSession, itemXform.Coordinates, item, null, false, out var user))
             {
                 Log.Info($"Inventory interaction validation failed.  Session={args.SenderSession}");
                 return;
@@ -313,10 +322,14 @@ namespace Content.Shared.Interaction
                 InteractionActivate(user.Value, item);
         }
 
-        public bool HandleAltUseInteraction(ICommonSession? session, EntityCoordinates coords, EntityUid uid)
+        public bool HandleAltUseInteraction(
+            ICommonSession? session,
+            EntityCoordinates coords,
+            EntityUid uid,
+            int? coordinateLayer = null)
         {
             // client sanitization
-            if (!ValidateClientInput(session, coords, uid, out var user))
+            if (!ValidateClientInput(session, coords, uid, coordinateLayer, true, out var user))
             {
                 Log.Info($"Alt-use input validation failed");
                 return true;
@@ -327,10 +340,14 @@ namespace Content.Shared.Interaction
             return false;
         }
 
-        public bool HandleUseInteraction(ICommonSession? session, EntityCoordinates coords, EntityUid uid)
+        public bool HandleUseInteraction(
+            ICommonSession? session,
+            EntityCoordinates coords,
+            EntityUid uid,
+            int? coordinateLayer = null)
         {
             // client sanitization
-            if (!ValidateClientInput(session, coords, uid, out var userEntity))
+            if (!ValidateClientInput(session, coords, uid, coordinateLayer, true, out var userEntity))
             {
                 Log.Info($"Use input validation failed");
                 return true;
@@ -1193,9 +1210,13 @@ namespace Content.Shared.Interaction
         }
 
         #region ActivateItemInWorld
-        private bool HandleActivateItemInWorld(ICommonSession? session, EntityCoordinates coords, EntityUid uid)
+        private bool HandleActivateItemInWorld(
+            ICommonSession? session,
+            EntityCoordinates coords,
+            EntityUid uid,
+            int? coordinateLayer = null)
         {
-            if (!ValidateClientInput(session, coords, uid, out var user))
+            if (!ValidateClientInput(session, coords, uid, coordinateLayer, true, out var user))
             {
                 Log.Info($"ActivateItemInWorld input validation failed");
                 return false;
@@ -1462,6 +1483,8 @@ namespace Content.Shared.Interaction
             ICommonSession? session,
             EntityCoordinates coords,
             EntityUid uid,
+            int? coordinateLayer,
+            bool allowCrossLevelTarget,
             [NotNullWhen(true)] out EntityUid? userEntity)
         {
             userEntity = null;
@@ -1492,7 +1515,23 @@ namespace Content.Shared.Interaction
                 return false;
             }
 
-            return _rateLimit.CountAction(session!, RateLimitKey) == RateLimitStatus.Allowed;
+            if (_rateLimit.CountAction(session!, RateLimitKey) != RateLimitStatus.Allowed)
+                return false;
+
+            var target = uid.IsValid() ? uid : (EntityUid?) null;
+            if (!_zLevelInteraction.TryResolveCoordinateLayer(
+                    userEntity.Value,
+                    target,
+                    coords,
+                    coordinateLayer,
+                    allowCrossLevelTarget && target != null,
+                    out _))
+            {
+                Log.Info($"Pointer layer validation failed: client={session}, layer={coordinateLayer}, target={target}");
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>

@@ -22,6 +22,8 @@ using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.GameObjects;
+using Robust.Client.Input;
+using Robust.Shared.Input;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
@@ -433,6 +435,38 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
             SEntMan.EventBus.RaiseLocalEvent(worldAction, ref nonFiniteValidation);
             Assert.That(nonFiniteValidation.Invalid, Is.True,
                 "Unlimited-range world actions must still reject non-finite coordinates.");
+
+            var nearCoordinates = new EntityCoordinates(testMap.Grid, new Vector2(0.5f, 0.5f));
+            var wrongLayerValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(worldAction),
+                    SEntMan.GetNetCoordinates(nearCoordinates),
+                    FrameOrigin + 1),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(worldAction, ref wrongLayerValidation);
+            Assert.That(wrongLayerValidation.Invalid, Is.True,
+                "A coordinate-only action cannot smuggle a different world layer through a planar target.");
+
+            var sameLayerValidation = new ActionValidateEvent
+            {
+                Input = new RequestPerformActionEvent(
+                    SEntMan.GetNetEntity(worldAction),
+                    SEntMan.GetNetCoordinates(nearCoordinates),
+                    FrameOrigin),
+                User = user,
+                Provider = user,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(worldAction, ref sameLayerValidation);
+            var worldEvent = SEntMan.GetComponent<WorldTargetActionComponent>(worldAction).Event;
+            Assert.Multiple(() =>
+            {
+                Assert.That(sameLayerValidation.Invalid, Is.False);
+                Assert.That(worldEvent, Is.Not.Null);
+                Assert.That(worldEvent!.TargetWorldZ, Is.EqualTo(FrameOrigin));
+            });
         });
     }
 
@@ -512,6 +546,124 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
                 Assert.That(listener.TargetEvents, Is.EqualTo(1));
             });
             listener.Reset();
+        });
+    }
+
+    [Test]
+    public async Task PointerCoordinateLayerIsRevalidatedAfterNetworking()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        EntityUid target = default;
+        FunnelListenerSystem listener = default!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            Assert.That(ServerSession, Is.Not.Null);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<ComplexInteractionComponent>(user);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, user);
+
+            target = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<FunnelListenerComponent>(target);
+            targetNet = SEntMan.GetNetEntity(target);
+            listener = SEntMan.System<FunnelListenerSystem>();
+            listener.Reset();
+        });
+        await Pair.RunTicksSync(5);
+        await AssertClientWorldZ(targetNet, FrameOrigin);
+
+        // Leave the client on its last Z0 state while the authoritative target moves.
+        await Server.WaitAssertion(() =>
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True));
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Down);
+        await Pair.RunTicksSync(5);
+        await AssertClientWorldZ(targetNet, FrameOrigin + 1);
+
+        await Server.WaitAssertion(() =>
+            Assert.That(listener.HandEvents, Is.Zero,
+                "The server must reject a stale pointer layer even when the target identity is valid."));
+        await SendPointerUse(targetNet, FrameOrigin + 1, BoundKeyState.Up);
+        await Pair.RunTicksSync(1);
+    }
+
+    [Test]
+    public async Task PointerCoordinateLayerPreservesSameFloorInteractionAfterNetworking()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        FunnelListenerSystem listener = default!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            Assert.That(ServerSession, Is.Not.Null);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<ComplexInteractionComponent>(user);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, user);
+
+            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<FunnelListenerComponent>(target);
+            targetNet = SEntMan.GetNetEntity(target);
+            listener = SEntMan.System<FunnelListenerSystem>();
+            listener.Reset();
+
+            SEntMan.System<SharedInteractionSystem>().UserInteraction(
+                user,
+                SEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                target);
+            Assert.That(listener.HandEvents, Is.EqualTo(1),
+                "The fixture must permit the native same-floor interaction before testing transport.");
+            listener.Reset();
+        });
+        await Pair.RunTicksSync(5);
+        await AssertClientWorldZ(targetNet, FrameOrigin);
+
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Down);
+        await Pair.RunTicksSync(5);
+        await Server.WaitAssertion(() =>
+            Assert.That(listener.HandEvents, Is.EqualTo(1),
+                "A synchronized same-floor pointer layer must preserve native interaction."));
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Up);
+        await Pair.RunTicksSync(1);
+    }
+
+    private async Task SendPointerUse(NetEntity targetNet, int coordinateLayer, BoundKeyState state)
+    {
+        await Client.WaitPost(() =>
+        {
+            var inputManager = Client.ResolveDependency<IInputManager>();
+            var input = CEntMan.System<Robust.Client.GameObjects.InputSystem>();
+            var target = CEntMan.GetEntity(targetNet);
+            var function = EngineKeyFunctions.Use;
+            var functionId = inputManager.NetworkBindMap.KeyFunctionID(function);
+            var message = new ClientFullInputCmdMessage(
+                CGameTiming.CurTick,
+                CGameTiming.TickFraction,
+                functionId)
+            {
+                State = state,
+                Coordinates = CEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                CoordinateLayer = coordinateLayer,
+                Uid = target,
+            };
+
+            Assert.That(
+                input.HandleInputCommand(Client.Session, function, message),
+                Is.False,
+                "A valid local pointer command must be dispatched to the server.");
+        });
+    }
+
+    private async Task AssertClientWorldZ(NetEntity targetNet, int expectedWorldZ)
+    {
+        await Client.WaitAssertion(() =>
+        {
+            var target = CEntMan.GetEntity(targetNet);
+            Assert.That(
+                CEntMan.System<SharedZLevelSystem>().GetWorldZLevel(target),
+                Is.EqualTo(expectedWorldZ));
         });
     }
 

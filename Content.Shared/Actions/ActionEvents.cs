@@ -85,6 +85,7 @@ public sealed class RequestPerformActionEvent : EntityEventArgs
     public readonly NetEntity Action;
     public readonly NetEntity? EntityTarget;
     public readonly NetCoordinates? EntityCoordinatesTarget;
+    public readonly int? CoordinateLayer;
 
     public RequestPerformActionEvent(NetEntity action)
     {
@@ -97,17 +98,26 @@ public sealed class RequestPerformActionEvent : EntityEventArgs
         EntityTarget = entityTarget;
     }
 
-    public RequestPerformActionEvent(NetEntity action, NetCoordinates entityCoordinatesTarget)
+    public RequestPerformActionEvent(
+        NetEntity action,
+        NetCoordinates entityCoordinatesTarget,
+        int? coordinateLayer = null)
     {
         Action = action;
         EntityCoordinatesTarget = entityCoordinatesTarget;
+        CoordinateLayer = coordinateLayer;
     }
 
-    public RequestPerformActionEvent(NetEntity action, NetEntity? entityTarget, NetCoordinates entityCoordinatesTarget)
+    public RequestPerformActionEvent(
+        NetEntity action,
+        NetEntity? entityTarget,
+        NetCoordinates entityCoordinatesTarget,
+        int? coordinateLayer = null)
     {
         Action = action;
         EntityTarget = entityTarget;
         EntityCoordinatesTarget = entityCoordinatesTarget;
+        CoordinateLayer = coordinateLayer;
     }
 }
 
@@ -150,6 +160,11 @@ public abstract partial class WorldTargetActionEvent : BaseActionEvent
     ///     The coordinates of the location that the user targeted.
     /// </summary>
     public EntityCoordinates Target;
+
+    /// <summary>
+    ///     Authoritative world layer associated with <see cref="Target"/>.
+    /// </summary>
+    public int TargetWorldZ;
 
     /// <summary>
     /// When combined with <see cref="EntityTargetAction"/> (and <c>Event</c> is null), the entity the client was hovering when clicked.

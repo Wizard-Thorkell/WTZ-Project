@@ -132,8 +132,21 @@ Implemented traversal and debug tooling:
   authority, server-owned remote-eye origins, and bounded opt-in traces through
   authored interaction portals.
 - Interaction outcomes and physical checks are visible in `zlevelmetrics` and
-  the Z-level debug overlay. Normal client use remains same-floor-only until
-  cross-floor targeting and obstruction are enabled as one reviewed path.
+  the Z-level debug overlay.
+- Pointer input now carries an optional engine-level coordinate layer. WTZ
+  Content interprets it as world Z, chooses coordinates relative to the target
+  grid or active viewport grid, and preserves it through context-menu and
+  short-click drag replay paths. This avoids an arbitrary planar grid lookup
+  when several decks or moving frames overlap in XY.
+- Entity targets authoritatively own their world Z. Coordinate-only targets use
+  the active view floor on the client and the effective interaction origin on
+  the server. The server independently checks finite coordinates, map identity,
+  target identity, target world Z, and remote-eye or relay origin before use.
+- World-target actions carry the selected layer through prediction and expose
+  the validated value as `WorldTargetActionEvent.TargetWorldZ`. Existing callers
+  that omit the optional layer retain same-floor behavior.
+- Normal physical use remains same-floor-only until visible lower-floor target
+  selection and segmented interaction obstruction are enabled together.
 - Every gameplay verb family, including the generic `Verb` used by pulling,
   rotation, UI activation, and other physical content, revalidates same-world-Z
   authority at execution time. Examine, VV, explicit forced execution, and
@@ -147,10 +160,9 @@ Implemented traversal and debug tooling:
 - Station AI proxy replacement preserves the old eye's world Z across
   remote/physical mode switches, and its optimized BUI range override cannot
   reopen access to the body's floor from a camera on another floor.
-- World-only action targets still carry planar `EntityCoordinates`, not a
-  selected world-Z value. They validate parent, finiteness, map, range, and
-  obstruction today; explicit lower-floor coordinate selection is reserved for
-  the reviewed client/network targeting contract.
+- World-only action targets now preserve an explicit selected world Z alongside
+  planar `EntityCoordinates`, but remain same-floor by policy. Opt-in lower-floor
+  empty-tile actions are reserved for the reviewed vertical targeting package.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
@@ -715,8 +727,9 @@ inspection feel intentional across floors.
 
 Tasks:
 
-- [Partial] Audit all client click resolution paths. Core execution funnels are
-  audited; lower-floor selection and click priority remain.
+- [Partial] Audit all client click resolution paths. Pointer layer transport,
+  frame selection, context-menu synthesis, drag replay, and core execution
+  funnels are covered; lower-floor selection and click priority remain.
 - [Done server-side] Ensure same-floor interaction is the default for
   use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
   targeted DoAfters.
