@@ -1,9 +1,9 @@
 # WTZ Z-Level Lighting And FOV
 
 This document defines the rendering ownership and vertical projection contract
-established by roadmap packages P3.1 through P3.4a. It is the baseline for
-lower-tile composition budgets, shadow policy, and visual hardening in the
-remaining P3.4 packages.
+established by roadmap packages P3.1 through P3.4c1. It is the baseline for
+bounded projected-shadow integration and visual hardening in the remaining
+P3.4 packages.
 
 ## Ownership
 
@@ -235,6 +235,35 @@ The overlay now builds one retained vertex batch and one draw call per projected
 chunk instead of issuing one draw call per tile. Grid, context, batch, tile, and
 geometry lists are caller-owned and reused after warm-up.
 
+## P3.4c1 External Point-Light Shadow Atlas
+
+WTZ Engine exposes a generic Clyde primitive for rendering ordered point-light
+shadow rows. It deliberately knows nothing about apertures, projected floors, or
+Content budgets:
+
+- `IClyde.CreateLightShadowMap` creates a 512-column repeating render texture
+  with one row per requested light and a depth-stencil attachment. It uses
+  `RG32F` when float framebuffers are available and Clyde's existing `RGBA8`
+  shadow encoding otherwise.
+- `IClyde.RenderLightShadowMap` accepts ordered `LightShadowMapRequest` values.
+  Each request contains a world position, radius, and world Z; its list index is
+  its atlas row.
+- Adjacent requests with the same world Z form one floor group. Clyde gathers
+  dynamic occluders once for the union of that group's source bounds, then draws
+  the native polar occlusion depth once per requested row.
+- The pass restores the complete render state and rebuilds the original
+  active-floor occlusion geometry before returning. This matters because the
+  native wall-bleed pass consumes that geometry after Content's
+  `BeforeLighting` overlays.
+- Headless Clyde validates the same target and request contract and safely
+  returns no rendered work in nullspace.
+
+This avoids a second CPU shadow implementation and keeps source selection in
+Content. P3.4c2 will own shadow-light and floor-group frame budgets, atlas
+lifetime, hard/soft sampling, metrics, and deterministic unshadowed fallback.
+Until then the primitive is dormant and projected-light pixels remain identical
+to P3.4b.
+
 ## Shared Aperture FOV Composition
 
 Lower-floor tile composition and projected light consume the same composed
@@ -361,11 +390,21 @@ CVar clamps, and warmed planner/geometry buffer reuse. The combined lighting and
 tile filter reruns all 32 P3.2 through P3.4b cases against their shared aperture
 cache.
 
+## P3.4c1 Shadow Atlas Fixture
+
+`LightShadowMapTest` validates target dimensions, request values, row counts,
+and contiguous world-Z group counts in seven unit cases.
+`LightShadowMapApiTest` validates headless target creation, safe nullspace
+rendering, and zero-capacity rejection. The complete engine client suites pass
+37/37 unit and 137/137 integration tests, and the full engine solution builds
+with zero errors.
+
 ## Current Deliberate Limits
 
-- Only the active floor contributes native point-light shadow maps and FOV
-  occluders. Lower-floor light is projected through visibility apertures, but
-  lower-floor walls do not yet cast source-specific shadows in that projection.
+- WTZ Engine can now render grouped external point-light shadow rows, but Content
+  does not request or sample them until P3.4c2 adds bounded ownership. Therefore
+  only active-floor native light currently shows source-specific wall shadows;
+  projected lower-floor light remains unshadowed in visible pixels.
 - Projected light is intentionally clipped to the lower scene visible through
   open columns. Physical light spill onto opaque upper-floor tiles is a separate
   gameplay policy and is not inferred by this compositor.

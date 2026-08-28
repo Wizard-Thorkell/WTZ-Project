@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/lighting-hardening`.
-- Active package: `P3.4c lower-floor shadows and visual regression hardening`.
+- Active package: `P3.4c2 bounded lower-floor shadow planning and shaders`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1809,7 +1809,7 @@ P2.4 is split into independently gated subpackages:
 | P3.3 | Bounded lower-floor light/FOV projection and attenuation | Complete |
 | P3.4a | Lighting retention, frame budgets, and whole-emitter fail-soft behavior | Complete |
 | P3.4b | Independent lower-tile/FOV and mapping-preview budgets and batching | Complete |
-| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress |
+| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress (c1 complete; c2 next) |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
 
@@ -2422,6 +2422,115 @@ P2.4 is split into independently gated subpackages:
   chunk budget. Extreme overlapping moving-grid counts require P8 profiling.
 - Next package: implement bounded lower-floor shadow composition, capture the
   canonical visual regression set, and harden any remaining Z-unaware overlays.
+
+## Completed Package: P3.4c1 External Point-Light Shadow Atlas Primitive
+
+### Scope
+
+- Add a renderer-owned polar shadow-atlas contract to WTZ Engine without
+  embedding Content Z-level policy in Clyde.
+- Allocate one native-format shadow row per ordered request and reuse Robust's
+  existing occlusion-depth geometry and shaders for each point-light source.
+- Group adjacent requests by world Z so dynamic occluder selection is rebuilt
+  once per floor group rather than once per light.
+- Preserve and restore the active-floor occlusion geometry and complete renderer
+  state after external atlas rendering.
+- Provide the same validated API in headless Clyde so Content integration and
+  tests do not require a GL context.
+
+### Acceptance Criteria
+
+- The public request contains only world position, radius, and world Z; request
+  order deterministically equals atlas row order.
+- The atlas uses the native 512-sample polar format, repeat wrapping, and a
+  depth-stencil target. Float-capable clients use `RG32F`; existing fallback
+  clients use `RGBA8`.
+- Adjacent equal-world-Z requests produce one floor-group upload while distinct
+  groups remain independent.
+- Invalid target dimensions, non-finite coordinates, and non-positive or
+  non-finite radii fail before drawing.
+- Empty and nullspace headless renders are safe and report no completed work.
+- External rendering cannot leave Clyde on the requested floor or disturb the
+  active-floor wall-bleed pass that follows Content overlays.
+
+### Evidence
+
+- `LightShadowMapTest` passes 7/7 contract cases covering row and contiguous
+  group counts, exact atlas width, required capacity, invalid radii, and
+  non-finite positions.
+- `LightShadowMapApiTest` passes 1/1 integration case covering headless target
+  creation, a safe nullspace render, and rejection of zero capacity.
+- Complete engine client suites pass 37/37 unit tests and 137/137 integration
+  tests after the API addition.
+- `dotnet build RobustToolbox.slnx --no-restore --no-incremental` passes with
+  zero errors and 189 established warnings after restoring the two previously
+  absent WebView assets files.
+- The staged engine diff contains exactly eight declared graphics and test
+  files, and `git diff --cached --check` is clean.
+
+### Decisions
+
+- Expose an ordered shadow-atlas primitive, not a Z-level lighting subsystem.
+  Content remains responsible for source selection, frame budgets, visibility
+  apertures, attenuation, and deterministic degradation.
+- Reuse `DrawOcclusionDepth` and the native polar shadow representation instead
+  of maintaining CPU shadow polygons or a subtractive framebuffer pass.
+- Make contiguous world-Z grouping part of the public performance contract.
+  Callers that sort floor groups together avoid redundant dynamic-occluder
+  uploads while preserving exact row identity.
+- Snapshot occlusion query inputs every active-floor update and restore that
+  geometry after the external pass. Restoring generic GL state alone is
+  insufficient because native wall bleed consumes the selected geometry later
+  in the same lighting pipeline.
+- Keep shadow sampling and source/floor budgets out of c1. The primitive has no
+  visual effect until P3.4c2 deliberately integrates it into Content.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to a generic Clyde atlas API, native and
+      headless implementations, validation, tests, and P3 documentation.
+- [x] Invariant review: request/row order, contiguous world-Z grouping, native
+      atlas format, nullspace behavior, active-floor geometry restoration, and
+      full render-state restoration are covered.
+- [x] Automated verification: 7/7 dedicated unit, 1/1 dedicated integration,
+      37/37 complete client unit, 137/137 complete client integration, and a
+      zero-error full engine solution build pass.
+- [x] Performance evidence: occluder collection is performed once per adjacent
+      floor group, while depth drawing remains one bounded row per request;
+      Content-owned hard limits are the next package.
+- [x] Documentation: the ownership boundary, format, ordering, restoration,
+      tests, and deliberately pending visual integration are recorded here and
+      in `Docs/ZLevelLighting.md`.
+- [x] Dependency check: the paired WTZ Engine branch is
+      `zlevel/lighting-shadows` at
+      `32f197aee162589f73ae158c3de24154cce365eb`; the parent repository records
+      that committed submodule pointer in the same package.
+- [x] Git check: the eight-file staged engine diff passes
+      `git diff --cached --check`; only the submodule pointer and declared docs
+      are included in the parent package.
+- [x] Mini review: findings, residual risks, and P3.4c2 are recorded below.
+- [x] Commit: engine and parent packages are prepared for their paired remote
+      branches and hash equality will be verified after each push.
+
+### Mini Review
+
+- Finding: the native active-floor occlusion state is semantic renderer state,
+  not just GL bindings. Explicit restoration prevents external floor selection
+  from changing the later native wall-bleed result.
+- Finding: floor grouping amortizes dynamic occluder collection without forcing
+  Content's source policy or world-Z ordering into the engine.
+- Finding: strict request validation gives headless and GL implementations the
+  same deterministic failure surface.
+- Residual risk: the API is intentionally dormant. P3.4c2 must cap both shadow
+  rows and floor-group uploads before any projected source can use it.
+- Residual risk: mutable shader parameters cannot be shared across queued draws
+  for different sources. P3.4c2 must use retained per-source shader instances or
+  an equivalent immutable draw-data path.
+- Residual risk: headless tests cannot validate polar depth values, soft-shadow
+  penumbrae, tint, or transient frame artifacts. P3.4c3 owns real GL capture.
+- Next package: select a deterministic bounded subset of shadow-casting projected
+  lights, render grouped atlas rows, sample hard/soft variants, expose metrics,
+  and degrade excess sources to the existing unshadowed projection.
 
 P2.2 is split into independently gated subpackages:
 
@@ -3386,3 +3495,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.3 | `Project lower-floor Z-level lighting` | 6 projection, 11 projection/cache, 194 Content Z-level, 136/30 engine client, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4a | `Bound Z-level lighting projection work` | 8 package, 19 lighting, 202 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4b | `Bound Z-level tile projection work` | 13 package, 32 lighting/tile, 215 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
+| 2026-08-28 | P3.4c1 | `Expose external point-light shadow atlases` / `Track external Z-level shadow atlas support` | 7 engine unit, 1 engine integration, 37 complete engine client unit, 137 complete engine client integration, full engine build, diff check | Complete |
