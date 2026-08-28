@@ -1,0 +1,48 @@
+#include "/Textures/Shaders/zlevel_light_projection_shadow_shared.swsl"
+
+highp vec4 gaussianWeights(highp float sigma, highp vec4 offset)
+{
+    highp vec4 exponent = offset * offset / (2.0 * sigma * sigma);
+    return exp(-exponent) / (sigma * sqrt(2.0 * PI));
+}
+
+highp float createOcclusion(highp vec2 diff)
+{
+    highp vec2 perpendicular =
+        normalize(cross(vec3(diff, 0.0), vec3(0.0, 0.0, 1.0)).xy) / 32.0;
+    highp float distance = length(diff);
+    perpendicular *= lightSoftness * 1.5;
+
+    highp vec2 sample1 = occludeDepth(diff, shadowMap, lightIndex);
+    highp vec2 sample2 = occludeDepth(diff + perpendicular, shadowMap, lightIndex);
+    highp vec2 sample3 = occludeDepth(diff - perpendicular, shadowMap, lightIndex);
+    highp vec2 sample4 = occludeDepth(diff + perpendicular * 2.0, shadowMap, lightIndex);
+    highp vec2 sample5 = occludeDepth(diff - perpendicular * 2.0, shadowMap, lightIndex);
+    highp vec2 sample6 = occludeDepth(diff + perpendicular * 3.0, shadowMap, lightIndex);
+    highp vec2 sample7 = occludeDepth(diff - perpendicular * 3.0, shadowMap, lightIndex);
+
+    highp float minimumDistance =
+        min(sample1.x,
+        min(sample2.x,
+        min(sample3.x,
+        min(sample4.x,
+        min(sample5.x,
+        min(sample6.x,
+            sample7.x))))));
+    minimumDistance = max(0.001, minimumDistance);
+
+    highp float sigma = max(0.001, (distance - minimumDistance) * 0.75);
+    highp vec4 weights = gaussianWeights(sigma, vec4(0.0, 1.0, 2.0, 3.0));
+    highp float totalWeight =
+        weights.x + weights.y * 2.0 + weights.z * 2.0 + weights.w * 2.0;
+
+    highp float occlusion = 0.0;
+    occlusion += ChebyshevUpperBound(sample1, distance) * weights.x;
+    occlusion += ChebyshevUpperBound(sample2, distance) * weights.y;
+    occlusion += ChebyshevUpperBound(sample3, distance) * weights.y;
+    occlusion += ChebyshevUpperBound(sample4, distance) * weights.z;
+    occlusion += ChebyshevUpperBound(sample5, distance) * weights.z;
+    occlusion += ChebyshevUpperBound(sample6, distance) * weights.w;
+    occlusion += ChebyshevUpperBound(sample7, distance) * weights.w;
+    return occlusion / totalWeight;
+}

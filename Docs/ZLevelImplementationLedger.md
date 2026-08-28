@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/lighting-hardening`.
-- Active package: `P3.4c2 bounded lower-floor shadow planning and shaders`.
+- Active package: `P3.4c3 real RGB fixture, captures, and visual hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1809,7 +1809,7 @@ P2.4 is split into independently gated subpackages:
 | P3.3 | Bounded lower-floor light/FOV projection and attenuation | Complete |
 | P3.4a | Lighting retention, frame budgets, and whole-emitter fail-soft behavior | Complete |
 | P3.4b | Independent lower-tile/FOV and mapping-preview budgets and batching | Complete |
-| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress (c1 complete; c2 next) |
+| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress (c1-c2 complete; c3 next) |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
 
@@ -2531,6 +2531,121 @@ P2.4 is split into independently gated subpackages:
 - Next package: select a deterministic bounded subset of shadow-casting projected
   lights, render grouped atlas rows, sample hard/soft variants, expose metrics,
   and degrade excess sources to the existing unshadowed projection.
+
+## Completed Package: P3.4c2 Bounded Projected-Light Shadows
+
+### Scope
+
+- Select shadow rows only after an aperture-clipped projected light has been
+  accepted, preserving the existing light batch regardless of shadow capacity.
+- Add independent per-client-frame limits for shadow-light rows and world-Z
+  occluder groups, shared by every automatic viewport in that frame.
+- Render one retained power-of-two atlas per viewport through the P3.4c1 Clyde
+  primitive and sample it with projected hard/soft shadow shaders.
+- Keep one retained mutable shader instance per atlas row and mode so queued
+  sources never observe another source's center, row, softness, or texture.
+- Expose planned, rendered, fallback, current, maximum, and exhaustion counters
+  through the debug overlay and `zlevelrendermetrics`.
+
+### Acceptance Criteria
+
+- Shadow requests preserve nearest-floor/UID batch order and equal-world-Z rows
+  remain contiguous for one engine occluder upload per group.
+- `castShadows: false` and the global client shadow toggle consume no row or
+  floor-group work and do not count as budget fallback.
+- A row or floor-group limit never removes a projected light. Excess sources use
+  the unchanged unshadowed shader, with deterministic nearest-first priority.
+- Row and group allowances are shared between viewport builds in one client
+  frame and reset together for the next frame.
+- Atlas height rounds up to a power of two, never exceeds the 1,024-row hard
+  limit, grows only when required, and is released with viewport/overlay
+  resources.
+- Hard and soft variants retain mask rotation, vertical attenuation,
+  transmission, color, energy, falloff, curve factor, and native polar shadow
+  sampling.
+
+### Evidence
+
+- `ZLevelLightingShadowTest` passes 13/13 cases covering row and group ordering,
+  atlas growth and hard-limit rejection, non-shadow casters, row fallback,
+  group fallback, same-frame sharing/reset, and the global shadow toggle.
+- The complete Content integration filter containing `ZLevel` passes 228/228
+  with no failures or skips; structural unit tests pass 2/2.
+- Generated 3-, 6-, and 10-floor server baselines pass 3/3 with 6,336 measured
+  bytes, 100% warm boundary-cache hits, and zero evictions. Measured times were
+  8.203, 14.388, and 28.182 ms respectively.
+- The existing warmed projection allocation fixture remains green while now
+  retaining and repopulating the shadow-request buffer.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes with
+  zero errors and 711 established dependency, vulnerability, analyzer, and
+  upstream-obsolescence warnings.
+
+### Decisions
+
+- Charge shadow work after complete aperture planning. Visibility/run limits
+  still roll back a whole source, while shadow limits intentionally fall back
+  to the already accepted unshadowed source.
+- Use defaults of 64 rows and 8 floor groups per client frame, with hard maxima
+  of 1,024 and 128. Both controls are local archived CVars; a server cannot
+  raise client rendering cost.
+- Start each viewport atlas at the smallest power of two that fits its current
+  plan and retain its high-water mark. This bounds reallocations without paying
+  the maximum allocation for every camera.
+- Use separate hard and soft shader pools keyed by atlas row. Reusing one mutable
+  shader for multiple queued sources would make all draws observe the final
+  source's uniforms.
+- Reuse the native shadow algorithms and packed depth format while retaining the
+  projected shader's CPU-provided mask UV and attenuation data.
+- Treat global shadow disablement as a quality choice, not an exhaustion. The
+  projected light remains visible and no fallback or budget counter increments.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to Content shadow planning, rendering,
+      local CVars, diagnostics, shaders/prototypes, tests, and P3 documentation.
+- [x] Invariant review: nearest-first order, contiguous groups, Z 0, authored
+      world/local frames, non-shadow casters, global disablement, whole-light
+      fallback, viewport sharing, and atlas lifetime are covered.
+- [x] Automated verification: 13/13 dedicated, 228/228 cumulative Z-level
+      integration, 2/2 structural unit, 3/3 baseline, and a zero-error clean full
+      solution build pass.
+- [x] Performance evidence: finite row/group limits, power-of-two capacity with
+      a 1,024-row ceiling, retained per-viewport resources, retained request and
+      geometry buffers, and live work/exhaustion counters are present.
+- [x] Documentation: controls, ordering, grouping, shader ownership, fallback,
+      metrics, tests, limitations, and P3.4c3 are recorded here and in
+      `Docs/ZLevelLighting.md`.
+- [x] Dependency check: WTZ Engine remains clean at
+      `32f197aee162589f73ae158c3de24154cce365eb`; no additional engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices; generated baseline artifacts remain ignored and only declared
+      package files are included.
+- [x] Mini review: findings, residual risks, and P3.4c3 are recorded below.
+- [x] Commit: package prepared as `Render bounded lower-floor light shadows` on
+      `zlevel/lighting-hardening`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: shadow selection after complete source planning gives lighting two
+  distinct fail-soft levels: expensive geometry failure rejects a source
+  transactionally, while optional shadow exhaustion preserves its illumination.
+- Finding: contiguous rows preserve the engine grouping optimization without a
+  second sort or a Content-side occluder cache.
+- Finding: per-row mutable instances make queued draw data stable while atlas,
+  shader, request, run, and vertex resources all reuse their warmed capacity.
+- Residual risk: headless shader/prototype tests cannot validate real polar depth
+  pixels, penumbrae, tint, wall silhouettes, or transient artifacts. P3.4c3 must
+  capture hard and soft GL output on the canonical RGB fixture.
+- Residual risk: source-floor occluders cast these shadows; intermediate floors
+  currently contribute vertical aperture clipping rather than a second lateral
+  occlusion pass. The visual fixture must confirm this policy is legible.
+- Residual risk: native active-floor and projected shadow pools are separately
+  bounded. P8 stress profiling must measure their combined cost with overlapping
+  cameras and pathological moving grids.
+- Next package: run the canonical RGB fixture in a real client, capture Z 0/Z 1/
+  Z 2 and mapping preview in hard and soft modes, add repeatable pixel checks,
+  and harden any artifact found before the consolidated P3 gate.
 
 P2.2 is split into independently gated subpackages:
 
@@ -3496,3 +3611,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.4a | `Bound Z-level lighting projection work` | 8 package, 19 lighting, 202 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4b | `Bound Z-level tile projection work` | 13 package, 32 lighting/tile, 215 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4c1 | `Expose external point-light shadow atlases` / `Track external Z-level shadow atlas support` | 7 engine unit, 1 engine integration, 37 complete engine client unit, 137 complete engine client integration, full engine build, diff check | Complete |
+| 2026-08-28 | P3.4c2 | `Render bounded lower-floor light shadows` | 13 package, 228 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |

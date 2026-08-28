@@ -24,6 +24,8 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 public sealed class ZLevelLightingProjectionTest : GameTest
 {
     private static readonly ProtoId<ShaderPrototype> ProjectionShader = "ZLevelLightProjection";
+    private static readonly ProtoId<ShaderPrototype> HardShadowShader = "ZLevelLightProjectionShadowHard";
+    private static readonly ProtoId<ShaderPrototype> SoftShadowShader = "ZLevelLightProjectionShadowSoft";
 
     [TestPrototypes]
     private const string Prototypes = @"
@@ -192,7 +194,12 @@ public sealed class ZLevelLightingProjectionTest : GameTest
         {
             var prototypes = Client.ResolveDependency<IPrototypeManager>();
 
-            Assert.That(prototypes.Index(ProjectionShader).Instance(), Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(prototypes.Index(ProjectionShader).Instance(), Is.Not.Null);
+                Assert.That(prototypes.Index(HardShadowShader).Instance(), Is.Not.Null);
+                Assert.That(prototypes.Index(SoftShadowShader).Instance(), Is.Not.Null);
+            });
         });
     }
 
@@ -292,7 +299,8 @@ public sealed class ZLevelLightingProjectionTest : GameTest
             0.5f,
             0,
             1,
-            1);
+            1,
+            -1);
         var runs = new[] { new ZLevelLightProjectionRun(gridUid, 0, 0, 0, 0) };
         var vertices = new List<DrawVertexUV2DColor>();
 

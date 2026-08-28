@@ -125,3 +125,13 @@
   id: ZLevelLightProjection
   kind: source
   path: "/Textures/Shaders/zlevel_light_projection.swsl"
+
+- type: shader
+  id: ZLevelLightProjectionShadowHard
+  kind: source
+  path: "/Textures/Shaders/zlevel_light_projection_shadow_hard.swsl"
+
+- type: shader
+  id: ZLevelLightProjectionShadowSoft
+  kind: source
+  path: "/Textures/Shaders/zlevel_light_projection_shadow_soft.swsl"

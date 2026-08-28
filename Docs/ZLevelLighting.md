@@ -1,9 +1,9 @@
 # WTZ Z-Level Lighting And FOV
 
 This document defines the rendering ownership and vertical projection contract
-established by roadmap packages P3.1 through P3.4c1. It is the baseline for
-bounded projected-shadow integration and visual hardening in the remaining
-P3.4 packages.
+established by roadmap packages P3.1 through P3.4c2. It is the baseline for
+real-client visual capture and rendering hardening in the remaining P3.4
+package.
 
 ## Ownership
 
@@ -259,10 +259,41 @@ Content budgets:
   returns no rendered work in nullspace.
 
 This avoids a second CPU shadow implementation and keeps source selection in
-Content. P3.4c2 will own shadow-light and floor-group frame budgets, atlas
-lifetime, hard/soft sampling, metrics, and deterministic unshadowed fallback.
-Until then the primitive is dormant and projected-light pixels remain identical
-to P3.4b.
+Content.
+
+## P3.4c2 Bounded Projected Shadows
+
+After an emitter has a complete aperture-clipped projection plan, Content may
+assign it one external shadow-atlas row. Requests retain the existing
+nearest-floor then UID order, so rows from equal world Z remain contiguous.
+`castShadows: false` sources and globally disabled client shadows bypass this
+step without consuming work.
+
+Shadow planning has two local archived frame budgets:
+
+| CVar | Default | Hard maximum | Charged work |
+| --- | ---: | ---: | --- |
+| `zlevel.lighting_max_shadow_lights_per_frame` | 64 | 1,024 | External atlas rows rendered |
+| `zlevel.lighting_max_shadow_floor_groups_per_frame` | 8 | 128 | Contiguous world-Z occluder uploads |
+
+Every automatic viewport shares these allowances in one client frame. A new
+viewport plan starts a new atlas group even if an earlier viewport requested the
+same floor, because Clyde must upload that viewport's selected occlusion
+geometry again. Exceeding either limit changes only that source's shadow row to
+`-1`; its accepted runs continue through the P3.3 unshadowed shader. Earlier
+nearest sources retain their shadows.
+
+Each viewport retains an atlas whose height is the smallest power of two that
+has held its plan, up to 1,024 rows. It grows on demand, does not churn downward,
+and is disposed with the viewport resource cache. Hard and soft modes maintain
+separate retained mutable shader instances per row. Per-source center, row,
+softness, and atlas texture are therefore immutable from the perspective of a
+queued draw even when later batches change their own uniforms.
+
+The two projected variants reuse Robust's native polar depth sampling,
+Chebyshev/VSM hard edge, and seven-sample soft edge. They retain the unshadowed
+projection's mask-space UVs, vertical height term, transmission, source color
+and energy, falloff, and curve factor.
 
 ## Shared Aperture FOV Composition
 
@@ -302,6 +333,10 @@ candidate, emitter, aperture-layer, cold-build, and run budgets.
 P3.4b adds grid/chunk candidates, completed/projected chunks, aperture and tile
 work, current batches/tiles, normal and preview used/maximum values, exhaustion
 counts, draw batches/vertices/calls, and build/render timings.
+
+P3.4c2 adds current shadow rows, floor groups, and unshadowed fallbacks;
+per-frame row/group used and maximum values; cumulative row/group exhaustion;
+planned versus rendered rows/groups; and external atlas render counts.
 
 Run `zlevelrendermetrics reset` to reset cumulative Content vertical-rendering
 counters.
@@ -399,12 +434,22 @@ rendering, and zero-capacity rejection. The complete engine client suites pass
 37/37 unit and 137/137 integration tests, and the full engine solution builds
 with zero errors.
 
+## P3.4c2 Projected Shadow Fixture
+
+`ZLevelLightingShadowTest` validates nearest-floor row order, contiguous groups,
+power-of-two atlas growth and hard limits, non-shadow casters, deterministic
+row/group fallback, same-frame sharing and reset, and global shadow disablement
+in 13 cases. The cumulative Content Z-level integration filter passes 228/228;
+the warmed projection allocation fixture remains green with shadow requests.
+
 ## Current Deliberate Limits
 
-- WTZ Engine can now render grouped external point-light shadow rows, but Content
-  does not request or sample them until P3.4c2 adds bounded ownership. Therefore
-  only active-floor native light currently shows source-specific wall shadows;
-  projected lower-floor light remains unshadowed in visible pixels.
+- Projected lower-floor lights now request source-floor occluders and sample
+  bounded hard or soft shadow rows. Intermediate floors clip the light through
+  composed vertical apertures; they do not add a second lateral shadow pass.
+- Headless tests validate planning, shaders, atlas contracts, and fallback but
+  cannot judge actual GL depth pixels, penumbrae, tint, silhouettes, or transient
+  flashes. P3.4c3 owns canonical hard/soft screenshots and pixel checks.
 - Projected light is intentionally clipped to the lower scene visible through
   open columns. Physical light spill onto opaque upper-floor tiles is a separate
   gameplay policy and is not inferred by this compositor.

@@ -116,6 +116,26 @@ public sealed partial class CCVars
             CVar.CLIENTONLY | CVar.ARCHIVE);
 
     /// <summary>
+    /// Maximum lower-floor point-light shadow rows rendered per client frame.
+    /// Sources beyond this limit retain their unshadowed projection.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelLightingMaxShadowLightsPerFrame =
+        CVarDef.Create(
+            "zlevel.lighting_max_shadow_lights_per_frame",
+            64,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum lower-floor world-Z occluder groups uploaded per client frame.
+    /// Sources beyond this limit retain their unshadowed projection.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelLightingMaxShadowFloorGroupsPerFrame =
+        CVarDef.Create(
+            "zlevel.lighting_max_shadow_floor_groups_per_frame",
+            8,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
     /// Maximum lower-floor tile chunks composed per client frame.
     /// </summary>
     public static readonly CVarDef<int> ZLevelTileProjectionMaxChunksPerFrame =

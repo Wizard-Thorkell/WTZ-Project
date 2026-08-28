@@ -215,10 +215,19 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"{projection.RunBudgetExhaustions}",
             metricsColor);
 
-        var tileProjection = _tileProjectionSystem.Snapshot();
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 196f),
+            $"vertical shadow row/group/fallback:{projection.CurrentShadowRequests}/" +
+            $"{projection.CurrentShadowFloorGroups}/{projection.CurrentShadowFallbacks} used:" +
+            $"{projection.CurrentShadowLightsUsed}/{projection.CurrentShadowFloorGroupsUsed} exhausted:" +
+            $"{projection.ShadowLightBudgetExhaustions}/{projection.ShadowFloorGroupBudgetExhaustions}",
+            metricsColor);
+
+        var tileProjection = _tileProjectionSystem.Snapshot();
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 210f),
             $"vertical tiles batch/tile:{tileProjection.CurrentBatches}/{tileProjection.CurrentTiles} " +
             $"chunk:{tileProjection.ChunkCandidates}/{tileProjection.ChunksProjected} " +
             $"build avg/max:{tileProjection.AverageBuildMilliseconds:0.000}/" +
@@ -226,7 +235,7 @@ public sealed class ZLevelDebugOverlay : Overlay
             metricsColor);
         args.ScreenHandle.DrawString(
             _font,
-            metricsPosition + new Vector2(0f, 210f),
+            metricsPosition + new Vector2(0f, 224f),
             $"vertical tile budget chunk/layer/build/tile:" +
             $"{tileProjection.NormalBudget.CurrentChunksUsed}/" +
             $"{tileProjection.NormalBudget.CurrentApertureLayersUsed}/" +

@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.Graphics;
@@ -31,14 +32,19 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     public const int DefaultMaxApertureLayersPerFrame = 4_096;
     public const int DefaultMaxApertureBuildsPerFrame = 32;
     public const int DefaultMaxRunsPerFrame = 8_192;
+    public const int DefaultMaxShadowLightsPerFrame = 64;
+    public const int DefaultMaxShadowFloorGroupsPerFrame = 8;
     public const int MaximumEmitterCandidatesPerFrame = 65_536;
     public const int MaximumEmittersPerFrame = 4_096;
     public const int MaximumApertureLayersPerFrame = 1_000_000;
     public const int MaximumApertureBuildsPerFrame = 4_096;
     public const int MaximumRunsPerFrame = 1_000_000;
+    public const int MaximumShadowLightsPerFrame = 1_024;
+    public const int MaximumShadowFloorGroupsPerFrame = 128;
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
+    [Dependency] private readonly ILightManager _lightManager = default!;
     [Dependency] private readonly IOverlayManager _overlayManager = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
@@ -47,6 +53,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     private readonly List<ZLevelLightEmitter> _emitters = new();
     private readonly List<ZLevelLightProjectionBatch> _batches = new();
     private readonly List<ZLevelLightProjectionRun> _runs = new();
+    private readonly List<LightShadowMapRequest> _shadowRequests = new();
 
     private long _frames;
     private long _emitterInputs;
@@ -74,16 +81,24 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     private int _maxApertureLayersPerFrame = DefaultMaxApertureLayersPerFrame;
     private int _maxApertureBuildsPerFrame = DefaultMaxApertureBuildsPerFrame;
     private int _maxRunsPerFrame = DefaultMaxRunsPerFrame;
+    private int _maxShadowLightsPerFrame = DefaultMaxShadowLightsPerFrame;
+    private int _maxShadowFloorGroupsPerFrame = DefaultMaxShadowFloorGroupsPerFrame;
     private int _remainingEmitterCandidates;
     private int _remainingEmitters;
     private int _remainingApertureLayers;
     private int _remainingApertureBuilds;
     private int _remainingRuns;
+    private int _remainingShadowLights;
+    private int _remainingShadowFloorGroups;
     private int _currentEmitterCandidatesUsed;
     private int _currentEmittersUsed;
     private int _currentApertureLayersUsed;
     private int _currentApertureBuildsUsed;
     private int _currentRunsUsed;
+    private int _currentShadowLightsUsed;
+    private int _currentShadowFloorGroupsUsed;
+    private int _currentProjectionShadowFloorGroups;
+    private int _currentProjectionShadowFallbacks;
     private uint _budgetFrame;
     private bool _budgetInitialized;
     private bool _candidateBudgetExhaustedThisFrame;
@@ -91,21 +106,34 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     private bool _apertureLayerBudgetExhaustedThisFrame;
     private bool _apertureBuildBudgetExhaustedThisFrame;
     private bool _runBudgetExhaustedThisFrame;
+    private bool _shadowLightBudgetExhaustedThisFrame;
+    private bool _shadowFloorGroupBudgetExhaustedThisFrame;
     private long _candidateBudgetExhaustions;
     private long _emitterBudgetExhaustions;
     private long _apertureLayerBudgetExhaustions;
     private long _apertureBuildBudgetExhaustions;
     private long _runBudgetExhaustions;
+    private long _shadowLightsPlanned;
+    private long _shadowFloorGroupsPlanned;
+    private long _shadowFallbacks;
+    private long _shadowLightBudgetExhaustions;
+    private long _shadowFloorGroupBudgetExhaustions;
+    private long _shadowAtlasRenders;
+    private long _renderShadowLights;
+    private long _renderShadowFloorGroups;
 
     private ZLevelLightingProjectionOverlay _overlay = default!;
 
     public IReadOnlyList<ZLevelLightProjectionBatch> Batches => _batches;
     public IReadOnlyList<ZLevelLightProjectionRun> Runs => _runs;
+    public IReadOnlyList<LightShadowMapRequest> ShadowRequests => _shadowRequests;
     public int MaxEmitterCandidatesPerFrame => _maxEmitterCandidatesPerFrame;
     public int MaxEmittersPerFrame => _maxEmittersPerFrame;
     public int MaxApertureLayersPerFrame => _maxApertureLayersPerFrame;
     public int MaxApertureBuildsPerFrame => _maxApertureBuildsPerFrame;
     public int MaxRunsPerFrame => _maxRunsPerFrame;
+    public int MaxShadowLightsPerFrame => _maxShadowLightsPerFrame;
+    public int MaxShadowFloorGroupsPerFrame => _maxShadowFloorGroupsPerFrame;
 
     public override void Initialize()
     {
@@ -135,6 +163,16 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             CCVars.ZLevelLightingMaxRunsPerFrame,
             value => SetBudget(ref _maxRunsPerFrame, value, MaximumRunsPerFrame),
             true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxShadowLightsPerFrame,
+            value => SetBudget(ref _maxShadowLightsPerFrame, value, MaximumShadowLightsPerFrame),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxShadowFloorGroupsPerFrame,
+            value => SetBudget(ref _maxShadowFloorGroupsPerFrame, value, MaximumShadowFloorGroupsPerFrame),
+            true);
         _overlay = new ZLevelLightingProjectionOverlay(this, EntityManager);
         _overlayManager.AddOverlay(_overlay);
     }
@@ -142,6 +180,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     public override void Shutdown()
     {
         _overlayManager.RemoveOverlay(_overlay);
+        _overlay.Dispose();
         base.Shutdown();
     }
 
@@ -155,6 +194,9 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _batches.Clear();
         _runs.Clear();
         _emitters.Clear();
+        _shadowRequests.Clear();
+        _currentProjectionShadowFloorGroups = 0;
+        _currentProjectionShadowFallbacks = 0;
         EnsureFrameBudget();
 
         if (mapId == MapId.Nullspace ||
@@ -196,6 +238,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         SortEmitters();
         _emitterInputs += _emitters.Count;
 
+        int? lastShadowWorldZ = null;
         foreach (var emitter in _emitters)
         {
             if (_remainingEmitters <= 0)
@@ -252,6 +295,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             if (runCount == 0)
                 continue;
 
+            var shadowRow = TryPlanShadow(emitter, ref lastShadowWorldZ);
             _batches.Add(new ZLevelLightProjectionBatch(
                 emitter,
                 emitter.GridUid,
@@ -262,7 +306,8 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
                 transmission,
                 firstRun,
                 runCount,
-                visibleTiles));
+                visibleTiles,
+                shadowRow));
             _emittersProjected++;
             _visibleRuns += runCount;
             _visibleTiles += visibleTiles;
@@ -300,6 +345,14 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _apertureLayerBudgetExhaustions = 0;
         _apertureBuildBudgetExhaustions = 0;
         _runBudgetExhaustions = 0;
+        _shadowLightsPlanned = 0;
+        _shadowFloorGroupsPlanned = 0;
+        _shadowFallbacks = 0;
+        _shadowLightBudgetExhaustions = 0;
+        _shadowFloorGroupBudgetExhaustions = 0;
+        _shadowAtlasRenders = 0;
+        _renderShadowLights = 0;
+        _renderShadowFloorGroups = 0;
         _budgetInitialized = false;
     }
 
@@ -342,7 +395,22 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             _maxEmittersPerFrame,
             _maxApertureLayersPerFrame,
             _maxApertureBuildsPerFrame,
-            _maxRunsPerFrame);
+            _maxRunsPerFrame,
+            _shadowLightsPlanned,
+            _shadowFloorGroupsPlanned,
+            _shadowFallbacks,
+            _shadowLightBudgetExhaustions,
+            _shadowFloorGroupBudgetExhaustions,
+            _shadowAtlasRenders,
+            _renderShadowLights,
+            _renderShadowFloorGroups,
+            _shadowRequests.Count,
+            _currentProjectionShadowFloorGroups,
+            _currentProjectionShadowFallbacks,
+            _currentShadowLightsUsed,
+            _currentShadowFloorGroupsUsed,
+            _maxShadowLightsPerFrame,
+            _maxShadowFloorGroupsPerFrame);
     }
 
     internal void BeginBudgetFrameForTesting()
@@ -356,7 +424,8 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         int batches,
         int runs,
         int vertices,
-        int drawCalls)
+        int drawCalls,
+        in LightShadowMapRenderStats shadowStats)
     {
         var elapsed = Stopwatch.GetTimestamp() - started;
         _renderFrames++;
@@ -364,9 +433,18 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _renderRuns += runs;
         _renderVertices += vertices;
         _renderDrawCalls += drawCalls;
+        if (shadowStats.Lights > 0)
+            _shadowAtlasRenders++;
+        _renderShadowLights += shadowStats.Lights;
+        _renderShadowFloorGroups += shadowStats.FloorGroups;
         _renderTimestampTicks += elapsed;
         _lastRenderTimestampTicks = elapsed;
         _maxRenderTimestampTicks = Math.Max(_maxRenderTimestampTicks, elapsed);
+    }
+
+    internal ReadOnlySpan<LightShadowMapRequest> GetShadowRequests()
+    {
+        return CollectionsMarshal.AsSpan(_shadowRequests);
     }
 
     private ZLevelProjectionPlanResult AddGridRuns(
@@ -556,6 +634,55 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         return result;
     }
 
+    private int TryPlanShadow(in ZLevelLightEmitter emitter, ref int? lastShadowWorldZ)
+    {
+        if (!emitter.CastShadows || !_lightManager.DrawShadows)
+            return -1;
+
+        if (_remainingShadowLights <= 0)
+        {
+            RecordShadowFallback(
+                ref _shadowLightBudgetExhaustedThisFrame,
+                ref _shadowLightBudgetExhaustions);
+            return -1;
+        }
+
+        var startsFloorGroup = lastShadowWorldZ != emitter.WorldZ;
+        if (startsFloorGroup && _remainingShadowFloorGroups <= 0)
+        {
+            RecordShadowFallback(
+                ref _shadowFloorGroupBudgetExhaustedThisFrame,
+                ref _shadowFloorGroupBudgetExhaustions);
+            return -1;
+        }
+
+        if (startsFloorGroup)
+        {
+            _remainingShadowFloorGroups--;
+            _currentShadowFloorGroupsUsed++;
+            _currentProjectionShadowFloorGroups++;
+            _shadowFloorGroupsPlanned++;
+            lastShadowWorldZ = emitter.WorldZ;
+        }
+
+        _remainingShadowLights--;
+        _currentShadowLightsUsed++;
+        _shadowLightsPlanned++;
+        var row = _shadowRequests.Count;
+        _shadowRequests.Add(new LightShadowMapRequest(
+            emitter.WorldPosition,
+            emitter.Radius,
+            emitter.WorldZ));
+        return row;
+    }
+
+    private void RecordShadowFallback(ref bool frameFlag, ref long exhaustionCounter)
+    {
+        _shadowFallbacks++;
+        _currentProjectionShadowFallbacks++;
+        RecordBudgetExhaustion(ref frameFlag, ref exhaustionCounter);
+    }
+
     private void SetBudget(ref int field, int configured, int maximum)
     {
         field = Math.Clamp(configured, 0, maximum);
@@ -575,16 +702,22 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _remainingApertureLayers = _maxApertureLayersPerFrame;
         _remainingApertureBuilds = _maxApertureBuildsPerFrame;
         _remainingRuns = _maxRunsPerFrame;
+        _remainingShadowLights = _maxShadowLightsPerFrame;
+        _remainingShadowFloorGroups = _maxShadowFloorGroupsPerFrame;
         _currentEmitterCandidatesUsed = 0;
         _currentEmittersUsed = 0;
         _currentApertureLayersUsed = 0;
         _currentApertureBuildsUsed = 0;
         _currentRunsUsed = 0;
+        _currentShadowLightsUsed = 0;
+        _currentShadowFloorGroupsUsed = 0;
         _candidateBudgetExhaustedThisFrame = false;
         _emitterBudgetExhaustedThisFrame = false;
         _apertureLayerBudgetExhaustedThisFrame = false;
         _apertureBuildBudgetExhaustedThisFrame = false;
         _runBudgetExhaustedThisFrame = false;
+        _shadowLightBudgetExhaustedThisFrame = false;
+        _shadowFloorGroupBudgetExhaustedThisFrame = false;
     }
 
     private static void RecordBudgetExhaustion(ref bool frameFlag, ref long counter)
@@ -653,7 +786,11 @@ public readonly record struct ZLevelLightProjectionBatch(
     float Transmission,
     int FirstRun,
     int RunCount,
-    int VisibleTileCount);
+    int VisibleTileCount,
+    int ShadowRow)
+{
+    public bool HasShadow => ShadowRow >= 0;
+}
 
 public readonly record struct ZLevelLightProjectionRun(
     EntityUid GridUid,
@@ -707,7 +844,22 @@ public readonly record struct ZLevelLightingProjectionMetrics(
     int MaxEmittersPerFrame,
     int MaxApertureLayersPerFrame,
     int MaxApertureBuildsPerFrame,
-    int MaxRunsPerFrame)
+    int MaxRunsPerFrame,
+    long ShadowLightsPlanned,
+    long ShadowFloorGroupsPlanned,
+    long ShadowFallbacks,
+    long ShadowLightBudgetExhaustions,
+    long ShadowFloorGroupBudgetExhaustions,
+    long ShadowAtlasRenders,
+    long RenderShadowLights,
+    long RenderShadowFloorGroups,
+    int CurrentShadowRequests,
+    int CurrentShadowFloorGroups,
+    int CurrentShadowFallbacks,
+    int CurrentShadowLightsUsed,
+    int CurrentShadowFloorGroupsUsed,
+    int MaxShadowLightsPerFrame,
+    int MaxShadowFloorGroupsPerFrame)
 {
     public double BuildMilliseconds => ToMilliseconds(BuildTimestampTicks);
     public double AverageBuildMilliseconds => Frames == 0 ? 0d : BuildMilliseconds / Frames;

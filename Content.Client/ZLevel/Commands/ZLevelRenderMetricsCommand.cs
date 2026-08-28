@@ -86,6 +86,19 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"emitters={projected.EmitterBudgetExhaustions}, layers={projected.ApertureLayerBudgetExhaustions}, " +
             $"builds={projected.ApertureBuildBudgetExhaustions}, runs={projected.RunBudgetExhaustions}");
         shell.WriteLine(
+            $"vertical projection shadows: current rows/groups/fallback=" +
+            $"{projected.CurrentShadowRequests}/{projected.CurrentShadowFloorGroups}/" +
+            $"{projected.CurrentShadowFallbacks}, frame used/max rows=" +
+            $"{projected.CurrentShadowLightsUsed}/{projected.MaxShadowLightsPerFrame}, groups=" +
+            $"{projected.CurrentShadowFloorGroupsUsed}/{projected.MaxShadowFloorGroupsPerFrame}, " +
+            $"exhausted rows/groups={projected.ShadowLightBudgetExhaustions}/" +
+            $"{projected.ShadowFloorGroupBudgetExhaustions}");
+        shell.WriteLine(
+            $"vertical projection shadow draw: atlases={projected.ShadowAtlasRenders}, " +
+            $"planned/rendered rows={projected.ShadowLightsPlanned}/{projected.RenderShadowLights}, " +
+            $"groups={projected.ShadowFloorGroupsPlanned}/{projected.RenderShadowFloorGroups}, " +
+            $"unshadowed fallback={projected.ShadowFallbacks}");
+        shell.WriteLine(
             $"vertical projection draw: frames={projected.RenderFrames}, batches/runs=" +
             $"{projected.RenderBatches}/{projected.RenderRuns}, vertices/calls=" +
             $"{projected.RenderVertices}/{projected.RenderDrawCalls}, avg/last/max=" +

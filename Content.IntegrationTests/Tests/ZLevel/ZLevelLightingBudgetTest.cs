@@ -40,6 +40,8 @@ public sealed class ZLevelLightingBudgetTest : GameTest
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxApertureLayersPerFrame, -1, false);
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxApertureBuildsPerFrame, -1, false);
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxRunsPerFrame, -1, false);
+        await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxShadowLightsPerFrame, -1, false);
+        await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxShadowFloorGroupsPerFrame, -1, false);
         await Pair.RunUntilSynced();
 
         await Client.WaitAssertion(() =>
@@ -56,6 +58,8 @@ public sealed class ZLevelLightingBudgetTest : GameTest
                 Assert.That(projection.MaxApertureLayersPerFrame, Is.Zero);
                 Assert.That(projection.MaxApertureBuildsPerFrame, Is.Zero);
                 Assert.That(projection.MaxRunsPerFrame, Is.Zero);
+                Assert.That(projection.MaxShadowLightsPerFrame, Is.Zero);
+                Assert.That(projection.MaxShadowFloorGroupsPerFrame, Is.Zero);
             });
         });
 
@@ -65,6 +69,8 @@ public sealed class ZLevelLightingBudgetTest : GameTest
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxApertureLayersPerFrame, int.MaxValue, false);
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxApertureBuildsPerFrame, int.MaxValue, false);
         await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxRunsPerFrame, int.MaxValue, false);
+        await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxShadowLightsPerFrame, int.MaxValue, false);
+        await OverrideCVar(Side.Client, CCVars.ZLevelLightingMaxShadowFloorGroupsPerFrame, int.MaxValue, false);
         await Pair.RunUntilSynced();
 
         await Client.WaitAssertion(() =>
@@ -86,6 +92,10 @@ public sealed class ZLevelLightingBudgetTest : GameTest
                     Is.EqualTo(ZLevelLightingProjectionSystem.MaximumApertureBuildsPerFrame));
                 Assert.That(projection.MaxRunsPerFrame,
                     Is.EqualTo(ZLevelLightingProjectionSystem.MaximumRunsPerFrame));
+                Assert.That(projection.MaxShadowLightsPerFrame,
+                    Is.EqualTo(ZLevelLightingProjectionSystem.MaximumShadowLightsPerFrame));
+                Assert.That(projection.MaxShadowFloorGroupsPerFrame,
+                    Is.EqualTo(ZLevelLightingProjectionSystem.MaximumShadowFloorGroupsPerFrame));
             });
         });
     }

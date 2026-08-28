@@ -4,9 +4,12 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Content.Client.Graphics;
 using Content.Client.Light;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Shared;
+using Robust.Shared.Configuration;
 using Robust.Shared.Enums;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map.Components;
@@ -22,7 +25,11 @@ namespace Content.Client.ZLevel;
 public sealed class ZLevelLightingProjectionOverlay : Overlay
 {
     private static readonly ProtoId<ShaderPrototype> ProjectionShader = "ZLevelLightProjection";
+    private static readonly ProtoId<ShaderPrototype> HardShadowShader = "ZLevelLightProjectionShadowHard";
+    private static readonly ProtoId<ShaderPrototype> SoftShadowShader = "ZLevelLightProjectionShadowSoft";
 
+    [Dependency] private readonly IClyde _clyde = default!;
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly IPrototypeManager _prototypeManager = default!;
     [Dependency] private readonly IResourceCache _resourceCache = default!;
 
@@ -30,6 +37,7 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
     private readonly ZLevelLightingProjectionSystem _projection;
     private readonly SharedTransformSystem _transform;
     private readonly List<DrawVertexUV2DColor> _vertices = new();
+    private readonly OverlayResourceCache<ShadowResources> _resources = new();
     private ShaderInstance? _shader;
 
     public override OverlaySpace Space => OverlaySpace.BeforeLighting;
@@ -52,21 +60,39 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
         var runsDrawn = 0;
         var verticesDrawn = 0;
         var drawCalls = 0;
+        var shadowStats = default(LightShadowMapRenderStats);
 
         if (args.Viewport.Eye is not { } eye)
         {
-            _projection.RecordRender(started, 0, 0, 0, 0);
+            _projection.RecordRender(started, 0, 0, 0, 0, shadowStats);
             return;
         }
 
         _projection.BuildProjection(args.MapId, args.WorldAABB, eye.WorldZLevel);
         if (_projection.Batches.Count == 0)
         {
-            _projection.RecordRender(started, 0, 0, 0, 0);
+            _projection.RecordRender(started, 0, 0, 0, 0, shadowStats);
             return;
         }
 
         _shader ??= _prototypeManager.Index(ProjectionShader).Instance();
+        ShadowResources? shadowResources = null;
+        IRenderTexture? shadowAtlas = null;
+        var shadowRequests = _projection.GetShadowRequests();
+        if (!shadowRequests.IsEmpty)
+        {
+            shadowResources = _resources.GetForViewport(
+                args.Viewport,
+                static _ => new ShadowResources());
+            shadowAtlas = shadowResources.EnsureAtlas(_clyde, shadowRequests.Length);
+            shadowStats = _clyde.RenderLightShadowMap(
+                shadowAtlas,
+                args.Viewport,
+                args.MapId,
+                shadowRequests);
+        }
+
+        var softShadows = _configuration.GetCVar(CVars.LightSoftShadows);
         var handle = args.WorldHandle;
 
         foreach (var batch in _projection.Batches)
@@ -85,8 +111,24 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
             if (_vertices.Count == 0)
                 continue;
 
+            var shader = _shader!;
+            if (batch.HasShadow && shadowResources != null && shadowAtlas != null)
+            {
+                shader = shadowResources.GetShader(
+                    _prototypeManager,
+                    softShadows,
+                    batch.ShadowRow);
+                shader.SetParameter("lightCenter", batch.Emitter.WorldPosition);
+                shader.SetParameter(
+                    "lightIndex",
+                    (batch.ShadowRow + 0.5f) / shadowAtlas.Size.Y);
+                shader.SetParameter("shadowMap", shadowAtlas.Texture);
+                if (softShadows)
+                    shader.SetParameter("lightSoftness", batch.Emitter.Softness);
+            }
+
             handle.SetTransform(worldMatrix);
-            handle.UseShader(_shader);
+            handle.UseShader(shader);
             handle.DrawPrimitives(
                 DrawPrimitiveTopology.TriangleList,
                 ResolveMask(batch.Emitter.MaskPath),
@@ -100,7 +142,13 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
 
         handle.UseShader(null);
         handle.SetTransform(Matrix3x2.Identity);
-        _projection.RecordRender(started, batchesDrawn, runsDrawn, verticesDrawn, drawCalls);
+        _projection.RecordRender(
+            started,
+            batchesDrawn,
+            runsDrawn,
+            verticesDrawn,
+            drawCalls,
+            shadowStats);
     }
 
     private Texture ResolveMask(string? maskPath)
@@ -109,6 +157,82 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
                _resourceCache.TryGetResource<TextureResource>(maskPath, out var resource)
             ? resource.Texture
             : Texture.White;
+    }
+
+    internal static int GetShadowAtlasCapacity(int requiredRows)
+    {
+        if (requiredRows <= 0 ||
+            requiredRows > ZLevelLightingProjectionSystem.MaximumShadowLightsPerFrame)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requiredRows));
+        }
+
+        var capacity = 1;
+        while (capacity < requiredRows)
+            capacity <<= 1;
+
+        return capacity;
+    }
+
+    protected override void DisposeBehavior()
+    {
+        _resources.Dispose();
+        base.DisposeBehavior();
+    }
+
+    private sealed class ShadowResources : IDisposable
+    {
+        private readonly List<ShaderInstance> _hardShaders = new();
+        private readonly List<ShaderInstance> _softShaders = new();
+
+        public IRenderTexture? Atlas { get; private set; }
+
+        public IRenderTexture EnsureAtlas(IClyde clyde, int requiredRows)
+        {
+            if (requiredRows <= 0)
+                throw new ArgumentOutOfRangeException(nameof(requiredRows));
+
+            if (Atlas != null && Atlas.Size.Y >= requiredRows)
+                return Atlas;
+
+            Atlas?.Dispose();
+            Atlas = clyde.CreateLightShadowMap(
+                ZLevelLightingProjectionOverlay.GetShadowAtlasCapacity(requiredRows),
+                "zlevel-projected-light-shadows");
+            return Atlas;
+        }
+
+        public ShaderInstance GetShader(
+            IPrototypeManager prototypes,
+            bool soft,
+            int row)
+        {
+            if (row < 0)
+                throw new ArgumentOutOfRangeException(nameof(row));
+
+            var shaders = soft ? _softShaders : _hardShaders;
+            var prototype = soft ? SoftShadowShader : HardShadowShader;
+            while (shaders.Count <= row)
+                shaders.Add(prototypes.Index(prototype).InstanceUnique());
+
+            return shaders[row];
+        }
+
+        public void Dispose()
+        {
+            Atlas?.Dispose();
+            Atlas = null;
+            DisposeShaders(_hardShaders);
+            DisposeShaders(_softShaders);
+        }
+
+        private static void DisposeShaders(List<ShaderInstance> shaders)
+        {
+            foreach (var shader in shaders)
+                shader.Dispose();
+
+            shaders.Clear();
+        }
     }
 }
 
