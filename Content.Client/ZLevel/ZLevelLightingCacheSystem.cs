@@ -131,6 +131,57 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
     }
 
     /// <summary>
+    /// Intersects every adjacent visibility aperture between two local floors.
+    /// A set bit in the result identifies a column that stays open for the
+    /// complete lower-to-upper stack.
+    /// </summary>
+    public bool TryComposeApertureStack(
+        Entity<MapGridComponent> grid,
+        Vector2i chunkIndices,
+        int targetLocalZ,
+        int viewerLocalZ,
+        out ZLevelApertureStack stack)
+    {
+        stack = default;
+        if (targetLocalZ >= viewerLocalZ || grid.Comp.Deleted)
+            return false;
+
+        var word0 = ulong.MaxValue;
+        var word1 = ulong.MaxValue;
+        var word2 = ulong.MaxValue;
+        var word3 = ulong.MaxValue;
+
+        for (var lowerZ = targetLocalZ; lowerZ < viewerLocalZ; lowerZ++)
+        {
+            if (!TryGetApertureChunk(grid, chunkIndices, lowerZ, out var aperture))
+                return false;
+
+            word0 &= aperture.Word0;
+            word1 &= aperture.Word1;
+            word2 &= aperture.Word2;
+            word3 &= aperture.Word3;
+
+            if ((word0 | word1 | word2 | word3) == 0)
+                break;
+        }
+
+        stack = new ZLevelApertureStack(
+            grid.Owner,
+            chunkIndices,
+            targetLocalZ,
+            viewerLocalZ,
+            word0,
+            word1,
+            word2,
+            word3,
+            BitOperations.PopCount(word0) +
+            BitOperations.PopCount(word1) +
+            BitOperations.PopCount(word2) +
+            BitOperations.PopCount(word3));
+        return true;
+    }
+
+    /// <summary>
     /// Appends live emitters whose light circles intersect <paramref name="worldBounds"/>
     /// and whose effective world Z is inside the inclusive requested range.
     /// </summary>
@@ -301,6 +352,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
 
         state.Results.Add(new ZLevelLightEmitter(
             entry.Uid,
+            entry.Transform.GridUid ?? EntityUid.Invalid,
             worldPosition,
             worldZ,
             entry.Component.Radius,
@@ -457,8 +509,62 @@ public readonly record struct ZLevelApertureChunk(
     }
 }
 
+public readonly record struct ZLevelApertureStack(
+    EntityUid GridUid,
+    Vector2i ChunkIndices,
+    int TargetLocalZ,
+    int ViewerLocalZ,
+    ulong Word0,
+    ulong Word1,
+    ulong Word2,
+    ulong Word3,
+    int OpenCount)
+{
+    public bool IsOpen(Vector2i gridTile)
+    {
+        if (SharedMapSystem.GetChunkIndices(gridTile, ZLevelApertureChunk.ChunkSize) != ChunkIndices)
+            return false;
+
+        var relative = SharedMapSystem.GetChunkRelative(gridTile, ZLevelApertureChunk.ChunkSize);
+        return IsOpenRelative(relative.X, relative.Y);
+    }
+
+    public bool IsOpenRelative(int x, int y)
+    {
+        if ((uint)x >= ZLevelApertureChunk.ChunkSize ||
+            (uint)y >= ZLevelApertureChunk.ChunkSize)
+        {
+            return false;
+        }
+
+        return (GetRowBits(y) & (1U << x)) != 0;
+    }
+
+    public uint GetRowBits(int y)
+    {
+        if ((uint)y >= ZLevelApertureChunk.ChunkSize)
+            return 0;
+
+        var bit = y * ZLevelApertureChunk.ChunkSize;
+        return (uint) ((GetWord(bit >> 6) >> (bit & 63)) & 0xFFFFUL);
+    }
+
+    public ulong GetWord(int index)
+    {
+        return index switch
+        {
+            0 => Word0,
+            1 => Word1,
+            2 => Word2,
+            3 => Word3,
+            _ => throw new ArgumentOutOfRangeException(nameof(index)),
+        };
+    }
+}
+
 public readonly record struct ZLevelLightEmitter(
     EntityUid Uid,
+    EntityUid GridUid,
     Vector2 WorldPosition,
     int WorldZ,
     float Radius,

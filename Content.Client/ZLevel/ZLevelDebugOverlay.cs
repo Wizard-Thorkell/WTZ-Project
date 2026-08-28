@@ -41,6 +41,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
     private readonly ZLevelLightingCacheSystem _lightingCacheSystem;
+    private readonly ZLevelLightingProjectionSystem _lightingProjectionSystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
     private readonly EntityQuery<ZLevelPositionComponent> _zLevelQuery;
     private readonly Font _font;
@@ -64,6 +65,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
         _lightingCacheSystem = _entityManager.System<ZLevelLightingCacheSystem>();
+        _lightingProjectionSystem = _entityManager.System<ZLevelLightingProjectionSystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
         _zLevelQuery = _entityManager.GetEntityQuery<ZLevelPositionComponent>();
 
@@ -190,6 +192,15 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"vertical light aperture chunks:{lighting.CachedApertureChunks} open:{lighting.CachedOpenApertureTiles} " +
             $"hit:{lighting.ApertureCacheHitPercent:0.0}% emit:{lighting.EmitterAccepted}/{lighting.EmitterCandidates}",
             metricsColor);
+
+        var projection = _lightingProjectionSystem.Snapshot();
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 168f),
+            $"vertical light project batch/run:{projection.CurrentBatches}/{projection.CurrentRuns} " +
+            $"build avg/max:{projection.AverageBuildMilliseconds:0.000}/{projection.MaxBuildMilliseconds:0.000}ms " +
+            $"draw avg/max:{projection.AverageRenderMilliseconds:0.000}/{projection.MaxRenderMilliseconds:0.000}ms",
+            metricsColor);
     }
 
     private void DrawWorld(in OverlayDrawArgs args, int playerWorldZ, MapId mapId)
@@ -213,6 +224,14 @@ public sealed class ZLevelDebugOverlay : Overlay
         handle.SetTransform(matrix);
 
         var playerLocalZ = _transformSystem.WorldToLocalZLevel(grid.Owner, playerWorldZ);
+        var minX = (int)Math.Floor(gridBounds.Left / grid.Comp.TileSize) - 1;
+        var maxX = (int)Math.Ceiling(gridBounds.Right / grid.Comp.TileSize) + 1;
+        var minY = (int)Math.Floor(gridBounds.Bottom / grid.Comp.TileSize) - 1;
+        var maxY = (int)Math.Ceiling(gridBounds.Top / grid.Comp.TileSize) + 1;
+        var minimumTile = new Vector2i(minX, minY);
+        var maximumTile = new Vector2i(maxX, maxY);
+        var minimumChunk = SharedMapSystem.GetChunkIndices(minimumTile, ZLevelApertureChunk.ChunkSize);
+        var maximumChunk = SharedMapSystem.GetChunkIndices(maximumTile, ZLevelApertureChunk.ChunkSize);
         var lowestZ = MappingPreviewEnabled
             ? playerLocalZ - 1
             : playerLocalZ - _visibilitySystem.MaxVisibleLevelDistance;
@@ -223,41 +242,62 @@ public sealed class ZLevelDebugOverlay : Overlay
             if (z == playerLocalZ)
                 continue;
 
-            var minX = (int)Math.Floor(gridBounds.Left / grid.Comp.TileSize) - 1;
-            var maxX = (int)Math.Ceiling(gridBounds.Right / grid.Comp.TileSize) + 1;
-            var minY = (int)Math.Floor(gridBounds.Bottom / grid.Comp.TileSize) - 1;
-            var maxY = (int)Math.Ceiling(gridBounds.Top / grid.Comp.TileSize) + 1;
-
-            for (var x = minX; x <= maxX; x++)
+            var requiresAperture = !MappingPreviewEnabled && z < playerLocalZ;
+            for (var chunkY = minimumChunk.Y; chunkY <= maximumChunk.Y; chunkY++)
             {
-                for (var y = minY; y <= maxY; y++)
+                for (var chunkX = minimumChunk.X; chunkX <= maximumChunk.X; chunkX++)
                 {
-                    var tile = _mapSystem.GetZLevelTileRef(grid.Owner, grid.Comp, new ZLevelTileIndices(x, y, z));
-                    if (tile.Tile.IsEmpty)
-                        continue;
-
-                    if (!MappingPreviewEnabled &&
-                        z < playerLocalZ &&
-                        !_visibilitySystem.IsTileVisibleFrom(
-                            grid.Owner,
-                            grid.Comp,
-                            new Vector2i(x, y),
-                            playerWorldZ,
-                            z))
+                    var chunkIndices = new Vector2i(chunkX, chunkY);
+                    var stack = default(ZLevelApertureStack);
+                    if (requiresAperture &&
+                        (!_lightingCacheSystem.TryComposeApertureStack(
+                            grid,
+                            chunkIndices,
+                            z,
+                            playerLocalZ,
+                            out stack) ||
+                         stack.OpenCount == 0))
                     {
                         continue;
                     }
 
-                    var tileSize = grid.Comp.TileSize;
-                    var localTile = new Box2(x * tileSize, y * tileSize, (x + 1) * tileSize, (y + 1) * tileSize);
-                    if (!gridBounds.Intersects(localTile))
-                        continue;
+                    var origin = chunkIndices * ZLevelApertureChunk.ChunkSize;
+                    var chunkMinX = Math.Max(minX, origin.X);
+                    var chunkMaxX = Math.Min(maxX, origin.X + ZLevelApertureChunk.ChunkSize - 1);
+                    var chunkMinY = Math.Max(minY, origin.Y);
+                    var chunkMaxY = Math.Min(maxY, origin.Y + ZLevelApertureChunk.ChunkSize - 1);
 
-                    var tileWorldZ = _transformSystem.LocalToWorldZLevel(grid.Owner, z);
-                    DrawTileTexture(handle,
-                        localTile,
-                        tile.Tile,
-                        GetTileColor(playerWorldZ, tileWorldZ, MappingPreviewEnabled));
+                    for (var x = chunkMinX; x <= chunkMaxX; x++)
+                    {
+                        for (var y = chunkMinY; y <= chunkMaxY; y++)
+                        {
+                            var indices = new Vector2i(x, y);
+                            if (requiresAperture && !stack.IsOpen(indices))
+                                continue;
+
+                            var tile = _mapSystem.GetZLevelTileRef(
+                                grid.Owner,
+                                grid.Comp,
+                                new ZLevelTileIndices(x, y, z));
+                            if (tile.Tile.IsEmpty)
+                                continue;
+
+                            var tileSize = grid.Comp.TileSize;
+                            var localTile = new Box2(
+                                x * tileSize,
+                                y * tileSize,
+                                (x + 1) * tileSize,
+                                (y + 1) * tileSize);
+                            if (!gridBounds.Intersects(localTile))
+                                continue;
+
+                            var tileWorldZ = _transformSystem.LocalToWorldZLevel(grid.Owner, z);
+                            DrawTileTexture(handle,
+                                localTile,
+                                tile.Tile,
+                                GetTileColor(playerWorldZ, tileWorldZ, MappingPreviewEnabled));
+                        }
+                    }
                 }
             }
         }
@@ -275,7 +315,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         else
             region = regionMaybe[tile.Variant];
 
-        var vertices = new[]
+        Span<DrawVertexUV2D> vertices = stackalloc DrawVertexUV2D[]
         {
             new DrawVertexUV2D(quad.BottomLeft, region.BottomLeft),
             new DrawVertexUV2D(quad.BottomRight, region.BottomRight),

@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/lighting-projection`.
-- Active package: `P3.3 bounded lower-floor light/FOV projection and attenuation`.
+- Active branch: `zlevel/lighting-hardening`.
+- Active package: `P3.4 frame budgets, fail-soft degradation, visual regressions, and hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1806,8 +1806,8 @@ P2.4 is split into independently gated subpackages:
 | --- | --- | --- |
 | P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | Complete |
 | P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | Complete |
-| P3.3 | Bounded lower-floor light/FOV projection and attenuation | In progress |
-| P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | Pending |
+| P3.3 | Bounded lower-floor light/FOV projection and attenuation | Complete |
+| P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | In progress |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
 
@@ -2059,6 +2059,138 @@ P2.4 is split into independently gated subpackages:
   parallel renderer must provide per-job buffers instead.
 - Next package: consume these inputs to project bounded lower-floor light and FOV
   through ordered `Visibility` apertures with deterministic attenuation.
+
+## Completed Package: P3.3 Bounded Lower-Floor Light/FOV Projection
+
+### Scope
+
+- Compose every adjacent `Visibility` aperture between a lower source floor and
+  the viewer into one four-word chunk mask, stopping early when it becomes
+  completely closed.
+- Query only lower point lights inside the viewport and configured depth, keep
+  each source tied to its own grid/frame, and produce deterministic retained
+  batches plus horizontal aperture runs.
+- Match native point-light radius, height, energy, color, mask rotation,
+  falloff, and curve behavior while applying vertical distance and per-floor
+  transmission.
+- Draw projected light into Clyde's `BeforeLighting` target before active-floor
+  FOV and native point lights, using a dedicated native-equivalent additive
+  blend mode in WTZ Engine.
+- Make lower-floor tile composition consume the same cached aperture stacks as
+  projected light, one query per chunk rather than one boundary walk per tile.
+- Expose planning and rendering counts/timings in `zlevelrendermetrics` and the
+  debug overlay.
+
+### Acceptance Criteria
+
+- A lower light contributes only where every crossed visibility boundary is
+  open; a closure at any intermediate floor rejects that column.
+- Active-floor lights remain on the native Clyde path and are never duplicated
+  by the projection overlay.
+- Depth is capped by `MaxVisibleLevelDistance`; radius and transmission decrease
+  deterministically with depth.
+- Translated and rotated Z-level frames preserve source world position, local
+  aperture coordinates, and directional mask UVs.
+- Lower tiles and projected light agree on the same composed visibility bits.
+- Warming planner, aperture, emitter, and geometry buffers removes allocation
+  proportional to frame or query count.
+- Z 0 and existing mapping, atmosphere, combat, interaction, projectile, and
+  persistence behavior remain green.
+
+### Evidence
+
+- The six dedicated P3.3 cases pass 6/6. They cover complete multi-boundary
+  stacks, closures at different depths, moving/rotated frames, depth scaling at
+  3/6/10 floors, source-mask UVs, attenuation packing, shader/prototype loading,
+  and warmed caller-owned buffers.
+- Projection plus P3.2 cache tests pass 11/11. The complete Content filter
+  containing `ZLevel` passes 194/194 with no failures or skips.
+- WTZ Engine passes 136/136 client integration and 30/30 client unit tests. The
+  new parser case verifies `blend_mode light_add`; existing blend modes remain
+  unchanged.
+- The complete solution build passes with zero errors. Its remaining warnings
+  are established dependency, analyzer, vulnerability, and upstream-obsolescence
+  findings whose exact count varies between incremental and clean builds.
+- The 3-, 6-, and 10-floor server baselines pass 3/3 with 6,336 measured bytes,
+  100% warm boundary-cache hits, and zero evictions. Measured times were 6.999,
+  13.120, and 24.143 ms respectively.
+- Dedicated hot loops assert at most one fixed 512-byte runtime bookkeeping
+  allowance after warm-up for both planning and geometry; work remains bounded
+  by viewport, light radius, authored depth, and aperture chunks.
+- The paired WTZ Engine revision is
+  `9d63eec79515c766a875f0d32803250298ddbcde` on
+  `zlevel/lighting-projection`.
+
+### Decisions
+
+- Keep the active floor entirely native. Content projects only lower-floor
+  contributions and Clyde applies the final active-floor FOV afterward.
+- Intersect same-column aperture bits for the complete source-to-viewer stack.
+  This renders the lower scene visible through authored openings; it does not
+  infer physical light spill onto opaque upper tiles.
+- Keep emitters on their own grids instead of testing every overlapping grid.
+  Shared XY overlap is not an authored vertical connection.
+- Encode per-emitter attenuation data in retained vertices. Reusing one mutable
+  shader instance with changing uniforms would make queued draw commands observe
+  the final emitter's values.
+- Quantize falloff to 1/16 and curve factor to 1/4095 so radius, mask UV, color,
+  energy, depth, and both curve controls fit the existing vertex contract
+  without per-light shader instances.
+- Add `light_add` rather than changing Robust's unused but existing `add`
+  semantics. The new mode exactly matches native point-light blending.
+- Defer cache capacity, per-frame work budgets, and predictable fail-soft
+  degradation until P3.4 has these measured projection counters.
+
+### Completion Gate
+
+- [x] Scope check: the project diff is limited to lower-floor light/FOV
+      projection, shared aperture composition, diagnostics, tests,
+      documentation, and the paired engine pointer; the engine diff contains
+      only one additive blend mode and its parser test.
+- [x] Invariant review: Z 0 parity, world/local Z, moving and rotated frames,
+      multi-floor closure, source-grid ownership, active-floor native rendering,
+      mask rotation, and visibility-channel authority are represented.
+- [x] Automated verification: 6/6 dedicated projection, 11/11 projection/cache,
+      194/194 Content Z-level, 3/3 baseline, 136/136 engine integration, and
+      30/30 engine unit tests pass, followed by a zero-error solution build.
+- [x] Performance evidence: 3/6/10-floor planning is depth-bounded, warmed
+      planner and geometry loops retain caller-owned buffers, server baselines
+      remain stable, and live build/draw counters are exposed.
+- [x] Documentation: pipeline order, equations, cache sharing, metrics, manual
+      fixture procedure, limits, and verification are recorded here and in
+      `Docs/ZLevelLighting.md`.
+- [x] Dependency check: WTZ Engine commit
+      `9d63eec79515c766a875f0d32803250298ddbcde` is committed, pushed, clean,
+      and paired by the project submodule pointer.
+- [x] Git check: engine and project `git diff --check` pass apart from checkout
+      line-ending notices; generated baseline artifacts remain ignored and no
+      unrelated files are included.
+- [x] Mini review: findings, residual risks, and P3.4 are recorded below.
+- [x] Commit: engine saved as `Add native light blend mode`; project package is
+      prepared as `Project lower-floor Z-level lighting`.
+
+### Mini Review
+
+- Finding: Robust's generic `add` mode does not use the destination-preserving
+  blend function used by point lights. A separate tested mode avoids changing
+  existing shader behavior.
+- Finding: per-batch mutable uniforms are unsafe in Clyde's queued draw path.
+  Retained vertex data preserves each emitter's values through queue flush.
+- Finding: lower-floor tile composition repeated a full boundary-stack query for
+  every tile. Chunk masks now make tile and light visibility both cheaper and
+  structurally identical.
+- Finding: the native shader includes a unit light-height term. Including it in
+  projected radius and attenuation prevents lower lights from gaining range.
+- Residual risk: lower-floor walls do not yet cast source-specific shadows into
+  projected light. Aperture clipping and active-floor FOV are correct, but this
+  visual limitation belongs in P3.4 hardening.
+- Residual risk: aperture retention and per-frame projection have no independent
+  capacity/work budget. P3.4 must degrade predictably under dense light loads.
+- Residual risk: headless tests validate shader resources, geometry, masks, and
+  inputs but cannot inspect final GL pixels. The canonical map procedure remains
+  mandatory for P3.4 visual regression capture.
+- Next package: add measured cache/frame budgets, deterministic fail-soft
+  degradation, lower-floor shadow policy, and visual regression hardening.
 
 P2.2 is split into independently gated subpackages:
 
@@ -3020,3 +3152,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4d3c | `Harden Z-level combat request authority` | 51 combat, 7 network throw, 4 native combat, 24 native interaction, 182 integration, full build, diff check | Complete |
 | 2026-08-28 | P3.1 | `Make active-floor rendering world-Z aware` | 135 engine client integration, 29 engine unit, 4 serialization, 1 replication, 182 Content Z-level, 3 baseline, full build, diff check | Complete |
 | 2026-08-28 | P3.2 | `Cache vertical lighting inputs` | 6 package, 188 Content Z-level, 136/29 engine client, 1026/446 engine shared, 3 baseline, full build, allocation, diff check | Complete |
+| 2026-08-28 | P3.3 | `Project lower-floor Z-level lighting` | 6 projection, 11 projection/cache, 194 Content Z-level, 136/30 engine client, 3 baseline, full build, allocation, diff check | Complete |

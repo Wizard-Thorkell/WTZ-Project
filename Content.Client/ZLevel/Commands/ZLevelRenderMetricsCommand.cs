@@ -22,9 +22,11 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
     public void Execute(IConsoleShell shell, string argStr, string[] args)
     {
         var cache = _entityManager.System<ZLevelLightingCacheSystem>();
+        var projection = _entityManager.System<ZLevelLightingProjectionSystem>();
         if (args.Length == 1 && args[0].Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             cache.ResetMetrics();
+            projection.ResetMetrics();
             shell.WriteLine("Reset local vertical-lighting counters.");
             return;
         }
@@ -58,5 +60,22 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"{lighting.EmitterWorldZRejected}/{lighting.EmitterBoundsRejected}, avg/last/max=" +
             $"{lighting.EmitterAverageQueryMilliseconds:0.000}/{lighting.EmitterLastQueryMilliseconds:0.000}/" +
             $"{lighting.EmitterMaxQueryMilliseconds:0.000}ms");
+
+        var projected = projection.Snapshot();
+        shell.WriteLine(
+            $"vertical projection: frames={projected.Frames}, input/projected/rejected=" +
+            $"{projected.EmitterInputs}/{projected.EmittersProjected}/{projected.RadiusRejections}, " +
+            $"current batches/runs={projected.CurrentBatches}/{projected.CurrentRuns}, " +
+            $"tiles={projected.VisibleTiles}");
+        shell.WriteLine(
+            $"vertical projection build: chunks/layers={projected.StackChunks}/{projected.StackBoundaryLayers}, " +
+            $"avg/last/max={projected.AverageBuildMilliseconds:0.000}/" +
+            $"{projected.LastBuildMilliseconds:0.000}/{projected.MaxBuildMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"vertical projection draw: frames={projected.RenderFrames}, batches/runs=" +
+            $"{projected.RenderBatches}/{projected.RenderRuns}, vertices/calls=" +
+            $"{projected.RenderVertices}/{projected.RenderDrawCalls}, avg/last/max=" +
+            $"{projected.AverageRenderMilliseconds:0.000}/{projected.LastRenderMilliseconds:0.000}/" +
+            $"{projected.MaxRenderMilliseconds:0.000}ms");
     }
 }

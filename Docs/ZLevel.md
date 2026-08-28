@@ -535,8 +535,9 @@ Major unfinished areas:
 - Upper-floor fire audio and burned decals are suppressed until sound/effects
   gain a Z-aware spatial contract.
 - Active-floor tiles, point lights, and FOV occluders are selected natively by
-  world Z. Cross-floor light projection, attenuation, and frame budgets remain
-  P3 work; see `Docs/ZLevelLighting.md`.
+  world Z. Lower-floor light and tiles now share bounded aperture projection
+  with vertical attenuation; frame budgets, fail-soft degradation, and
+  lower-floor source shadows remain P3.4 work. See `Docs/ZLevelLighting.md`.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
 - Hitscan, physical projectile lifecycle and flight, projectile actions, and

@@ -1,8 +1,8 @@
 # WTZ Z-Level Lighting And FOV
 
-This document defines the rendering ownership established by roadmap packages
-P3.1 and P3.2. It is the baseline for vertical light projection in P3.3 and
-frame budgets in P3.4.
+This document defines the rendering ownership and vertical projection contract
+established by roadmap packages P3.1 through P3.3. It is the baseline for frame
+budgets, fail-soft quality, and visual hardening in P3.4.
 
 ## Ownership
 
@@ -114,6 +114,57 @@ The index follows translated and rotated grids through the existing component
 tree update lifecycle. Queries are main-thread and sequential because the
 system owns one reusable tree scratch buffer.
 
+## Lower-Floor Projection Contract
+
+`ZLevelLightingProjectionSystem` builds one retained plan for the viewport's
+world AABB and eye world Z. The active floor remains entirely native. For each
+lower point light inside the configured visibility depth, the planner:
+
+1. resolves depth in world Z and keeps the emitter tied to its own grid/frame;
+2. computes a projected horizontal radius using
+   `sqrt(radius^2 - (depth * 0.75)^2 - 1)`, preserving the native light shader's
+   unit height term;
+3. applies transmission of `0.72^depth`;
+4. intersects every adjacent aperture chunk from the source local Z to the
+   viewer local Z; and
+5. compresses visible bits into deterministic horizontal tile runs.
+
+A column contributes only when every crossed `Visibility` boundary is open.
+The projection never infers a connection merely because another grid overlaps
+the same world XY. Sources without an authored grid frame are skipped because
+there is no authoritative aperture stack for them.
+
+`ZLevelLightingProjectionOverlay` draws these runs directly into Clyde's light
+target in `BeforeLighting`, after Content's enlarged light target and sun-shadow
+composition. Clyde then applies the normal active-floor FOV mask and renders
+active-floor point lights. The resulting order is:
+
+```text
+Content ambient/emission -> lower-floor projection -> active FOV -> native lights
+```
+
+The projection shader uses the native attenuation curve, source mask rotation,
+vertical distance, transmission, falloff, and curve factor. It carries all
+per-source data in retained vertices so queued draw commands never share mutable
+uniform state. Falloff and curve are packed into one high-precision UV channel;
+the 1/16 falloff and 1/4095 curve quantization errors are bounded and tested.
+
+WTZ Engine provides `blend_mode light_add`, which uses the same
+`source-alpha + destination` blend function as native point lights. The older
+generic `add` mode is intentionally unchanged.
+
+## Shared Aperture FOV Composition
+
+Lower-floor tile composition and projected light consume the same composed
+aperture chunks. `ZLevelDebugOverlay` now walks 16 by 16 chunks, composes each
+lower-to-viewer stack once, and rejects closed bits before reading or drawing
+tiles. This replaces repeated authoritative boundary queries for every tile and
+prevents the visible lower scene from disagreeing with its light mask.
+
+The active floor's normal horizontal FOV remains owned by Clyde. Vertical
+visibility only selects which lower columns can participate; it does not create
+a second eye, viewport, or FOV render for every floor.
+
 ## Observability
 
 The client command `zlevelrendermetrics` reports the latest rendered frame:
@@ -130,8 +181,13 @@ It also reports cumulative P3.2 input-cache counters:
 - emitter queries, candidates, accepted sources, world-Z and bounds rejections,
   and query timings.
 
-Run `zlevelrendermetrics reset` to reset cumulative P3.2 counters. Retained cache
-entries and native per-frame Clyde counters are not destroyed by this command.
+P3.3 adds projection frames, input/projected/radius-rejected emitters, current
+batches and runs, visible tiles, composed chunks and boundary layers, generated
+vertices and draw calls, plus build and render timings.
+
+Run `zlevelrendermetrics reset` to reset cumulative P3.2/P3.3 counters. Retained
+cache entries and native per-frame Clyde counters are not destroyed by this
+command.
 
 The same values appear when `zlevel.debug_overlay` is enabled. Counters reset at
 the start of each Clyde frame; retained cache size is sampled live.
@@ -159,14 +215,18 @@ Manual baseline procedure:
 1. Run `forcemap ZLevelMappingStation`, start the round, and join as Passenger.
 2. Enable `zlevel.debug_overlay` in the client console.
 3. Stand near `(3.5, 1.5)` on Z 0, then traverse Z 1 and Z 2.
-4. On each floor, confirm that only the matching red, green, or blue light
-   affects the active floor and that walls from other floors cast no shadows.
-5. Run `zlevelrendermetrics`. With all fixtures in the query area, two lights
-   should be rejected by world Z and at least one grid layer should be drawn.
-6. Traverse `0 -> 1 -> 2 -> 1`. The first visit to a floor may create cache
+4. On Z 0, confirm the red source is native. On Z 1, confirm the green source is
+   native and red light appears only through the stair opening near
+   `(2.5, 2.5)`. On Z 2, confirm the blue source is native and green light
+   appears only through the stair opening near `(4.5, 4.5)`.
+5. Confirm closed floor columns do not receive the projected lower-floor color,
+   and that the projected color is dimmer than its source floor.
+6. Run `zlevelrendermetrics`. The projection report should show at least one
+   batch, aperture run, and draw call while looking through either opening.
+7. Traverse `0 -> 1 -> 2 -> 1`. The first visit to a floor may create cache
    entries; the return to Z 1 must reuse its own layer without briefly showing
    another floor.
-7. Enter mapping mode and enable adjacent preview. The active floor remains the
+8. Enter mapping mode and enable adjacent preview. The active floor remains the
    native Clyde layer; adjacent tiles are the tinted Content composition.
 
 Capture screenshots at Z 0, Z 1, Z 2, and adjacent preview whenever renderer or
@@ -182,17 +242,29 @@ build work, one live emitter per authored floor, and no managed allocation in
 the warmed aperture and emitter query loops. Timing is diagnostic output rather
 than a machine-dependent pass threshold.
 
-## P3.2 Deliberate Limits
+## P3.3 Projection Fixture
 
-- Only the active floor contributes native point light and FOV occlusion.
-- Lower floors can remain visible through Content composition, but their light
-  is not projected upward yet.
-- P3.2 prepares apertures and emitters but does not project lower-floor light or
-  modify FOV. P3.3 owns that visible behavior and attenuation.
+`ZLevelLightingProjectionTest` validates full-stack aperture intersection,
+closed boundaries at different depths, moving and rotated grid frames, native
+mask-space UVs, vertical attenuation, shader/prototype loading, and buffer
+reuse. Its 3-, 6-, and 10-floor cases assert that accepted source depth never
+exceeds `MaxVisibleLevelDistance` and that warmed planning and geometry do not
+allocate proportionally to frame count.
+
+## P3.3 Deliberate Limits
+
+- Only the active floor contributes native point-light shadow maps and FOV
+  occluders. Lower-floor light is projected through visibility apertures, but
+  lower-floor walls do not yet cast source-specific shadows in that projection.
+- Projected light is intentionally clipped to the lower scene visible through
+  open columns. Physical light spill onto opaque upper-floor tiles is a separate
+  gameplay policy and is not inferred by this compositor.
+- Upper floors remain hidden from a lower viewer unless mapping preview is
+  active. Upward player-facing FOV and targeting are still separate policy work.
 - Cache capacity, per-frame work budgets, and predictable fail-soft degradation
   remain assigned to P3.4.
 - Lights and occluders on different overlapping grids compare world Z, not each
   grid's local Z.
-- The cache is bounded by authored sparse content lifetime, but P3.1 does not
+- The cache is bounded by authored sparse content lifetime, but P3.3 does not
   impose a separate eviction budget. P3.4 will use measured stress behavior to
   select a predictable policy.
