@@ -48,6 +48,7 @@ public sealed partial class GunSystem : SharedGunSystem
     [Dependency] private readonly SharedTransformSystem _xform = default!;
     [Dependency] private readonly SpriteSystem _sprite = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
+    [Dependency] private readonly ZLevelTargetingSystem _zLevelTargeting = default!;
 
     public static readonly EntProtoId HitscanProto = "HitscanEffect";
 
@@ -204,20 +205,28 @@ public sealed partial class GunSystem : SharedGunSystem
         // Define target coordinates relative to gun entity, so that network latency on moving grids doesn't fuck up the target location.
         var coordinates = TransformSystem.ToCoordinates(entity, mousePos);
 
-        NetEntity? target = null;
+        EntityUid? targetEntity = null;
         if (_state.CurrentState is GameplayStateBase screen)
-            target = GetNetEntity(screen.GetClickedEntity(
+            targetEntity = screen.GetClickedEntity(
                 mousePos,
                 _eyeManager.CurrentEye,
-                ZLevelTargetingMode.VisibleCrossFloorRanged));
+                ZLevelTargetingMode.VisibleCrossFloorRanged);
+
+        var targetWorldZ = _zLevelTargeting.GetPointerWorldZ(_eyeManager.CurrentEye, targetEntity);
+        if (targetEntity == null &&
+            _zLevelTargeting.TryGetNearestVisibleLowerTileWorldZ(coordinates, out var lowerWorldZ))
+        {
+            targetWorldZ = lowerWorldZ;
+        }
 
         Log.Debug($"Sending shoot request tick {Timing.CurTick} / {Timing.CurTime}");
 
 
         RaisePredictiveEvent(new RequestShootEvent
         {
-            Target = target,
+            Target = GetNetEntity(targetEntity),
             Coordinates = GetNetCoordinates(coordinates),
+            CoordinateLayer = targetWorldZ,
             Gun = GetNetEntity(gun),
             Continuous = _cfg.GetCVar(CCVars.ControlHoldToAttackRanged),
         });

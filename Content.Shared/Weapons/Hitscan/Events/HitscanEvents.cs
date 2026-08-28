@@ -35,6 +35,16 @@ public record struct HitscanTraceEvent
     /// Target that was being aimed at (Not necessarily hit).
     /// </summary>
     public EntityUid? Target;
+
+    /// <summary>
+    /// Targetless coordinate selected for the shot, if one was supplied.
+    /// </summary>
+    public EntityCoordinates? TargetCoordinates;
+
+    /// <summary>
+    /// World Z associated with <see cref="TargetCoordinates"/>.
+    /// </summary>
+    public int? TargetWorldZ;
 }
 
 /// <summary>

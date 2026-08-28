@@ -49,6 +49,7 @@ public abstract partial class SharedGunSystem : EntitySystem
     [Dependency] private readonly SharedCombatModeSystem _combatMode = default!;
     [Dependency] private readonly SharedHandsSystem _hands = default!;
     [Dependency] private readonly UseDelaySystem _useDelay = default!;
+    [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
     [Dependency] protected readonly DamageableSystem Damageable = default!;
     [Dependency] protected readonly ExamineSystemShared Examine = default!;
     [Dependency] protected readonly IGameTiming Timing = default!;
@@ -73,6 +74,11 @@ public abstract partial class SharedGunSystem : EntitySystem
     /// Default projectile speed
     /// </summary>
     public const float ProjectileSpeed = 40f;
+
+    /// <summary>
+    /// Minimal planar progress used by 2D physics for an otherwise vertical projectile route.
+    /// </summary>
+    public const float VerticalShotPlanarDisplacement = 0.1f;
 
     /// <summary>
     ///     Name of the container slot used as the gun's chamber
@@ -157,8 +163,29 @@ public abstract partial class SharedGunSystem : EntitySystem
         if (gun.Owner != GetEntity(msg.Gun))
             return;
 
-        gun.Comp.ShootCoordinates = GetCoordinates(msg.Coordinates);
-        gun.Comp.Target = GetEntity(msg.Target);
+        var coordinates = GetCoordinates(msg.Coordinates);
+        var target = GetEntity(msg.Target);
+        if (!_zLevelInteraction.TryResolveCoordinateLayer(
+                user.Value,
+                target,
+                coordinates,
+                msg.CoordinateLayer,
+                true,
+                out var targetWorldZ))
+        {
+            return;
+        }
+
+        if (target == null &&
+            !_zLevelInteraction.IsCoordinateOnEffectiveWorldLevel(user.Value, coordinates, targetWorldZ) &&
+            !_zLevelInteraction.CanTargetVisibleCoordinate(user.Value, coordinates, targetWorldZ, 0f))
+        {
+            return;
+        }
+
+        gun.Comp.ShootCoordinates = coordinates;
+        gun.Comp.Target = target;
+        gun.Comp.TargetWorldZ = targetWorldZ;
         AttemptShoot(user.Value, gun);
         if (msg.Continuous)
             gun.Comp.ShotCounter = 0;
@@ -224,16 +251,23 @@ public abstract partial class SharedGunSystem : EntitySystem
         ent.Comp.ShotCounter = 0;
         ent.Comp.ShootCoordinates = null;
         ent.Comp.Target = null;
+        ent.Comp.TargetWorldZ = null;
         DirtyField(ent.AsNullable(), nameof(GunComponent.ShotCounter));
     }
 
     /// <summary>
     /// Attempts to shoot at the target coordinates. Resets the shot counter after every shot.
     /// </summary>
-    public bool AttemptShoot(EntityUid user, Entity<GunComponent> gun, EntityCoordinates toCoordinates, EntityUid? target = null)
+    public bool AttemptShoot(
+        EntityUid user,
+        Entity<GunComponent> gun,
+        EntityCoordinates toCoordinates,
+        EntityUid? target = null,
+        int? targetWorldZ = null)
     {
         gun.Comp.ShootCoordinates = toCoordinates;
         gun.Comp.Target = target;
+        gun.Comp.TargetWorldZ = targetWorldZ;
         var result = AttemptShoot(user, gun);
         gun.Comp.ShotCounter = 0;
         DirtyField(gun.AsNullable(), nameof(GunComponent.ShotCounter));
@@ -247,6 +281,8 @@ public abstract partial class SharedGunSystem : EntitySystem
     {
         var coordinates = new EntityCoordinates(gun, gun.Comp.DefaultDirection);
         gun.Comp.ShootCoordinates = coordinates;
+        gun.Comp.Target = null;
+        gun.Comp.TargetWorldZ = null;
         var result = AttemptShoot(gun, gun);
         gun.Comp.ShotCounter = 0;
         return result;

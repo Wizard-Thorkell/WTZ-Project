@@ -18,6 +18,7 @@
     range: 60
     checkCanAccess: false
   - type: WorldTargetAction
+    allowCrossLevelCoordinates: true
     event: !type:ProjectileSpellEvent
       prototype: ProjectileFireball
   - type: SpeakOnAction

@@ -75,27 +75,16 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
     {
         _metrics.RecordBallisticRouteAttempt();
 
-        if (HasComp<ZLevelBallisticTrajectoryComponent>(uid))
-            return false;
-
         if (!_physicsQuery.TryComp(uid, out var physics) ||
             !_transformQuery.TryComp(uid, out var transform) ||
             !_transformQuery.TryComp(target, out var targetTransform) ||
             transform.GridUid is not { } frameUid ||
             targetTransform.GridUid != frameUid ||
-            !_gridQuery.HasComp(frameUid) ||
             transform.MapID == MapId.Nullspace ||
-            targetTransform.MapID != transform.MapID ||
-            (physics.BodyType & (BodyType.Dynamic | BodyType.KinematicController)) == 0 ||
-            !IsFinite(mapDisplacement) ||
-            !IsActiveBallistic(uid))
+            targetTransform.MapID != transform.MapID)
         {
             return false;
         }
-
-        var directionLength = mapDisplacement.Length();
-        if (!float.IsFinite(directionLength) || directionLength <= 0f)
-            return false;
 
         var sourceWorldZ = _zLevels.GetWorldZLevel(uid);
         var targetWorldZ = _zLevels.GetWorldZLevel(target);
@@ -107,13 +96,97 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
 
         var sourceLocalZ = _zLevels.GetZLevel(uid);
         var targetLocalZ = _zLevels.GetZLevel(target);
-        var crossingCount = Math.Abs(targetLocalZ - sourceLocalZ);
+        var sourceMap = TransformSystem.GetMapCoordinates((uid, transform));
+        var targetMap = TransformSystem.GetMapCoordinates((target, targetTransform));
+        if (!IsFinite(sourceMap.Position) || !IsFinite(targetMap.Position))
+            return false;
+
+        return TryStartTrajectory(
+            uid,
+            mapDisplacement,
+            physics,
+            transform,
+            frameUid,
+            sourceLocalZ,
+            targetLocalZ);
+    }
+
+    /// <summary>
+    /// Starts a fixed launch-time route toward an explicitly selected lower-floor surface.
+    /// </summary>
+    public bool TryStartTrajectory(
+        EntityUid uid,
+        EntityCoordinates targetCoordinates,
+        int targetWorldZ,
+        Vector2 mapDisplacement)
+    {
+        _metrics.RecordBallisticRouteAttempt();
+
+        if (!targetCoordinates.IsValid(EntityManager) ||
+            !_physicsQuery.TryComp(uid, out var physics) ||
+            !_transformQuery.TryComp(uid, out var transform) ||
+            transform.GridUid is not { } frameUid ||
+            transform.MapID == MapId.Nullspace)
+        {
+            return false;
+        }
+
+        var targetFrame = _gridQuery.HasComp(targetCoordinates.EntityId)
+            ? targetCoordinates.EntityId
+            : TransformSystem.GetGrid(targetCoordinates);
+        var targetMap = TransformSystem.ToMapCoordinates(targetCoordinates);
+        var sourceWorldZ = _zLevels.GetWorldZLevel(uid);
+        if (targetFrame != frameUid ||
+            targetMap.MapId != transform.MapID ||
+            !IsFinite(targetMap.Position) ||
+            sourceWorldZ == targetWorldZ ||
+            !_visibility.IsCoordinateVisibleFrom(
+                targetCoordinates,
+                targetWorldZ,
+                transform.MapID,
+                sourceWorldZ))
+        {
+            return false;
+        }
+
+        return TryStartTrajectory(
+            uid,
+            mapDisplacement,
+            physics,
+            transform,
+            frameUid,
+            _zLevels.GetZLevel(uid),
+            TransformSystem.WorldToLocalZLevel(frameUid, targetWorldZ));
+    }
+
+    private bool TryStartTrajectory(
+        EntityUid uid,
+        Vector2 mapDisplacement,
+        PhysicsComponent physics,
+        TransformComponent transform,
+        EntityUid frameUid,
+        int sourceLocalZ,
+        int targetLocalZ)
+    {
+        if (HasComp<ZLevelBallisticTrajectoryComponent>(uid) ||
+            !_gridQuery.HasComp(frameUid) ||
+            (physics.BodyType & (BodyType.Dynamic | BodyType.KinematicController)) == 0 ||
+            !IsFinite(mapDisplacement) ||
+            !IsActiveBallistic(uid))
+        {
+            return false;
+        }
+
+        var directionLength = mapDisplacement.Length();
+        if (!float.IsFinite(directionLength) || directionLength <= 0f)
+            return false;
+
+        var crossingCount = Math.Abs((long) targetLocalZ - sourceLocalZ);
         if (crossingCount == 0 || crossingCount > _trace.MaxVerticalCrossings)
             return false;
 
         var sourceMap = TransformSystem.GetMapCoordinates((uid, transform));
-        var targetMap = TransformSystem.GetMapCoordinates((target, targetTransform));
-        if (!IsFinite(sourceMap.Position) || !IsFinite(targetMap.Position))
+        if (!IsFinite(sourceMap.Position))
             return false;
 
         var planarDistance = directionLength;

@@ -24,6 +24,7 @@ using Content.Shared.Stunnable;
 using Content.Shared.Tag;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Systems;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -50,6 +51,8 @@ public abstract class SharedMagicSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly IRobustRandom _random = default!;
     [Dependency] private readonly SharedGunSystem _gunSystem = default!;
+    [Dependency] private readonly SharedZLevelBallisticSystem _zBallistics = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly INetManager _net = default!;
@@ -288,7 +291,16 @@ public abstract class SharedMagicSystem : EntitySystem
         var ent = Spawn(ev.Prototype, fromMap);
         var direction = _transform.ToMapCoordinates(toCoords).Position -
                          fromMap.Position;
+        var sourceWorldZ = _zLevels.GetWorldZLevel(ev.Performer);
+        if (ev.TargetWorldZ != sourceWorldZ && direction.LengthSquared() <= float.Epsilon)
+        {
+            direction = _transform.GetWorldRotation(ev.Performer)
+                .RotateVec(Vector2.UnitX) * SharedGunSystem.VerticalShotPlanarDisplacement;
+        }
+
         _gunSystem.ShootProjectile(ent, direction, userVelocity, ev.Performer, ev.Performer, 25f);
+        if (ev.TargetWorldZ != sourceWorldZ)
+            _zBallistics.TryStartTrajectory(ent, toCoords, ev.TargetWorldZ, direction);
     }
     // End Projectile Spells
     #endregion

@@ -178,8 +178,15 @@ Implemented traversal and debug tooling:
 - World-only action targets now preserve an explicit selected world Z alongside
   planar `EntityCoordinates`. Opted-in actions can select a visible lower tile,
   while closed decks, upper targets, different frames, out-of-range points, and
-  sparse empty layers are rejected. No production action prototype opts in yet;
-  gun, hitscan, and projectile consumers are the next reviewed package.
+  sparse empty layers are rejected.
+- Normal gun requests carry that selected world Z through server prediction and
+  authority. Hitscan traces to a targetless lower coordinate directly; physical
+  projectiles use the bounded ballistic controller, including a minimal planar
+  physics step for an otherwise pure-vertical shot. Action guns and projectile
+  spells forward the same contract.
+- Fireball and Dragon's Breath explicitly opt into visible lower-floor
+  coordinates. Other world actions remain same-floor by default, and every shot
+  must still pass the independent `Projectile` boundary channel.
 - Admin/debug verbs to enable/disable ZLevel mode.
 - Debug hotbar actions for moving up/down or to a target Z.
 - Support-floor stamping helpers.
@@ -249,10 +256,13 @@ Implemented authoritative Z-aware hitscan:
 - Visible lower-floor entities can be targeted through open visibility paths;
   the server independently validates visibility, a shared structural frame,
   three-dimensional range, and every `Projectile` boundary crossing.
+- A targetless pointer can select the nearest visible non-empty lower surface.
+  The server revalidates its world Z, frame, map, range, and visibility before
+  tracing, so an empty sparse layer or forged coordinate cannot become a floor.
 - Hitscan effects are split into ordered floor segments and stamped with their
   world Z on the client.
-- Upward targeting and empty-tile cross-floor aiming remain deferred until the
-  viewport/FOV and network input contracts can represent them intentionally.
+- Upward targeting remains deferred until the viewport/FOV and input contracts
+  can represent it intentionally.
 
 Implemented Z-aware physical projectile lifecycle:
 
@@ -503,12 +513,12 @@ Major unfinished areas:
 - Lighting and FOV are not native to floors.
 - Pathfinding and AI do not understand multi-floor navigation.
 - Sound propagation is not Z-aware.
-- Hitscan, physical projectile lifecycle, and authoritative explosion topology
-  are Z-aware. Fire, atmospheric heat, physical vertical flight, and other area
-  effects remain incomplete.
-- Empty-tile cross-floor actions and aiming still need an explicit owning
-  subsystem opt-in; entity-target click priority and physical use are covered,
-  while final manual UI/gameplay coverage belongs to the P2 completion matrix.
+- Hitscan, physical projectile lifecycle and flight, projectile actions, and
+  authoritative explosion topology are Z-aware. Other area effects remain
+  incomplete.
+- Visible lower-floor coordinate aiming is implemented for normal guns,
+  hitscan, action guns, and projectile spells. Forged/stale request hardening and
+  final manual UI/gameplay coverage remain in the P2 completion matrix.
 - Grid lookup still begins from a 2D `MapCoordinates` selection in several
   engine APIs. Once a destination grid is known, callers now convert world Z to
   that grid's local frame correctly, but physically overlapping grids at the
@@ -749,8 +759,8 @@ Tasks:
 - [Partial] Audit all client click resolution paths. Pointer layer transport,
   frame selection, context-menu synthesis, drag replay, entity-target selection,
   same-floor-first click priority, and explicit visible lower-coordinate action
-  authority are covered; gun/projectile consumers and forged-request hardening
-  remain for the final P2 packages.
+  authority and gun/projectile consumers are covered; forged/stale request
+  hardening and the final manual matrix remain.
 - [Done server-side] Ensure same-floor interaction is the default for
   use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
   targeted DoAfters.

@@ -134,6 +134,54 @@ public sealed class ZLevelHitscanTest : GameTest
     }
 
     [Test]
+    public async Task TargetlessCoordinateHitscanReachesSelectedLowerFloor()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid shooter = default;
+        EntityUid target = default;
+        EntityUid hitscan = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap, 1);
+            shooter = Spawn(testMap, null, new Vector2(0.5f, 0.5f), 1);
+            target = Spawn(testMap, "ZLevelHitscanObstacle", new Vector2(0.5f, 0.5f), 0);
+            hitscan = SpawnHitscan(testMap);
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var listener = SEntMan.System<HitscanListenerSystem>();
+            listener.Clear(hitscan);
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            metrics.ResetCounters();
+            var fired = new HitscanTraceEvent
+            {
+                FromCoordinates = SEntMan.GetComponent<TransformComponent>(shooter).Coordinates,
+                ShotDirection = Vector2.Zero,
+                Gun = shooter,
+                Shooter = shooter,
+                TargetCoordinates = SEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                TargetWorldZ = 0,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(hitscan, ref fired);
+
+            var data = listener.GetEvents(hitscan).Single().Data;
+            var snapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(data.HitEntity, Is.EqualTo(target));
+                Assert.That(snapshot.TraceQueries, Is.EqualTo(1));
+                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
+                Assert.That(snapshot.TraceSegments, Is.EqualTo(2));
+                Assert.That(snapshot.TraceBoundaryCrossings, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
     public async Task ProjectileClosedBoundaryStopsVerticalHitscan()
     {
         var testMap = await Pair.CreateTestMap();

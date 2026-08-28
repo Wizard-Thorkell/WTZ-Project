@@ -10,9 +10,12 @@ logging, and presentation.
 1. The client resolves the entity under the cursor with
    `VisibleCrossFloorRanged`. Same-floor entities remain valid. A lower-floor
    entity is valid only through a complete stack of open `Visibility`
-   boundaries.
-2. The server receives the ordinary gun request and resolves the target entity
-   from its own state. It never accepts a client-provided floor index.
+   boundaries. Without an entity, the pointer may select the nearest visible,
+   non-empty lower-floor surface.
+2. The ordinary gun request carries an optional world Z with its planar
+   coordinates. The server resolves entity layers from server state and
+   independently validates targetless layers against the effective origin,
+   map, frame, downward direction, and visibility.
 3. `HitscanBasicRaycastSystem` takes the origin world Z from the authoritative
    shooter transform. A cross-floor target must be on the same map and grid
    frame, visible from the shooter, and within three-dimensional max range.
@@ -33,8 +36,9 @@ target legitimately.
 
 Same-floor shots retain their normal two-dimensional max-distance ray and Z 0
 behavior. Cross-floor shots use the target's server transform to select the
-destination world Z, while recoil direction still controls the planar line.
-Range is measured in XYZ with one floor equal to one world distance unit.
+destination world Z, or use the validated targetless coordinate layer when no
+entity was selected. Recoil direction still controls the planar line. Range is
+measured in XYZ with one floor equal to one world distance unit.
 
 Vertical traces currently require shooter and target to share one structural
 grid frame. That matches the ownership contract of `ZLevelTrace`; overlapping
@@ -62,9 +66,8 @@ two-dimensional presentation limit, not a collision limit.
 - Normal rendering hides floors above the viewer. Ranged targeting therefore
   permits visible lower floors only; upward targeting remains deferred to the
   P3 lighting/FOV and presentation policy.
-- `RequestShootEvent` carries 2D coordinates and an optional entity target, but
-  no cursor world Z. A lower-floor entity can define a vertical shot; an empty
-  lower-floor tile cannot yet do so.
+- Targetless cross-floor aiming requires a real non-empty surface. It skips
+  sparse empty layers and cannot aim at an arbitrary invisible Z plane.
 - One shot uses one structural grid frame. Entry into or exit from several
   moving grids is deferred until the trace contract can compose frame-owned
   boundaries.
@@ -91,7 +94,8 @@ dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build 
 ```
 
 The focused matrix covers Z 0 selection parity, filtering colliders from other
-floors, visible open-floor hits, projectile-specific closed boundaries,
+floors, visible open-floor entity and targetless-coordinate hits,
+projectile-specific closed boundaries,
 visibility denial, upward-target rejection, XYZ range, target-only obstacles,
 diagonal moving frames, vertical-crossing budget failure, and the
 collision-enabled allocation capture.

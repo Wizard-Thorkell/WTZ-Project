@@ -71,6 +71,16 @@ public sealed partial class GunSystem : SharedGunSystem
         var fromMap = TransformSystem.ToMapCoordinates(fromCoordinates);
         var toMap = TransformSystem.ToMapCoordinates(toCoordinates).Position;
         var mapDirection = toMap - fromMap.Position;
+        var source = user ?? gun.Owner;
+        if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+            targetWorldZ != ZLevels.GetWorldZLevel(source) &&
+            mapDirection.LengthSquared() <= float.Epsilon)
+        {
+            mapDirection = TransformSystem.GetWorldRotation(source)
+                .RotateVec(Vector2.UnitX) * VerticalShotPlanarDisplacement;
+            toMap = fromMap.Position + mapDirection;
+        }
+
         var mapAngle = mapDirection.ToAngle();
         var angle = GetRecoilAngle(Timing.CurTime, gun, mapDirection.ToAngle());
 
@@ -147,6 +157,8 @@ public sealed partial class GunSystem : SharedGunSystem
                         Gun = gun,
                         Shooter = user,
                         Target = gun.Comp.Target,
+                        TargetCoordinates = toCoordinates,
+                        TargetWorldZ = gun.Comp.TargetWorldZ,
                     };
                     RaiseLocalEvent(ent.Value, ref hitscanEv);
 
@@ -235,12 +247,32 @@ public sealed partial class GunSystem : SharedGunSystem
             ThrowingSystem.TryThrow(uid, mapDirection, gun.Comp.ProjectileSpeedModified, user);
             if (targetUid is { } throwTarget)
                 _zBallistics.TryStartTrajectory(uid, throwTarget, trajectoryDisplacement);
+            else if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+                     targetWorldZ != ZLevels.GetWorldZLevel(uid) &&
+                     gun.Comp.ShootCoordinates is { } targetCoordinates)
+            {
+                _zBallistics.TryStartTrajectory(
+                    uid,
+                    targetCoordinates,
+                    targetWorldZ,
+                    trajectoryDisplacement);
+            }
             return;
         }
 
         ShootProjectile(uid, mapDirection, gunVelocity, gun, user, gun.Comp.ProjectileSpeedModified);
         if (targetUid is { } projectileTarget)
             _zBallistics.TryStartTrajectory(uid, projectileTarget, trajectoryDisplacement);
+        else if (gun.Comp.TargetWorldZ is { } targetWorldZ &&
+                 targetWorldZ != ZLevels.GetWorldZLevel(uid) &&
+                 gun.Comp.ShootCoordinates is { } targetCoordinates)
+        {
+            _zBallistics.TryStartTrajectory(
+                uid,
+                targetCoordinates,
+                targetWorldZ,
+                trajectoryDisplacement);
+        }
     }
 
     /// <summary>

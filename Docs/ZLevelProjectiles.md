@@ -4,7 +4,8 @@ Physical projectiles and thrown entities retain the existing Robust horizontal
 physics model. WTZ adds explicit floor authority at lifecycle boundaries without
 turning ordinary same-floor shots or throws into vertical arcs. An explicit,
 bounded trajectory is added only when a normal server-side fire or throw input
-resolves a visible target entity on another floor of the same grid frame.
+resolves a visible target entity or validated lower-floor coordinate in the same
+grid frame.
 
 ## Floor Authority
 
@@ -27,12 +28,19 @@ grid whose local Z is displaced by `ZLevelFrameComponent.Origin`.
 ## Bounded Vertical Trajectories
 
 `SharedZLevelBallisticSystem.TryStartTrajectory` receives the projectile or
-thrown entity, the server-resolved target entity, and the actual planar
-displacement after range clamping, recoil, or spread. It rejects same-floor,
-hidden, cross-map, cross-grid, inactive, non-physical, non-finite, and trace
-budget-exhausted requests. The target selects the destination floor, while the
-displacement selects the planar route. Target movement after launch does not
-retarget the shot.
+thrown entity, either a server-resolved target entity or an explicitly validated
+coordinate/world-Z pair, and the actual planar displacement after range
+clamping, recoil, or spread. It rejects same-floor, hidden, cross-map,
+cross-grid, inactive, non-physical, non-finite, and trace-budget-exhausted
+requests. The target selects the destination floor, while the displacement
+selects the planar route. Target movement after launch does not retarget the
+shot.
+
+Normal gun requests, action guns, and projectile spells forward targetless
+coordinate layers through the same authority. A physically pure-vertical shot
+uses a 0.1-tile displacement in the shooter's facing direction so the 2D solver
+can measure progress; the route still performs every ordered vertical crossing
+and boundary check. Same-floor coordinate shots never enter the router.
 
 The networked `ZLevelBallisticTrajectoryComponent` stores a route in the grid's
 local frame. A line between floor centers crosses each half-level plane in
@@ -76,9 +84,8 @@ stamps that value into the destination grid or map frame afterward.
 
 ## Current Limits
 
-- Vertical physical flight currently requires a target entity. Clicking an
-  empty lower-floor tile does not yet carry enough authoritative view-Z input to
-  select a destination floor.
+- Targetless vertical flight requires the nearest visible non-empty lower-floor
+  surface. Arbitrary empty sparse layers are not valid destinations.
 - Player-facing visibility currently authorizes lower-floor targets. Upward
   physical targeting remains disabled until upper-floor FOV and input policy
   are implemented coherently.
@@ -116,3 +123,8 @@ terminal metrics, and batched contact flushing. Its completion gate passes
 18/18 trajectory cases, 12/12 affected regressions, the cumulative 101/101
 Z-level matrix, 7/7 engine contact tests, 2/2 structural unit tests, and all
 three stress baselines.
+
+P2.4d3b adds targetless gun coordinates, pure-vertical physical flight,
+same-floor zero-route delegation, action guns, and projectile spells. The final
+consumer matrix passes 22/22 ballistic cases, 11/11 hitscan cases, and 164/164
+focused Z-level integration cases with no skips.

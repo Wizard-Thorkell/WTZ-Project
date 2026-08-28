@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/interaction-targeting`.
-- Active package: `P2.4d3b coordinate aiming for projectile consumers`.
+- Active package: `P2.4d3c forged/stale request hardening and final P2 review`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -821,8 +821,8 @@ P2.4 is split into independently gated subpackages:
 | P2.4d1 | Pointer coordinate-layer transport, frame ownership, and server authority | Complete |
 | P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | Complete |
 | P2.4d3a | Explicit lower-floor coordinate opt-in, visibility, frame, and range authority | Complete |
-| P2.4d3b | Coordinate aiming for guns, hitscan, projectiles, action guns, and projectile spells | In progress |
-| P2.4d3c | Forged/stale request hardening and final P2 automated/manual review | Pending |
+| P2.4d3b | Coordinate aiming for guns, hitscan, projectiles, action guns, and projectile spells | Complete |
+| P2.4d3c | Forged/stale request hardening and final P2 automated/manual review | In progress |
 
 ### P2.4 Contracts
 
@@ -1564,6 +1564,118 @@ P2.4 is split into independently gated subpackages:
   manual review.
 - Next package: carry world Z through normal gun requests and every projectile
   consumer, then start coordinate trajectories through the `Projectile` trace.
+
+## Completed Package: P2.4d3b Coordinate Aiming For Projectile Consumers
+
+### Scope
+
+- Carry the selected world Z through normal gun requests without changing the
+  planar `EntityCoordinates` contract or trusting the client-selected layer.
+- Let targetless hitscan and physical ammunition aim at the nearest visible,
+  non-empty lower-floor surface in the same structural frame.
+- Forward validated coordinate layers through action guns and projectile spells.
+- Enable the explicit world-action opt-in only for Fireball and Dragon's Breath.
+- Preserve ordinary same-floor gun, projectile, recoil, spread, and reflection
+  behavior without creating vertical route work.
+
+### Contracts
+
+- The server resolves entity target layers from the entity itself. Targetless
+  layers must be downward, visible, non-empty, finite, on the same map and frame,
+  and are revalidated from the server-owned interaction origin.
+- `Visibility` authorizes selection only. Hitscan and physical ammunition still
+  trace the independent `Projectile` boundary channel before crossing a deck.
+- Hitscan uses the exact coordinate destination and combined XYZ max range.
+  Physical ammunition keeps Robust's 2D solver and uses a 0.1-tile facing
+  displacement only when an otherwise pure-vertical route needs planar progress.
+- Same-floor requests never call the vertical ballistic router. Existing callers
+  that omit a coordinate layer retain their native path.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to gun-layer transport, projectile
+      consumers, two production opt-ins, focused tests, and documentation.
+- [x] Invariant review: Z 0 parity, world/local frame origins, translated and
+      rotated grids, downward visibility, independent projectile boundaries,
+      XYZ range, recoil/spread, pure-vertical motion, and same-floor delegation
+      were reviewed.
+- [x] Automated verification: 33/33 focused hitscan/ballistic cases, 27/27 native
+      interaction/action/DoAfter/pulling regressions, 1/1 native weapon case,
+      and 164/164 focused `ZLevel` integration cases pass with no skips. The
+      complete solution builds with zero errors and its established 711-warning
+      baseline.
+- [x] Performance evidence: same-floor coordinate fire records zero ballistic
+      route attempts. Lower-surface discovery is click/fire-request driven and
+      bounded by the configured visibility distance; cross-floor consumers add
+      one existing buffered trace or bounded trajectory per shot and no retained
+      per-entity cache or global tick scan.
+- [x] Documentation: transport, authority, consumer behavior, content opt-ins,
+      verification, limitations, and review findings are recorded here and in
+      `Docs/ZLevel.md`, `Docs/ZLevelHitscan.md`, and `Docs/ZLevelProjectiles.md`.
+- [x] Dependency check: no engine change is required; WTZ Project remains paired
+      with clean WTZ Engine commit
+      `ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c`.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risks, and the P2.4d3c handoff are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Aim projectiles at lower-floor
+      coordinates` commit on `zlevel/interaction-targeting`; remote verification
+      follows the package commit.
+
+### Evidence
+
+- `ZLevelHitscanTest` and `ZLevelBallisticTrajectoryTest` pass 33/33. New cases
+  prove targetless coordinate hitscan, pure-vertical physical flight through two
+  boundaries, same-floor zero-route delegation, action-gun forwarding, and the
+  projectile-spell consumer.
+- The pure-vertical case reaches the lower target, records exactly two ordered
+  crossings and one completed route, and never gains a targeted-projectile UID.
+- Fireball and Dragon's Breath are the only production world actions opted into
+  lower-floor coordinates. Integration startup loads both prototypes without a
+  serialization or data-definition failure.
+- The expanded native matrix passes 27/27, the native wielded-gun regression
+  passes 1/1, and `dotnet test ... --filter "FullyQualifiedName~ZLevel"` passes
+  164/164 with no skips.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes in
+  1m12s with zero errors and the established 711 dependency, vulnerability,
+  analyzer, and upstream-obsolescence warnings.
+
+### Decisions
+
+- Extend the existing gun request instead of introducing a second firing RPC.
+  The nullable field preserves wire/default behavior for old and programmatic
+  callers while the server remains authoritative.
+- Keep entity-target and coordinate-target ballistic overloads separate at the
+  public edge, then share one validated route constructor. This avoids inventing
+  a fake entity for an empty lower-floor surface.
+- Use one tiny planar displacement for pure-vertical physical ammunition because
+  the current physics controller measures route progress in 2D. Hitscan remains
+  geometrically vertical and does not need that compatibility step.
+- Opt in production content only after every consumer path had focused coverage;
+  unrelated world actions remain same-floor by default.
+
+### Mini Review
+
+- Finding: the first pure-vertical test expected to observe local Z 1 between
+  ticks. A short route can process both crossings in one tick, so the final test
+  checks the authoritative two-crossing metric plus destination and impact.
+- Finding: ordinary same-floor shots initially reached the coordinate overload
+  and recorded a rejected route attempt. Both server branches now compare the
+  projectile's authoritative world Z first, and a regression proves zero route
+  work.
+- Finding: `ActionGunShootEvent` is a value event; the focused test now raises it
+  by value, satisfying the event analyzer and matching production dispatch.
+- Residual risk: a target entity can disappear, move floors, or change frames
+  between request validation and consumer execution. Forged upper/different-frame
+  requests also need terminal rejection instead of harmless same-floor fallback.
+- Residual risk: transient gun aim state persists across burst/continuous-fire
+  lifecycle boundaries by native design. P2.4d3c must prove that stale world Z
+  cannot be reused by a later request.
+- Residual risk: automated coverage cannot judge cursor feel, effect placement,
+  or overlapping-sprite readability. The final P2 manual matrix remains required.
+- Next package: harden forged and one-tick-stale gun requests, test lifecycle
+  cleanup and terminal rejection, then run the final automated/manual P2 review.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2521,3 +2633,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4d1 | `Carry authoritative floors through pointer targets` | 20 authority, 24 native regression, 153 integration, 2 engine, full build, diff check | Complete |
 | 2026-08-28 | P2.4d2 | `Enable authored cross-floor entity interactions` | 25 authority, 24 native regression, 158 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3a | `Authorize visible lower-floor action coordinates` | 26 authority, 24 native regression, 159 integration, full build, diff check | Complete |
+| 2026-08-28 | P2.4d3b | `Aim projectiles at lower-floor coordinates` | 33 combat, 27 native interaction, 1 native weapon, 164 integration, full build, diff check | Complete |

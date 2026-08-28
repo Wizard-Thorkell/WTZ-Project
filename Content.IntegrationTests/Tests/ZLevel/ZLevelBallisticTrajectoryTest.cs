@@ -9,10 +9,13 @@ using System.Numerics;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.IntegrationTests.Tests.Helpers;
+using Content.Shared.Actions.Components;
+using Content.Shared.Magic.Events;
 using Content.Shared.Projectiles;
 using Content.Shared.Throwing;
 using Content.Shared.Weapons.Ranged.Components;
 using Content.Shared.Weapons.Ranged.Events;
+using Content.Shared.Weapons.Ranged.Systems;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -449,6 +452,196 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
                 Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
                 Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
                 Assert.That(metrics.BallisticRoutesCompleted, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
+    public async Task TargetlessGunCoordinateStartsPureVerticalTrajectory()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid projectile = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            var gun = Spawn(testMap, "ZLevelBallisticTestGun", new Vector2(0.25f, 0.5f), 2);
+            target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(0.25f, 0.5f), 0);
+            SEntMan.EnsureComponent<TestListenerComponent>(gun);
+
+            var gunSystem = SEntMan.System<Content.Server.Weapons.Ranged.Systems.GunSystem>();
+            var gunComponent = SEntMan.GetComponent<GunComponent>(gun);
+            var targetCoordinates = SEntMan.GetComponent<TransformComponent>(target).Coordinates;
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+
+            Assert.That(
+                gunSystem.AttemptShoot(
+                    source,
+                    (gun, gunComponent),
+                    targetCoordinates,
+                    targetWorldZ: FrameOrigin),
+                Is.True);
+            projectile = SEntMan.System<AmmoShotListenerSystem>()
+                .GetEvents(gun)
+                .Single()
+                .FiredProjectiles
+                .Single();
+            SEntMan.EnsureComponent<TestListenerComponent>(projectile);
+
+            var trajectory = SEntMan.GetComponent<ZLevelBallisticTrajectoryComponent>(projectile);
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.HasComponent<TargetedProjectileComponent>(projectile), Is.False);
+                Assert.That(trajectory.TargetLocalZ, Is.Zero);
+                Assert.That(
+                    trajectory.PlanarDistance,
+                    Is.EqualTo(SharedGunSystem.VerticalShotPlanarDisplacement).Within(0.0001f));
+            });
+        });
+
+        var observedLevels = await ObserveProjectileUntilSpent(projectile);
+
+        await Server.WaitAssertion(() =>
+        {
+            var hits = SEntMan.System<ProjectileHitListenerSystem>().GetEvents(projectile).ToArray();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(observedLevels, Does.Contain(0));
+                Assert.That(hits, Has.Length.EqualTo(1));
+                Assert.That(hits[0].Target, Is.EqualTo(target));
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
+                Assert.That(metrics.BallisticCrossings, Is.EqualTo(2));
+                Assert.That(metrics.BallisticRoutesCompleted, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
+    public async Task SameFloorGunCoordinateDoesNotAttemptVerticalTrajectory()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            var gun = Spawn(testMap, "ZLevelBallisticTestGun", new Vector2(0.25f, 0.5f), 2);
+            var target = Spawn(testMap, "ZLevelBallisticTarget", new Vector2(4.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<TestListenerComponent>(gun);
+
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            metrics.ResetCounters();
+            Assert.That(
+                SEntMan.System<Content.Server.Weapons.Ranged.Systems.GunSystem>().AttemptShoot(
+                    source,
+                    (gun, SEntMan.GetComponent<GunComponent>(gun)),
+                    SEntMan.GetComponent<TransformComponent>(target).Coordinates,
+                    targetWorldZ: SEntMan.System<SharedZLevelSystem>().GetWorldZLevel(target)),
+                Is.True);
+
+            var projectile = SEntMan.System<AmmoShotListenerSystem>()
+                .GetEvents(gun)
+                .Single()
+                .FiredProjectiles
+                .Single();
+            var snapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.HasComponent<ZLevelBallisticTrajectoryComponent>(projectile), Is.False);
+                Assert.That(snapshot.BallisticRouteAttempts, Is.Zero);
+                Assert.That(snapshot.BallisticRoutesStarted, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task ActionGunForwardsTargetlessCoordinateWorldZ()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            var gun = Spawn(testMap, "ZLevelBallisticTestGun", new Vector2(0.25f, 0.5f), 2);
+            var targetCoordinates = new EntityCoordinates(testMap.Grid, new Vector2(4.25f, 0.5f));
+            SEntMan.EnsureComponent<TestListenerComponent>(gun);
+#pragma warning disable RA0002
+            SEntMan.EnsureComponent<ActionGunComponent>(source).Gun = gun;
+#pragma warning restore RA0002
+
+            var fired = new ActionGunShootEvent
+            {
+                Performer = source,
+                Target = targetCoordinates,
+                TargetWorldZ = FrameOrigin,
+            };
+            SEntMan.EventBus.RaiseLocalEvent(source, fired);
+
+            var projectile = SEntMan.System<AmmoShotListenerSystem>()
+                .GetEvents(gun)
+                .Single()
+                .FiredProjectiles
+                .Single();
+            var trajectory = SEntMan.GetComponent<ZLevelBallisticTrajectoryComponent>(projectile);
+            Assert.Multiple(() =>
+            {
+                Assert.That(trajectory.TargetLocalZ, Is.Zero);
+                Assert.That(trajectory.PlanarDistance, Is.EqualTo(4f).Within(0.0001f));
+            });
+        });
+    }
+
+    [Test]
+    public async Task ProjectileSpellForwardsTargetlessCoordinateWorldZ()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var source = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            var action = Spawn(testMap, null, new Vector2(0.25f, 0.5f), 2);
+            var actionComponent = SEntMan.EnsureComponent<ActionComponent>(action);
+            SEntMan.System<SharedZLevelMetricsSystem>().ResetCounters();
+
+            var fired = new ProjectileSpellEvent
+            {
+                Performer = source,
+                Action = (action, actionComponent),
+                Target = new EntityCoordinates(testMap.Grid, new Vector2(4.25f, 0.5f)),
+                TargetWorldZ = FrameOrigin,
+                Prototype = "ZLevelBallisticProbeProjectile",
+            };
+            SEntMan.EventBus.RaiseEvent(EventSource.Local, fired);
+
+            EntityUid projectile = default;
+            ZLevelBallisticTrajectoryComponent? trajectory = null;
+            var query = SEntMan.EntityQueryEnumerator<ZLevelBallisticTrajectoryComponent>();
+            while (query.MoveNext(out var candidate, out var candidateTrajectory))
+            {
+                if (candidateTrajectory.FrameUid != testMap.Grid.Owner)
+                    continue;
+
+                Assert.That(trajectory, Is.Null);
+                projectile = candidate;
+                trajectory = candidateTrajectory;
+            }
+
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>().Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(fired.Handled, Is.True);
+                Assert.That(projectile.IsValid(), Is.True);
+                Assert.That(trajectory, Is.Not.Null);
+                Assert.That(trajectory!.TargetLocalZ, Is.Zero);
+                Assert.That(trajectory.PlanarDistance, Is.EqualTo(4f).Within(0.0001f));
+                Assert.That(metrics.BallisticRouteAttempts, Is.EqualTo(1));
+                Assert.That(metrics.BallisticRoutesStarted, Is.EqualTo(1));
             });
         });
     }

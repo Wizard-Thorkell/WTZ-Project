@@ -9,6 +9,7 @@ using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
 using Robust.Shared.Utility;
 
@@ -118,6 +119,9 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
             targetTransform.MapID == originMap.MapId)
         {
             var targetWorldZ = _zLevels.GetWorldZLevel(target);
+            if (args.TargetWorldZ is { } selectedWorldZ && selectedWorldZ != targetWorldZ)
+                return false;
+
             if (targetWorldZ != originWorldZ &&
                 frameUid is { } commonFrame &&
                 targetTransform.GridUid == commonFrame &&
@@ -139,6 +143,43 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
                     destinationWorldZ = targetWorldZ;
                 }
             }
+        }
+        else if (args.TargetWorldZ is { } targetWorldZ && targetWorldZ != originWorldZ)
+        {
+            if (args.TargetCoordinates is not { } targetCoordinates ||
+                !targetCoordinates.IsValid(EntityManager) ||
+                frameUid is not { } commonFrame)
+            {
+                return false;
+            }
+
+            var coordinateFrame = HasComp<MapGridComponent>(targetCoordinates.EntityId)
+                ? targetCoordinates.EntityId
+                : _transform.GetGrid(targetCoordinates);
+            var targetMap = _transform.ToMapCoordinates(targetCoordinates);
+            if (coordinateFrame != commonFrame ||
+                targetMap.MapId != originMap.MapId ||
+                !IsFinite(targetMap.Position) ||
+                !_zVisibility.IsCoordinateVisibleFrom(
+                    targetCoordinates,
+                    targetWorldZ,
+                    originMap.MapId,
+                    originWorldZ))
+            {
+                return false;
+            }
+
+            var planarDistance = Vector2.Distance(originMap.Position, targetMap.Position);
+            var verticalDistance = (double) targetWorldZ - originWorldZ;
+            var traceDistance = Math.Sqrt(
+                (double) planarDistance * planarDistance + verticalDistance * verticalDistance);
+            if (!double.IsFinite(traceDistance) || traceDistance > maxDistance)
+                return false;
+
+            destinationPosition = planarDistance == 0f || directionLength == 0f
+                ? targetMap.Position
+                : originMap.Position + direction * planarDistance;
+            destinationWorldZ = targetWorldZ;
         }
 
         if (!TryCreatePoint(originMap, originWorldZ, frameUid, out var origin) ||

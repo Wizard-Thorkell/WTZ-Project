@@ -283,6 +283,7 @@
     checkCanAccess: false
     range: 0
   - type: WorldTargetAction
+    allowCrossLevelCoordinates: true
     event: !type:ActionGunShootEvent
 
 - type: entity

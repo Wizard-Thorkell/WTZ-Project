@@ -25,6 +25,11 @@ public sealed class RequestShootEvent : EntityEventArgs
     public NetEntity? Target;
 
     /// <summary>
+    /// Optional world Z selected for the aim. Entity targets remain authoritative for their own layer.
+    /// </summary>
+    public int? CoordinateLayer;
+
+    /// <summary>
     /// If the client wants to continuously shoot.
     /// If true, the gun will continue firing until a stop event is sent from the client.
     /// </summary>

@@ -145,6 +145,12 @@ public sealed partial class GunComponent : Component
     public EntityUid? Target = null;
 
     /// <summary>
+    /// World Z associated with <see cref="ShootCoordinates"/> for the current request.
+    /// </summary>
+    [ViewVariables]
+    public int? TargetWorldZ = null;
+
+    /// <summary>
     ///     The base value for how many shots to fire per burst.
     /// </summary>
     [DataField, AutoNetworkedField]
