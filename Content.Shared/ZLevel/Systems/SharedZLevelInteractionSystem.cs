@@ -2,6 +2,7 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using System.Numerics;
+using Content.Shared.Physics;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -76,8 +77,12 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         EntityUid user,
         EntityUid target,
         bool allowVertical,
-        float maximumRange = 0f)
+        float maximumRange = 0f,
+        CollisionGroup collisionMask = CollisionGroup.None,
+        EntityUid? ignoredEntity = null,
+        ZLevelTraceBuffer? traceBuffer = null)
     {
+        traceBuffer?.Clear();
         if (!TryGetSpatialOrigin(user, target, out var origin))
         {
             return RecordDecision(ZLevelInteractionDecision.InvalidContextRejected, false);
@@ -128,10 +133,15 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
             traceOrigin,
             traceTarget,
             ZLevelBoundaryChannels.Interaction,
-            Options: ZLevelTraceOptions.None,
+            CollisionMask: (int) collisionMask,
+            IgnoredEntity: ignoredEntity,
+            Options: collisionMask == CollisionGroup.None
+                ? ZLevelTraceOptions.None
+                : ZLevelTraceOptions.IncludeEntityHits,
             BoundaryFrameUid: frameUid);
+        var buffer = traceBuffer ?? _traceBuffer;
         return RecordDecision(
-            _trace.Trace(request, _traceBuffer).ReachedDestination
+            _trace.Trace(request, buffer).ReachedDestination
                 ? ZLevelInteractionDecision.VerticalAllowed
                 : ZLevelInteractionDecision.TraceRejected,
             remoteOrigin);
@@ -145,6 +155,42 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
     public bool CanInteractThroughOpenBoundary(EntityUid user, EntityUid target, float maximumRange)
     {
         return CanInteract(user, target, true, maximumRange);
+    }
+
+    /// <summary>
+    /// Traces an explicitly vertical interaction and retains its segmented fixture hits.
+    /// The caller owns the gameplay-specific decision about which hits are obstructions.
+    /// </summary>
+    public bool CanInteractThroughOpenBoundary(
+        EntityUid user,
+        EntityUid target,
+        float maximumRange,
+        CollisionGroup collisionMask,
+        EntityUid? ignoredEntity,
+        ZLevelTraceBuffer traceBuffer)
+    {
+        ArgumentNullException.ThrowIfNull(traceBuffer);
+        return CanInteract(
+            user,
+            target,
+            true,
+            maximumRange,
+            collisionMask,
+            ignoredEntity,
+            traceBuffer);
+    }
+
+    /// <summary>
+    /// Returns whether a target shares the effective interaction origin's map and world level.
+    /// Unlike <see cref="AreOnSameWorldLevel"/>, this follows remote-eye and relay spatial ownership.
+    /// </summary>
+    public bool AreOnSameEffectiveWorldLevel(EntityUid user, EntityUid target)
+    {
+        return TryGetSpatialOrigin(user, target, out var origin) &&
+               TryGetContext(origin, out var originContext) &&
+               TryGetContext(target, out var targetContext) &&
+               originContext.MapCoordinates.MapId == targetContext.MapCoordinates.MapId &&
+               originContext.WorldZ == targetContext.WorldZ;
     }
 
     /// <summary>

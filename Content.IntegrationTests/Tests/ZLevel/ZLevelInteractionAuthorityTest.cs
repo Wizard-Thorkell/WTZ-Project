@@ -2,7 +2,9 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using System.Numerics;
+using Content.Client.ZLevel;
 using Content.IntegrationTests.Fixtures;
+using Content.IntegrationTests.Fixtures.Attributes;
 using Content.IntegrationTests.Tests.Helpers;
 using Content.Server.Administration.Managers;
 using Content.Server.Silicons.StationAi;
@@ -35,6 +37,27 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
 {
     private const int FrameOrigin = 5;
     private const int AllocationIterations = 4_096;
+
+    [TestPrototypes]
+    private const string InteractionPrototypes = @"
+- type: entity
+  parent: BaseStructure
+  id: ZLevelInteractionObstacle
+  components:
+  - type: Physics
+    bodyType: Static
+  - type: Fixtures
+    fixtures:
+      interaction:
+        shape:
+          !type:PhysShapeAabb
+          bounds: ""-0.1,-0.1,0.1,0.1""
+        mask:
+        - FullTileMask
+        layer:
+        - WallLayer
+        hard: true
+";
 
     [Test]
     public async Task ExplicitVerticalInteractionRequiresItsBoundaryChannel()
@@ -98,6 +121,137 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
                 Assert.That(snapshot.InteractionPhysicalQueries, Is.Zero);
                 Assert.That(snapshot.TraceQueries, Is.EqualTo(4));
             });
+        });
+    }
+
+    [Test]
+    public async Task UseReachExtendsOnlyThroughOpenInteractionBoundaries()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var position = new Vector2(0.5f, 0.5f);
+            var user = Spawn(testMap, position, 1);
+            var target = Spawn(testMap, position, 0);
+            var interaction = SEntMan.System<SharedInteractionSystem>();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(interaction.InRangeUnobstructed(user, target), Is.False,
+                    "The generic SS14 reach helper must remain same-floor only.");
+                Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.False,
+                    "A closed floor must reject the explicit vertical use helper.");
+            });
+
+            SetBoundary(
+                testMap,
+                Vector2i.Zero,
+                0,
+                opens: ZLevelBoundaryChannels.Interaction | ZLevelBoundaryChannels.Visibility);
+            Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.True);
+            Assert.That(interaction.InRangeUnobstructedForUse(target, user), Is.False,
+                "Server authority must match the client rule that only visible lower floors are selectable.");
+
+            var farTarget = Spawn(testMap, new Vector2(1.7f, 0.5f), 0);
+            SetBoundary(
+                testMap,
+                new Vector2i(1, 0),
+                0,
+                opens: ZLevelBoundaryChannels.Interaction | ZLevelBoundaryChannels.Visibility);
+            Assert.That(interaction.InRangeUnobstructedForUse(user, farTarget), Is.False,
+                "Combined XY and discrete-Z distance must retain the normal 1.5 tile use range.");
+        });
+    }
+
+    [Test]
+    public async Task VisibilityOnlyGrateCannotAuthorizePhysicalUse()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var position = new Vector2(0.5f, 0.5f);
+            var user = Spawn(testMap, position, 1);
+            var target = Spawn(testMap, position, 0);
+            var grate = SEntMan.SpawnEntity(
+                "ZLevelGrateBoundaryMarker",
+                new EntityCoordinates(testMap.Grid, position));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(grate, 1), Is.True);
+
+            var visibility = SEntMan.System<SharedZLevelVisibilitySystem>();
+            var interaction = SEntMan.System<SharedInteractionSystem>();
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    visibility.IsEntityVisibleFrom(target, testMap.MapId, FrameOrigin + 1),
+                    Is.True,
+                    "A grate must keep the lower target visible.");
+                Assert.That(
+                    interaction.InRangeUnobstructedForUse(user, target),
+                    Is.False,
+                    "Visibility alone must never grant the Interaction channel.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task VerticalUseChecksObstructionsOnEveryTraceSegment()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var user = Spawn(testMap, new Vector2(0.1f, 0.5f), 1);
+            var target = Spawn(testMap, new Vector2(1f, 0.5f), 0);
+            SetBoundary(
+                testMap,
+                Vector2i.Zero,
+                0,
+                opens: ZLevelBoundaryChannels.Interaction | ZLevelBoundaryChannels.Visibility);
+            var interaction = SEntMan.System<SharedInteractionSystem>();
+            Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.True,
+                "The rotated and translated frame must permit an unobstructed diagonal portal trace.");
+
+            var upperBlocker = Spawn(
+                testMap,
+                "ZLevelInteractionObstacle",
+                new Vector2(0.35f, 0.5f),
+                1);
+            Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.False,
+                "A blocker before the vertical crossing must reject use.");
+            SEntMan.DeleteEntity(upperBlocker);
+
+            var lowerBlocker = Spawn(
+                testMap,
+                "ZLevelInteractionObstacle",
+                new Vector2(0.8f, 0.5f),
+                0);
+            Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.False,
+                "A blocker after the vertical crossing must reject use.");
+            SEntMan.DeleteEntity(lowerBlocker);
+
+            Assert.That(interaction.InRangeUnobstructedForUse(user, target), Is.True);
+        });
+    }
+
+    [Test]
+    public void InteractionTargetingAlwaysPrefersTheCurrentFloor()
+    {
+        var comparer = ZLevelTargetingSystem.InteractionClickableComparer.Instance;
+        var sameFloor = (new EntityUid(1), 0, int.MinValue, 0u, float.MinValue);
+        var lowerFloor = (new EntityUid(2), 1, int.MaxValue, uint.MaxValue, float.MaxValue);
+        var twoFloorsDown = (new EntityUid(3), 2, int.MaxValue, uint.MaxValue, float.MaxValue);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(comparer.Compare(sameFloor, lowerFloor), Is.LessThan(0),
+                "Draw order must never let a lower-floor sprite steal a same-floor use click.");
+            Assert.That(comparer.Compare(lowerFloor, twoFloorsDown), Is.LessThan(0),
+                "After the current floor, the nearest visible lower floor must win.");
         });
     }
 
@@ -282,9 +436,9 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
         await Server.WaitAssertion(() =>
         {
             Configure(testMap);
-            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
-            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
-            var sameFloorTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            var sameFloorTarget = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
             var verbs = SEntMan.System<VerbSystem>();
             var executions = 0;
             Verb[] physicalVerbs =
@@ -316,9 +470,19 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
             Assert.That(executions, Is.Zero,
                 "Physical verbs and unauthenticated admin labels must reject a target on another world Z.");
 
+            SetBoundary(
+                testMap,
+                Vector2i.Zero,
+                0,
+                opens: ZLevelBoundaryChannels.Interaction | ZLevelBoundaryChannels.Visibility);
+            foreach (var verb in physicalVerbs)
+                verbs.ExecuteVerb(verb, user, target);
+            Assert.That(executions, Is.EqualTo(physicalVerbs.Length),
+                "Every physical verb family may cross an authored open portal within normal use range.");
+
             foreach (var verb in physicalVerbs)
                 verbs.ExecuteVerb(verb, user, sameFloorTarget);
-            Assert.That(executions, Is.EqualTo(physicalVerbs.Length),
+            Assert.That(executions, Is.EqualTo(physicalVerbs.Length * 2),
                 "All physical verb families must retain normal same-floor execution.");
 
             verbs.ExecuteVerb(new ExamineVerb { Act = () => executions++ }, user, target);
@@ -340,7 +504,7 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
             adminManager.DeAdmin(ServerSession!);
             Server.PlayerMan.SetAttachedEntity(ServerSession!, null);
 
-            Assert.That(executions, Is.EqualTo(physicalVerbs.Length + 4),
+            Assert.That(executions, Is.EqualTo(physicalVerbs.Length * 2 + 4),
                 "Examine, VV, authenticated admin verbs, and explicit forced execution keep their remote semantics.");
         });
     }
@@ -629,6 +793,55 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
         await Pair.RunTicksSync(1);
     }
 
+    [Test]
+    public async Task PointerUseRequiresAnAuthoredVerticalPortalAfterNetworking()
+    {
+        var testMap = await Pair.CreateTestMap();
+        NetEntity targetNet = default;
+        FunnelListenerSystem listener = default!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            Assert.That(ServerSession, Is.Not.Null);
+            var user = Spawn(testMap, new Vector2(0.5f, 0.5f), 1);
+            SEntMan.AddComponent<ComplexInteractionComponent>(user);
+            Server.PlayerMan.SetAttachedEntity(ServerSession!, user);
+
+            var target = Spawn(testMap, new Vector2(0.5f, 0.5f), 0);
+            SEntMan.AddComponent<FunnelListenerComponent>(target);
+            targetNet = SEntMan.GetNetEntity(target);
+            listener = SEntMan.System<FunnelListenerSystem>();
+            listener.Reset();
+        });
+        await Pair.RunTicksSync(5);
+        await AssertClientWorldZ(targetNet, FrameOrigin);
+
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Down);
+        await Pair.RunTicksSync(5);
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Up);
+        await Pair.RunTicksSync(1);
+        await Server.WaitAssertion(() =>
+            Assert.That(listener.HandEvents, Is.Zero,
+                "A correct coordinate layer must not bypass a closed Interaction boundary."));
+
+        await Server.WaitAssertion(() =>
+            SetBoundary(
+                testMap,
+                Vector2i.Zero,
+                0,
+                opens: ZLevelBoundaryChannels.Interaction | ZLevelBoundaryChannels.Visibility));
+        await Pair.RunTicksSync(2);
+
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Down);
+        await Pair.RunTicksSync(5);
+        await Server.WaitAssertion(() =>
+            Assert.That(listener.HandEvents, Is.EqualTo(1),
+                "The same server-owned target becomes usable after an authored portal opens."));
+        await SendPointerUse(targetNet, FrameOrigin, BoundKeyState.Up);
+        await Pair.RunTicksSync(1);
+    }
+
     private async Task SendPointerUse(NetEntity targetNet, int coordinateLayer, BoundKeyState state)
     {
         await Client.WaitPost(() =>
@@ -827,7 +1040,12 @@ public sealed partial class ZLevelInteractionAuthorityTest : GameTest
 
     private EntityUid Spawn(TestMapData testMap, Vector2 position, int localZ)
     {
-        var entity = SEntMan.SpawnEntity(null, new EntityCoordinates(testMap.Grid, position));
+        return Spawn(testMap, null, position, localZ);
+    }
+
+    private EntityUid Spawn(TestMapData testMap, string prototype, Vector2 position, int localZ)
+    {
+        var entity = SEntMan.SpawnEntity(prototype, new EntityCoordinates(testMap.Grid, position));
         Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(entity, localZ), Is.True);
         return entity;
     }

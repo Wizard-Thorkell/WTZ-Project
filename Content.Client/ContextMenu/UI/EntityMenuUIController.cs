@@ -10,6 +10,7 @@ using Content.Shared.CCVar;
 using Content.Shared.Examine;
 using Content.Shared.IdentityManagement;
 using Content.Shared.Input;
+using Content.Shared.Interaction;
 using Content.Shared.Verbs;
 using Content.Shared.ZLevel.Components;
 using Robust.Client.GameObjects;
@@ -53,6 +54,7 @@ namespace Content.Client.ContextMenu.UI
         [UISystemDependency] private readonly ExamineSystem _examineSystem = default!;
         [UISystemDependency] private readonly TransformSystem _xform = default!;
         [UISystemDependency] private readonly CombatModeSystem _combatMode = default!;
+        [UISystemDependency] private readonly SharedInteractionSystem _interactionSystem = default!;
         [UISystemDependency] private readonly ZLevelTargetingSystem _zLevelTargeting = default!;
 
         private bool _updating;
@@ -90,7 +92,7 @@ namespace Content.Client.ContextMenu.UI
         /// </summary>
         public void OpenRootMenu(List<EntityUid> entities)
         {
-            _zLevelTargeting.FilterEntities(entities, ZLevelTargetingMode.SameFloorOnly);
+            _zLevelTargeting.FilterEntities(entities, ZLevelTargetingMode.VisibleCrossFloorExamine);
             if (entities.Count == 0)
                 return;
 
@@ -136,15 +138,29 @@ namespace Content.Client.ContextMenu.UI
             }
 
             // do some other server-side interaction?
-            if (args.Function == EngineKeyFunctions.Use ||
-                args.Function == ContentKeyFunctions.ActivateItemInWorld ||
-                args.Function == ContentKeyFunctions.AltActivateItemInWorld ||
-                args.Function == ContentKeyFunctions.Point ||
+            var verticalUse = args.Function == EngineKeyFunctions.Use ||
+                              args.Function == ContentKeyFunctions.ActivateItemInWorld ||
+                              args.Function == ContentKeyFunctions.AltActivateItemInWorld;
+            var sameFloorCommand = args.Function == ContentKeyFunctions.Point ||
                 args.Function == ContentKeyFunctions.TryPullObject ||
-                args.Function == ContentKeyFunctions.MovePulledObject)
+                args.Function == ContentKeyFunctions.MovePulledObject;
+            if (verticalUse || sameFloorCommand)
             {
-                if (!_zLevelTargeting.IsEntityTargetable(entity.Value, ZLevelTargetingMode.SameFloorOnly))
+                if (verticalUse)
+                {
+                    if (!_zLevelTargeting.IsEntityTargetable(
+                            entity.Value,
+                            ZLevelTargetingMode.VisibleCrossFloorInteraction) ||
+                        _playerManager.LocalEntity is not { } player ||
+                        !_interactionSystem.InRangeUnobstructedForUse(player, entity.Value))
+                    {
+                        return;
+                    }
+                }
+                else if (!_zLevelTargeting.IsEntityTargetable(entity.Value, ZLevelTargetingMode.SameFloorOnly))
+                {
                     return;
+                }
 
                 var inputSys = _systemManager.GetEntitySystem<InputSystem>();
 
@@ -307,7 +323,7 @@ namespace Content.Client.ContextMenu.UI
         /// </summary>
         private void AddEntityToMenu(EntityUid entity, ContextMenuPopup menu)
         {
-            if (!_zLevelTargeting.IsEntityTargetable(entity, ZLevelTargetingMode.SameFloorOnly))
+            if (!_zLevelTargeting.IsEntityTargetable(entity, ZLevelTargetingMode.VisibleCrossFloorExamine))
                 return;
 
             var element = new EntityMenuElement(entity);

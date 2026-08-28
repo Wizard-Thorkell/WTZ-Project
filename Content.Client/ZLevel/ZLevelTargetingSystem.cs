@@ -29,6 +29,7 @@ public enum ZLevelTargetingMode : byte
     VisibleCrossFloorAdmin,
     VisibleTopmostAny,
     VisibleCrossFloorRanged,
+    VisibleCrossFloorInteraction,
 }
 
 /// <summary>
@@ -44,7 +45,7 @@ public sealed class ZLevelTargetingSystem : EntitySystem
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
     [Dependency] private readonly ZLevelViewContextSystem _viewContext = default!;
 
-    private readonly List<(EntityUid Entity, int Depth, uint RenderOrder, float Bottom)> _candidates = new();
+    private readonly List<(EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom)> _candidates = new();
     private EntityQuery<ClickableComponent> _clickableQuery;
     private EntityQuery<SpriteComponent> _spriteQuery;
     private EntityQuery<TransformComponent> _transformQuery;
@@ -60,6 +61,16 @@ public sealed class ZLevelTargetingSystem : EntitySystem
     public ZLevelTargetingMode GetTargetingModeForInput(BoundKeyFunction function)
     {
         if (function == ContentKeyFunctions.ExamineEntity)
+            return ZLevelTargetingMode.VisibleCrossFloorExamine;
+
+        if (function == EngineKeyFunctions.Use ||
+            function == ContentKeyFunctions.ActivateItemInWorld ||
+            function == ContentKeyFunctions.AltActivateItemInWorld)
+        {
+            return ZLevelTargetingMode.VisibleCrossFloorInteraction;
+        }
+
+        if (function == EngineKeyFunctions.UseSecondary)
             return ZLevelTargetingMode.VisibleCrossFloorExamine;
 
         if (function == ContentKeyFunctions.InspectEntity ||
@@ -109,13 +120,22 @@ public sealed class ZLevelTargetingSystem : EntitySystem
             if (!IsEntityTargetable(entity.Uid, viewerContext, mode))
                 continue;
 
-            _candidates.Add((entity.Uid, drawDepth, renderOrder, bottom));
+            var entityZ = _transform.GetWorldZLevel((
+                entity.Uid,
+                xform,
+                CompOrNull<ZLevelPositionComponent>(entity.Uid)));
+            var floorDistance = mode == ZLevelTargetingMode.VisibleCrossFloorInteraction
+                ? Math.Abs(viewerContext.WorldZLevel - entityZ)
+                : 0;
+            _candidates.Add((entity.Uid, floorDistance, drawDepth, renderOrder, bottom));
         }
 
         if (_candidates.Count == 0)
             return Array.Empty<EntityUid>();
 
-        _candidates.Sort(ClickableComparer.Instance);
+        _candidates.Sort(mode == ZLevelTargetingMode.VisibleCrossFloorInteraction
+            ? InteractionClickableComparer.Instance
+            : ClickableComparer.Instance);
         return _candidates.Select(c => c.Entity).ToArray();
     }
 
@@ -202,6 +222,8 @@ public sealed class ZLevelTargetingSystem : EntitySystem
                 _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
             ZLevelTargetingMode.VisibleCrossFloorRanged => entityZ < viewer.WorldZLevel &&
                 _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
+            ZLevelTargetingMode.VisibleCrossFloorInteraction => entityZ < viewer.WorldZLevel &&
+                _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
             ZLevelTargetingMode.VisibleCrossFloorAdmin => entityZ < viewer.WorldZLevel &&
                 _visibility.IsEntityVisibleFrom(entity, viewer.MapId, viewer.WorldZLevel),
             ZLevelTargetingMode.VisibleTopmostAny =>
@@ -219,13 +241,13 @@ public sealed class ZLevelTargetingSystem : EntitySystem
         return new ZLevelViewContext(null, MapId.Nullspace, 0, 0);
     }
 
-    private sealed class ClickableComparer : IComparer<(EntityUid Entity, int Depth, uint RenderOrder, float Bottom)>
+    private sealed class ClickableComparer : IComparer<(EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom)>
     {
         public static readonly ClickableComparer Instance = new();
 
         public int Compare(
-            (EntityUid Entity, int Depth, uint RenderOrder, float Bottom) x,
-            (EntityUid Entity, int Depth, uint RenderOrder, float Bottom) y)
+            (EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom) x,
+            (EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom) y)
         {
             var cmp = y.Depth.CompareTo(x.Depth);
             if (cmp != 0)
@@ -240,6 +262,19 @@ public sealed class ZLevelTargetingSystem : EntitySystem
                 return cmp;
 
             return y.Entity.CompareTo(x.Entity);
+        }
+    }
+
+    internal sealed class InteractionClickableComparer : IComparer<(EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom)>
+    {
+        public static readonly InteractionClickableComparer Instance = new();
+
+        public int Compare(
+            (EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom) x,
+            (EntityUid Entity, int FloorDistance, int Depth, uint RenderOrder, float Bottom) y)
+        {
+            var floor = x.FloorDistance.CompareTo(y.FloorDistance);
+            return floor != 0 ? floor : ClickableComparer.Instance.Compare(x, y);
         }
     }
 }

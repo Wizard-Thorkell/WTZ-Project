@@ -2,6 +2,7 @@ using Content.Client.ContextMenu.UI;
 using Content.Client.Gameplay;
 using Content.Client.Interactable.Components;
 using Content.Client.Viewport;
+using Content.Client.ZLevel;
 using Content.Shared.CCVar;
 using Content.Shared.Interaction;
 using Robust.Client.Graphics;
@@ -114,11 +115,17 @@ public sealed class InteractionOutlineSystem : EntitySystem
             if (vp is ScalingViewport svp)
             {
                 renderScale = svp.CurrentRenderScale;
-                entityToClick = screen.GetClickedEntity(mousePosWorld, svp.Eye);
+                entityToClick = screen.GetClickedEntity(
+                    mousePosWorld,
+                    svp.Eye,
+                    ZLevelTargetingMode.VisibleCrossFloorInteraction);
             }
             else
             {
-                entityToClick = screen.GetClickedEntity(mousePosWorld);
+                entityToClick = screen.GetClickedEntity(
+                    mousePosWorld,
+                    _eyeManager.CurrentEye,
+                    ZLevelTargetingMode.VisibleCrossFloorInteraction);
             }
         }
         else if (_uiManager.CurrentlyHovered is EntityMenuElement element)
@@ -134,7 +141,9 @@ public sealed class InteractionOutlineSystem : EntitySystem
         var inRange = false;
         if (localSession.AttachedEntity != null && !Deleted(entityToClick))
         {
-            inRange = _interactionSystem.InRangeUnobstructed(localSession.AttachedEntity.Value, entityToClick.Value);
+            inRange = _interactionSystem.InRangeUnobstructedForUse(
+                localSession.AttachedEntity.Value,
+                entityToClick.Value);
         }
 
         InteractionOutlineComponent? outline;

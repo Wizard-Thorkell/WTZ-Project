@@ -145,8 +145,19 @@ Implemented traversal and debug tooling:
 - World-target actions carry the selected layer through prediction and expose
   the validated value as `WorldTargetActionEvent.TargetWorldZ`. Existing callers
   that omit the optional layer retain same-floor behavior.
-- Normal physical use remains same-floor-only until visible lower-floor target
-  selection and segmented interaction obstruction are enabled together.
+- Normal pointer use, world activation, and alternate use always prefer a
+  current-floor entity over overlapping sprites. When no current-floor target
+  wins, they can deliberately select the nearest visible lower-floor entity.
+- Lower-floor physical use requires both a `Visibility` path and an independently
+  authored `Interaction` path, remains inside the ordinary combined XY/Z use
+  range, and checks native fixture obstruction on every horizontal trace
+  segment. A grate can therefore expose an entity without making it usable.
+- The server repeats the lower-and-visible, frame, range, boundary, and fixture
+  checks from server-owned state. Upper-floor entities remain ineligible for
+  ordinary use even if a forged client knows their UID.
+- Context menus include visible lower entities for examination and expose
+  physical verbs only when the same use-specific authority succeeds. Pointing,
+  pulling, and moving a pulled object remain same-floor operations.
 - Every gameplay verb family, including the generic `Verb` used by pulling,
   rotation, UI activation, and other physical content, revalidates same-world-Z
   authority at execution time. Examine, VV, explicit forced execution, and
@@ -489,7 +500,9 @@ Major unfinished areas:
 - Hitscan, physical projectile lifecycle, and authoritative explosion topology
   are Z-aware. Fire, atmospheric heat, physical vertical flight, and other area
   effects remain incomplete.
-- Click priority and interaction semantics need more coverage.
+- Empty-tile cross-floor actions and aiming still need an explicit owning
+  subsystem opt-in; entity-target click priority and physical use are covered,
+  while final manual UI/gameplay coverage belongs to the P2 completion matrix.
 - Grid lookup still begins from a 2D `MapCoordinates` selection in several
   engine APIs. Once a destination grid is known, callers now convert world Z to
   that grid's local frame correctly, but physically overlapping grids at the
@@ -728,20 +741,21 @@ inspection feel intentional across floors.
 Tasks:
 
 - [Partial] Audit all client click resolution paths. Pointer layer transport,
-  frame selection, context-menu synthesis, drag replay, and core execution
-  funnels are covered; lower-floor selection and click priority remain.
+  frame selection, context-menu synthesis, drag replay, entity-target selection,
+  and same-floor-first click priority are covered; coordinate-only consumers
+  remain for the final P2 package.
 - [Done server-side] Ensure same-floor interaction is the default for
   use/pickup/pull, verbs, BUI, entity actions, drag/drop, and finite-range
   targeted DoAfters.
-- Allow cross-floor examine only through visible openings.
+- [Done] Allow cross-floor examine only through visible openings.
 - Keep admin inspection capable of deliberate cross-floor targeting.
-- Improve click priority when entities overlap in XY but differ in Z.
-- Add support for selecting lower-floor entities through holes without stealing
-  normal same-floor clicks.
-- [Partial] Ensure verbs only appear for valid floor contexts. Execution is
-  authoritative; client menu filtering remains part of targeting polish.
+- [Done] Improve click priority when entities overlap in XY but differ in Z.
+- [Done] Add support for selecting lower-floor entities through holes without
+  stealing normal same-floor clicks.
+- [Done] Ensure verbs only appear for valid floor contexts and revalidate their
+  physical authority at execution.
 - Ensure construction/deconstruction interactions target active floor surfaces.
-- Add tests for same-XY entities on different floors.
+- [Done] Add tests for same-XY entities on different floors.
 
 Exit criteria:
 

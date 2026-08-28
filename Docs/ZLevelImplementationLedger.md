@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/interaction-targeting`.
-- Active package: `P2.4d2 cross-floor entity targeting and segmented obstruction`.
+- Active package: `P2.4d3 empty-tile actions/projectiles and final P2 regression review`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -819,8 +819,8 @@ P2.4 is split into independently gated subpackages:
 | P2.4b | Interaction metrics and authored vertical portals | Complete |
 | P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Complete |
 | P2.4d1 | Pointer coordinate-layer transport, frame ownership, and server authority | Complete |
-| P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | In progress |
-| P2.4d3 | Empty-tile actions/projectiles and final P2 regression review | Pending |
+| P2.4d2 | Cross-floor entity targeting, click priority, menus, and segmented obstruction | Complete |
+| P2.4d3 | Empty-tile actions/projectiles and final P2 regression review | In progress |
 
 ### P2.4 Contracts
 
@@ -1342,6 +1342,119 @@ P2.4 is split into independently gated subpackages:
 - Next package: implement same-floor-first entity selection, bounded visible
   lower-floor candidates, authoritative open-boundary use, segmented native
   obstruction, and matching context-menu filtering.
+
+## Completed Package: P2.4d2 Authored Cross-Floor Entity Use
+
+### Scope
+
+- Add a dedicated client targeting mode for normal use, world activation, and
+  alternate use that considers same-floor and visible lower-floor entities.
+- Sort interaction candidates by floor distance before native sprite draw
+  order, so an overlapping lower sprite can never steal a current-floor click.
+- Extend physical use and verb reach only through authored vertical portals,
+  preserving ordinary same-floor interaction behavior exactly.
+- Trace native interaction collision masks over every horizontal segment before
+  and after a vertical crossing while retaining item and wall-mount exemptions.
+- Align hover outlines and context menus with the same selection and reach
+  policy, while leaving pulling and other non-opted-in commands same-floor.
+
+### Contracts
+
+- Cross-floor entity use is downward-only under the current viewport policy.
+  The target must be visible through the `Visibility` channel and usable through
+  the independent `Interaction` channel; either channel may reject it.
+- Range is measured in combined planar and discrete-Z distance. Admin mapping
+  range bypass may skip fixture and distance checks, but never target direction,
+  visibility, frame ownership, or the authored interaction boundary.
+- Same-floor calls delegate to the native `InRangeUnobstructed` path. Pulling,
+  BUI requests, drag/drop, entity actions, and generic targeted DoAfters keep
+  their existing same-floor policy unless their owning subsystem later opts in.
+- The server resolves the effective remote eye or relay origin and repeats the
+  lower-floor visibility and interaction checks. Client targeting is ergonomic
+  selection, never authority.
+- Vertical-validation flags are private implementation details of the pointer
+  funnel. Existing public interaction APIs retain their original signatures and
+  cannot opt themselves into a prevalidated cross-floor path.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to entity targeting, use-specific shared
+      reach, physical verbs, context menus/outlines, focused tests, and docs.
+- [x] Invariant review: Z 0 parity, translated/rotated frame origins, remote
+      spatial origins, target direction, independent boundary channels, range,
+      every trace segment, and same-XY priority were reviewed.
+- [x] Automated verification: 25/25 interaction-authority cases, 24/24 native
+      interaction/action/DoAfter/pulling regressions, and 158/158 focused
+      `ZLevel` integration cases passed with no skips; the complete solution
+      built with zero errors.
+- [x] Performance evidence: candidate ordering adds one integer comparison to
+      the existing bounded click list. Vertical fixture work is request-driven,
+      bounded by trace budgets, and reuses one caller-owned trace buffer; no new
+      tick/frame scan or retained per-entity cache was added.
+- [x] Documentation: selection order, server authority, channels, obstruction,
+      bypass semantics, evidence, deferrals, and findings are recorded here and
+      in `Docs/ZLevel.md`.
+- [x] Dependency check: no engine change is required; WTZ Project remains paired
+      with clean WTZ Engine commit `ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c`.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings, residual risks, and the P2.4d3 handoff are recorded
+      below.
+- [x] Commit: package prepared as the isolated `Enable authored cross-floor
+      entity interactions` commit on `zlevel/interaction-targeting`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `ZLevelInteractionAuthorityTest` passes 25/25. New cases cover closed/open
+  portals, a visibility-only grate, upward rejection, combined 3D range,
+  source/destination segment blockers on a translated and rotated frame,
+  same-floor-first ordering, and a real network pointer request.
+- The unchanged native matrix passes 24/24, proving that construction actions,
+  pulling, normal `DoAfter`, and action lifecycles retain their prior behavior.
+- `dotnet test ... --filter "FullyQualifiedName~ZLevel"` passes 158/158. A
+  narrower namespace-only filter reports 142 because 16 Z-aware regressions
+  intentionally live outside `Content.IntegrationTests.Tests.ZLevel`.
+- `Content.Shared` and `Content.IntegrationTests` builds pass with zero errors.
+  The package removed its one newly introduced nullable warning; remaining
+  warnings are the established dependency, vulnerability, analyzer, and
+  upstream-obsolescence baseline.
+
+### Decisions
+
+- Use a separate `VisibleCrossFloorInteraction` mode instead of weakening
+  examine, ranged, admin, or default same-floor targeting modes.
+- Prefer floor distance before draw depth only for physical use. Other modes
+  retain their established visual ordering.
+- Require visibility in addition to interaction permission. This prevents a
+  malicious known UID from targeting an entity above the viewer or behind a
+  visibility-closed deck while preserving independent boundary channels.
+- Reuse native target predicates after collecting segmented trace hits, keeping
+  item pickup and wall-mounted interaction behavior consistent across floors.
+- Keep empty-tile input separate. Entity identity is sufficient authority for
+  this package; a coordinate-only destination needs an explicit consumer-owned
+  policy in P2.4d3.
+
+### Mini Review
+
+- Finding: the first server pass accepted an entity above the viewer when a
+  forged client knew its UID, even though the client only offered visible lower
+  candidates. Server authority now enforces the same downward visibility rule.
+- Finding: initial optional validation flags accidentally enlarged several
+  public interaction signatures. They now live only in private core funnels;
+  public APIs preserve the pre-package surface and same-floor defaults.
+- Finding: the historical 153-case matrix used `FullyQualifiedName~ZLevel`, not
+  the namespace-only filter used during one intermediate run. Repeating the
+  historical filter produced the expected prior 153 plus five new cases: 158.
+- Residual risk: automated coverage proves ordering and network authority, but
+  a final manual client pass should still exercise overlapping animated sprites,
+  context-menu grouping, item pickup, wall mounts, and admin mapping bypass.
+- Residual risk: targetless lower-floor tiles still resolve to the active/effective
+  floor. P2.4d3 owns deliberate coordinate-only actions and aiming without
+  weakening consumers that must remain same-floor.
+- Next package: define explicit empty-tile opt-in policy for world actions and
+  projectiles, test forged/stale coordinate layers, then execute the final P2
+  automated and manual regression review.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2297,3 +2410,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.4b | `Instrument native Z-level interaction policy` | 13 package, 21 regression, 144 integration, allocation, full build, diff check | Complete |
 | 2026-08-28 | P2.4c | `Harden native Z-level interaction funnels` | 18 authority/funnel, 24 native regression, 151 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d1 | `Carry authoritative floors through pointer targets` | 20 authority, 24 native regression, 153 integration, 2 engine, full build, diff check | Complete |
+| 2026-08-28 | P2.4d2 | `Enable authored cross-floor entity interactions` | 25 authority, 24 native regression, 158 integration, full build, diff check | Complete |

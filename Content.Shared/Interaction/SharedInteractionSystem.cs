@@ -29,6 +29,7 @@ using Content.Shared.Timing;
 using Content.Shared.UserInterface;
 using Content.Shared.Verbs;
 using Content.Shared.Wall;
+using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Systems;
 using JetBrains.Annotations;
 using Robust.Shared.Containers;
@@ -76,6 +77,8 @@ namespace Content.Shared.Interaction
         [Dependency] private readonly TagSystem _tagSystem = default!;
         [Dependency] private readonly UseDelaySystem _useDelay = default!;
         [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
+        [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
+        [Dependency] private readonly SharedZLevelVisibilitySystem _zLevelVisibility = default!;
 
         [Dependency] private readonly EntityQuery<IgnoreUIRangeComponent> _ignoreUiRangeQuery = default!;
         [Dependency] private readonly EntityQuery<FixturesComponent> _fixtureQuery = default!;
@@ -87,6 +90,8 @@ namespace Content.Shared.Interaction
         [Dependency] private readonly EntityQuery<WallMountComponent> _wallMountQuery = default!;
         [Dependency] private readonly EntityQuery<UseDelayComponent> _delayQuery = default!;
         [Dependency] private readonly EntityQuery<ActivatableUIComponent> _uiQuery = default!;
+
+        private readonly ZLevelTraceBuffer _verticalInteractionTraceBuffer = new();
 
         /// <summary>
         /// The collision mask used by default for
@@ -335,7 +340,15 @@ namespace Content.Shared.Interaction
                 return true;
             }
 
-            UserInteraction(user.Value, coords, uid, altInteract: true, checkAccess: ShouldCheckAccess(user.Value));
+            UserInteractionCore(
+                user.Value,
+                coords,
+                uid,
+                altInteract: true,
+                checkCanInteract: true,
+                checkAccess: ShouldCheckAccess(user.Value),
+                checkCanUse: true,
+                allowVerticalTarget: true);
 
             return false;
         }
@@ -353,7 +366,15 @@ namespace Content.Shared.Interaction
                 return true;
             }
 
-            UserInteraction(userEntity.Value, coords, !Deleted(uid) ? uid : null, checkAccess: ShouldCheckAccess(userEntity.Value));
+            UserInteractionCore(
+                userEntity.Value,
+                coords,
+                !Deleted(uid) ? uid : null,
+                altInteract: false,
+                checkCanInteract: true,
+                checkAccess: ShouldCheckAccess(userEntity.Value),
+                checkCanUse: true,
+                allowVerticalTarget: true);
 
             return false;
         }
@@ -412,18 +433,40 @@ namespace Content.Shared.Interaction
             bool checkAccess = true,
             bool checkCanUse = true)
         {
+            UserInteractionCore(
+                user,
+                coordinates,
+                target,
+                altInteract,
+                checkCanInteract,
+                checkAccess,
+                checkCanUse,
+                false);
+        }
+
+        private void UserInteractionCore(
+            EntityUid user,
+            EntityCoordinates coordinates,
+            EntityUid? target,
+            bool altInteract,
+            bool checkCanInteract,
+            bool checkAccess,
+            bool checkCanUse,
+            bool allowVerticalTarget)
+        {
             if (_relayQuery.TryComp(user, out var relay) && relay.RelayEntity is not null)
             {
                 // TODO this needs to be handled better. This probably bypasses many complex can-interact checks in weird roundabout ways.
                 if (_actionBlockerSystem.CanInteract(user, target))
                 {
-                    UserInteraction(relay.RelayEntity.Value,
+                    UserInteractionCore(relay.RelayEntity.Value,
                         coordinates,
                         target,
                         altInteract,
                         checkCanInteract,
                         checkAccess,
-                        checkCanUse);
+                        checkCanUse,
+                        allowVerticalTarget);
                     return;
                 }
             }
@@ -431,7 +474,9 @@ namespace Content.Shared.Interaction
             if (target != null && Deleted(target.Value))
                 return;
 
-            if (target != null && !_zLevelInteraction.CanDirectlyInteract(user, target.Value))
+            if (target != null &&
+                !allowVerticalTarget &&
+                !_zLevelInteraction.CanDirectlyInteract(user, target.Value))
                 return;
 
             if (!altInteract && _combatQuery.TryComp(user, out var combatMode) && combatMode.IsInCombatMode)
@@ -447,7 +492,7 @@ namespace Content.Shared.Interaction
             {
                 // Perform alternative interactions, using context menu verbs.
                 // These perform their own range, can-interact, and accessibility checks.
-                AltInteract(user, target.Value);
+                AltInteractCore(user, target.Value, allowVerticalTarget);
                 return;
             }
 
@@ -461,7 +506,11 @@ namespace Content.Shared.Interaction
 
             var inRangeUnobstructed = target == null
                 ? !checkAccess || InRangeUnobstructed(user, coordinates)
-                : !checkAccess || InRangeUnobstructed(user, target.Value); // permits interactions with wall mounted entities
+                : allowVerticalTarget
+                    ? checkAccess
+                        ? InRangeUnobstructedForUse(user, target.Value)
+                        : HasUseAuthority(user, target.Value, true, false, float.MaxValue)
+                    : !checkAccess || InRangeUnobstructed(user, target.Value); // permits interactions with wall mounted entities
 
             // empty-hand interactions
             // combat mode hand interactions will always be true here -- since
@@ -469,7 +518,7 @@ namespace Content.Shared.Interaction
             if (!TryGetUsedEntity(user, out var used, checkCanUse))
             {
                 if (inRangeUnobstructed && target != null)
-                    InteractHand(user, target.Value);
+                    InteractHandCore(user, target.Value, allowVerticalTarget, allowVerticalTarget);
 
                 return;
             }
@@ -482,13 +531,15 @@ namespace Content.Shared.Interaction
 
             if (inRangeUnobstructed && target != null)
             {
-                InteractUsing(
+                InteractUsingCore(
                     user,
                     used.Value,
                     target.Value,
                     coordinates,
                     checkCanInteract: false,
-                    checkCanUse: false);
+                    checkCanUse: false,
+                    allowVerticalTarget: allowVerticalTarget,
+                    zLevelAuthorityValidated: allowVerticalTarget);
 
                 return;
             }
@@ -514,21 +565,37 @@ namespace Content.Shared.Interaction
 
         public void InteractHand(EntityUid user, EntityUid target)
         {
+            InteractHandCore(user, target, false, false);
+        }
+
+        private void InteractHandCore(
+            EntityUid user,
+            EntityUid target,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated)
+        {
             if (IsDeleted(user) ||
                 IsDeleted(target) ||
-                !_zLevelInteraction.CanDirectlyInteract(user, target))
+                !HasUseAuthority(
+                    user,
+                    target,
+                    allowVerticalTarget,
+                    zLevelAuthorityValidated,
+                    InteractionRange))
                 return;
 
             var complexInteractions = _actionBlockerSystem.CanComplexInteract(user);
             if (!complexInteractions)
             {
-                InteractionActivate(user,
+                InteractionActivateCore(user,
                     target,
                     checkCanInteract: false,
                     checkUseDelay: true,
                     checkAccess: false,
                     complexInteractions: complexInteractions,
-                    checkDeletion: false);
+                    checkDeletion: false,
+                    allowVerticalTarget: allowVerticalTarget,
+                    zLevelAuthorityValidated: zLevelAuthorityValidated);
                 return;
             }
 
@@ -556,13 +623,15 @@ namespace Content.Shared.Interaction
 
             DebugTools.Assert(!IsDeleted(user) && !IsDeleted(target));
             // Else we run Activate.
-            InteractionActivate(user,
+            InteractionActivateCore(user,
                 target,
                 checkCanInteract: false,
                 checkUseDelay: true,
                 checkAccess: false,
                 complexInteractions: complexInteractions,
-                checkDeletion: false);
+                checkDeletion: false,
+                allowVerticalTarget: allowVerticalTarget,
+                zLevelAuthorityValidated: zLevelAuthorityValidated);
         }
 
         public void InteractUsingRanged(EntityUid user, EntityUid used, EntityUid? target,
@@ -1071,11 +1140,37 @@ namespace Content.Shared.Interaction
             bool canReach,
             bool checkDeletion = true)
         {
+            return RangedInteractDoBeforeCore(
+                user,
+                used,
+                target,
+                clickLocation,
+                canReach,
+                checkDeletion,
+                false,
+                false);
+        }
+
+        private bool RangedInteractDoBeforeCore(
+            EntityUid user,
+            EntityUid used,
+            EntityUid? target,
+            EntityCoordinates clickLocation,
+            bool canReach,
+            bool checkDeletion,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated)
+        {
             if (checkDeletion && (IsDeleted(user) || IsDeleted(used) || IsDeleted(target)))
                 return false;
 
             if (!_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
-                target is { } targetUid && !_zLevelInteraction.CanDirectlyInteract(user, targetUid))
+                target is { } targetUid && !HasUseAuthority(
+                    user,
+                    targetUid,
+                    allowVerticalTarget,
+                    zLevelAuthorityValidated,
+                    InteractionRange))
             {
                 return false;
             }
@@ -1114,11 +1209,37 @@ namespace Content.Shared.Interaction
             bool checkCanInteract = true,
             bool checkCanUse = true)
         {
+            return InteractUsingCore(
+                user,
+                used,
+                target,
+                clickLocation,
+                checkCanInteract,
+                checkCanUse,
+                false,
+                false);
+        }
+
+        private bool InteractUsingCore(
+            EntityUid user,
+            EntityUid used,
+            EntityUid target,
+            EntityCoordinates clickLocation,
+            bool checkCanInteract,
+            bool checkCanUse,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated)
+        {
             if (IsDeleted(user) ||
                 IsDeleted(used) ||
                 IsDeleted(target) ||
                 !_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
-                !_zLevelInteraction.CanDirectlyInteract(user, target))
+                !HasUseAuthority(
+                    user,
+                    target,
+                    allowVerticalTarget,
+                    zLevelAuthorityValidated,
+                    InteractionRange))
                 return false;
 
             if (checkCanInteract && !_actionBlockerSystem.CanInteract(user, target))
@@ -1132,7 +1253,15 @@ namespace Content.Shared.Interaction
                 LogImpact.Low,
                 $"{ToPrettyString(user):user} interacted with {ToPrettyString(target):target} using {ToPrettyString(used):used}");
 
-            if (RangedInteractDoBefore(user, used, target, clickLocation, canReach: true, checkDeletion: false))
+            if (RangedInteractDoBeforeCore(
+                    user,
+                    used,
+                    target,
+                    clickLocation,
+                    canReach: true,
+                    checkDeletion: false,
+                    allowVerticalTarget: allowVerticalTarget,
+                    zLevelAuthorityValidated: zLevelAuthorityValidated))
                 return true;
 
             DebugTools.Assert(!IsDeleted(user) && !IsDeleted(used) && !IsDeleted(target));
@@ -1149,7 +1278,15 @@ namespace Content.Shared.Interaction
             if (interactUsingEvent.Handled || userInteractUsingEvent.Handled)
                 return true;
 
-            if (InteractDoAfter(user, used, target, clickLocation, canReach: true, checkDeletion: false))
+            if (InteractDoAfterCore(
+                    user,
+                    used,
+                    target,
+                    clickLocation,
+                    canReach: true,
+                    checkDeletion: false,
+                    allowVerticalTarget: allowVerticalTarget,
+                    zLevelAuthorityValidated: zLevelAuthorityValidated))
                 return true;
 
             DebugTools.Assert(!IsDeleted(user) && !IsDeleted(used) && !IsDeleted(target));
@@ -1166,7 +1303,34 @@ namespace Content.Shared.Interaction
         /// <param name="canReach">Whether the <paramref name="user"/> is in range of the <paramref name="target"/>.
         ///     </param>
         /// <returns>True if the interaction was handled. Otherwise, false.</returns>
-        public bool InteractDoAfter(EntityUid user, EntityUid used, EntityUid? target, EntityCoordinates clickLocation, bool canReach, bool checkDeletion = true)
+        public bool InteractDoAfter(
+            EntityUid user,
+            EntityUid used,
+            EntityUid? target,
+            EntityCoordinates clickLocation,
+            bool canReach,
+            bool checkDeletion = true)
+        {
+            return InteractDoAfterCore(
+                user,
+                used,
+                target,
+                clickLocation,
+                canReach,
+                checkDeletion,
+                false,
+                false);
+        }
+
+        private bool InteractDoAfterCore(
+            EntityUid user,
+            EntityUid used,
+            EntityUid? target,
+            EntityCoordinates clickLocation,
+            bool canReach,
+            bool checkDeletion,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated)
         {
             if (target is { Valid: false })
                 target = null;
@@ -1175,7 +1339,12 @@ namespace Content.Shared.Interaction
                 return false;
 
             if (!_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
-                target is { } targetUid && !_zLevelInteraction.CanDirectlyInteract(user, targetUid))
+                target is { } targetUid && !HasUseAuthority(
+                    user,
+                    targetUid,
+                    allowVerticalTarget,
+                    zLevelAuthorityValidated,
+                    InteractionRange))
             {
                 return false;
             }
@@ -1225,7 +1394,15 @@ namespace Content.Shared.Interaction
             if (Deleted(uid))
                 return false;
 
-            InteractionActivate(user.Value, uid, checkAccess: ShouldCheckAccess(user.Value));
+            InteractionActivateCore(
+                user.Value,
+                uid,
+                checkCanInteract: true,
+                checkUseDelay: true,
+                checkAccess: ShouldCheckAccess(user.Value),
+                complexInteractions: null,
+                checkDeletion: true,
+                allowVerticalTarget: true);
             return false;
         }
 
@@ -1245,10 +1422,30 @@ namespace Content.Shared.Interaction
             bool? complexInteractions = null,
             bool checkDeletion = true)
         {
-            if (checkDeletion && (IsDeleted(user) || IsDeleted(used)))
-                return false;
+            return InteractionActivateCore(
+                user,
+                used,
+                checkCanInteract,
+                checkUseDelay,
+                checkAccess,
+                complexInteractions,
+                checkDeletion,
+                false,
+                false);
+        }
 
-            if (!_zLevelInteraction.CanDirectlyInteract(user, used))
+        private bool InteractionActivateCore(
+            EntityUid user,
+            EntityUid used,
+            bool checkCanInteract,
+            bool checkUseDelay,
+            bool checkAccess,
+            bool? complexInteractions,
+            bool checkDeletion,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated = false)
+        {
+            if (checkDeletion && (IsDeleted(user) || IsDeleted(used)))
                 return false;
 
             DebugTools.Assert(!IsDeleted(user) && !IsDeleted(used));
@@ -1259,8 +1456,23 @@ namespace Content.Shared.Interaction
             if (checkCanInteract && !_actionBlockerSystem.CanInteract(user, used))
                 return false;
 
-            if (checkAccess && !InRangeUnobstructed(user, used))
+            if (checkAccess)
+            {
+                var inRange = allowVerticalTarget
+                    ? InRangeUnobstructedForUse(user, used)
+                    : InRangeUnobstructed(user, used);
+                if (!inRange)
+                    return false;
+            }
+            else if (!HasUseAuthority(
+                         user,
+                         used,
+                         allowVerticalTarget,
+                         zLevelAuthorityValidated,
+                         float.MaxValue))
+            {
                 return false;
+            }
 
             // Check if interacted entity is in the same container, the direct child, or direct parent of the user.
             // This is bypassed IF the interaction happened through an item slot (e.g., backpack UI)
@@ -1350,7 +1562,15 @@ namespace Content.Shared.Interaction
         /// <returns>True if the interaction was handled, false otherwise.</returns>
         public bool AltInteract(EntityUid user, EntityUid target)
         {
-            if (!_zLevelInteraction.CanDirectlyInteract(user, target))
+            return AltInteractCore(user, target, false);
+        }
+
+        private bool AltInteractCore(EntityUid user, EntityUid target, bool allowVerticalTarget)
+        {
+            var accessible = allowVerticalTarget
+                ? InRangeAndAccessibleForUse(user, target)
+                : _zLevelInteraction.CanDirectlyInteract(user, target);
+            if (!accessible)
                 return false;
 
             // Get list of alt-interact verbs
@@ -1404,6 +1624,151 @@ namespace Content.Shared.Interaction
                 return false;
 
             return IsAccessible(user, target) && InRangeUnobstructed(user, target, range, collisionMask, predicate);
+        }
+
+        /// <summary>
+        /// The ordinary interaction reach check, extended only for explicitly selected vertical use targets.
+        /// Same-level calls delegate to <see cref="InRangeUnobstructed(Entity{TransformComponent?},Entity{TransformComponent?},float,CollisionGroup,Ignored?,bool,bool)"/>.
+        /// </summary>
+        public bool InRangeUnobstructedForUse(
+            Entity<TransformComponent?> origin,
+            Entity<TransformComponent?> other,
+            float range = InteractionRange,
+            CollisionGroup collisionMask = InRangeUnobstructedMask,
+            Ignored? predicate = null,
+            bool popup = false)
+        {
+            if (!Resolve(origin, ref origin.Comp) || !Resolve(other, ref other.Comp))
+                return false;
+
+            if (_zLevelInteraction.AreOnSameEffectiveWorldLevel(origin, other))
+                return InRangeUnobstructed(origin, other, range, collisionMask, predicate, popup);
+
+            if (!_zLevelInteraction.TryGetSpatialOrigin(origin, other, out var spatialOrigin) ||
+                !TryComp(spatialOrigin, out TransformComponent? spatialTransform))
+            {
+                return VerticalInteractionFailed(origin, popup);
+            }
+
+            if (!IsVisibleLowerUseTarget(spatialOrigin, spatialTransform, other))
+                return VerticalInteractionFailed(origin, popup);
+
+            var checkAccess = ShouldCheckAccess(origin);
+            var maximumRange = checkAccess && float.IsFinite(range) && range > 0f
+                ? range
+                : float.MaxValue;
+            var traceMask = checkAccess ? collisionMask : CollisionGroup.None;
+            if (!_zLevelInteraction.CanInteractThroughOpenBoundary(
+                    origin,
+                    other,
+                    maximumRange,
+                    traceMask,
+                    spatialOrigin,
+                    _verticalInteractionTraceBuffer))
+            {
+                return VerticalInteractionFailed(origin, popup);
+            }
+
+            if (!checkAccess || _verticalInteractionTraceBuffer.EntityHits.Count == 0)
+                return true;
+
+            var originPos = _transform.GetMapCoordinates(spatialOrigin, spatialTransform);
+            var targetPos = _transform.ToMapCoordinates(other.Comp.Coordinates);
+            var targetRot = _transform.GetWorldRotation(other.Comp.Coordinates.EntityId) + other.Comp.LocalRotation;
+            Ignored combinedPredicate = entity =>
+                entity == origin.Owner ||
+                entity == spatialOrigin ||
+                (predicate?.Invoke(entity) ?? false);
+            Ignored? targetPredicate = null;
+            foreach (var hit in _verticalInteractionTraceBuffer.EntityHitSpan)
+            {
+                if (hit.Entity == origin.Owner ||
+                    hit.Entity == spatialOrigin ||
+                    hit.Entity == other.Owner ||
+                    predicate?.Invoke(hit.Entity) == true)
+                {
+                    continue;
+                }
+
+                targetPredicate ??= GetPredicate(
+                    originPos,
+                    other,
+                    targetPos,
+                    targetRot,
+                    collisionMask,
+                    combinedPredicate);
+                if (!targetPredicate(hit.Entity))
+                    return VerticalInteractionFailed(origin, popup);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Combines container accessibility with the use-specific vertical reach policy.
+        /// </summary>
+        public bool InRangeAndAccessibleForUse(
+            Entity<TransformComponent?> user,
+            Entity<TransformComponent?> target,
+            float range = InteractionRange,
+            CollisionGroup collisionMask = InRangeUnobstructedMask,
+            Ignored? predicate = null)
+        {
+            if (user == target)
+                return true;
+
+            if (!Resolve(user, ref user.Comp) || !Resolve(target, ref target.Comp))
+                return false;
+
+            return IsAccessible(user, target) &&
+                   InRangeUnobstructedForUse(user, target, range, collisionMask, predicate);
+        }
+
+        private bool HasUseAuthority(
+            EntityUid user,
+            EntityUid target,
+            bool allowVerticalTarget,
+            bool zLevelAuthorityValidated,
+            float maximumRange)
+        {
+            if (zLevelAuthorityValidated)
+                return true;
+
+            if (!allowVerticalTarget ||
+                _zLevelInteraction.AreOnSameEffectiveWorldLevel(user, target))
+            {
+                return _zLevelInteraction.CanDirectlyInteract(user, target);
+            }
+
+            if (!_zLevelInteraction.TryGetSpatialOrigin(user, target, out var spatialOrigin) ||
+                !TryComp(spatialOrigin, out TransformComponent? spatialTransform) ||
+                !IsVisibleLowerUseTarget(spatialOrigin, spatialTransform, target))
+            {
+                return false;
+            }
+
+            return _zLevelInteraction.CanInteractThroughOpenBoundary(user, target, maximumRange);
+        }
+
+        private bool IsVisibleLowerUseTarget(
+            EntityUid spatialOrigin,
+            TransformComponent spatialTransform,
+            EntityUid target)
+        {
+            var originWorldZ = _zLevels.GetWorldZLevel(spatialOrigin);
+            return _zLevels.GetWorldZLevel(target) < originWorldZ &&
+                   _zLevelVisibility.IsEntityVisibleFrom(target, spatialTransform.MapID, originWorldZ);
+        }
+
+        private bool VerticalInteractionFailed(EntityUid origin, bool popup)
+        {
+            if (popup && _gameTiming.IsFirstTimePredicted)
+            {
+                var message = Loc.GetString("interaction-system-user-interaction-cannot-reach");
+                _popupSystem.PopupClient(message, origin, origin);
+            }
+
+            return false;
         }
 
         /// <summary>

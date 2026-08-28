@@ -2,7 +2,6 @@ using Content.Shared.ActionBlocker;
 using Content.Shared.Hands.Components;
 using Content.Shared.Interaction;
 using Content.Shared.Inventory.VirtualItem;
-using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
 
@@ -12,7 +11,6 @@ namespace Content.Shared.Verbs
     {
         [Dependency] private readonly SharedInteractionSystem _interactionSystem = default!;
         [Dependency] private readonly ActionBlockerSystem _actionBlockerSystem = default!;
-        [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
         [Dependency] protected readonly SharedContainerSystem ContainerSystem = default!;
 
         public override void Initialize()
@@ -75,7 +73,7 @@ namespace Content.Shared.Verbs
             extraCategories = new();
 
             // accessibility checks
-            var canAccess = force || _interactionSystem.InRangeAndAccessible(user, target);
+            var canAccess = force || _interactionSystem.InRangeAndAccessibleForUse(user, target);
 
             // A large number of verbs need to check action blockers. Instead of repeatedly having each system individually
             // call ActionBlocker checks, just cache it for the verb request.
@@ -168,7 +166,7 @@ namespace Content.Shared.Verbs
             if (forced || !RequiresDirectInteractionAuthority(verb))
                 return true;
 
-            return _zLevelInteraction.CanDirectlyInteract(user, target);
+            return _interactionSystem.InRangeAndAccessibleForUse(user, target);
         }
 
         protected void ExecuteVerbCore(Verb verb, EntityUid user, EntityUid target)
@@ -189,7 +187,8 @@ namespace Content.Shared.Verbs
                 return;
 
             // Perform any contact interactions
-            if (verb.DoContactInteraction ?? (verb.DefaultDoContactInteraction && _interactionSystem.InRangeUnobstructed(user, target)))
+            if (verb.DoContactInteraction ??
+                (verb.DefaultDoContactInteraction && _interactionSystem.InRangeUnobstructedForUse(user, target)))
                 _interactionSystem.DoContactInteraction(user, target);
         }
 
