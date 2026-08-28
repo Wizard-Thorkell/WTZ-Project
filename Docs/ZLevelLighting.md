@@ -1,8 +1,9 @@
 # WTZ Z-Level Lighting And FOV
 
 This document defines the rendering ownership and vertical projection contract
-established by roadmap packages P3.1 through P3.3. It is the baseline for frame
-budgets, fail-soft quality, and visual hardening in P3.4.
+established by roadmap packages P3.1 through P3.4a. It is the baseline for
+lower-tile composition budgets, shadow policy, and visual hardening in the
+remaining P3.4 packages.
 
 ## Ownership
 
@@ -91,10 +92,19 @@ Targeted invalidation rules:
   cache, preventing an old default policy from repopulating a fresh light cache.
 - Removing a grid removes only entries owned by that grid.
 
-Entries carry monotonically increasing revisions so tests and future consumers
-can distinguish a retained neighbor from a rebuilt chunk. P3.2 deliberately
-does not add capacity eviction: P3.4 owns bounded retention and fail-soft policy
-after P3.3 reveals the real visible working set.
+Entries carry monotonically increasing revisions so tests and consumers can
+distinguish a retained neighbor from a rebuilt chunk. P3.4a bounds retention
+with `zlevel.lighting_aperture_cache_capacity`, which defaults to 4,096 entries
+and clamps to 1 through 65,536. A FIFO queue evicts the oldest built entry.
+FIFO keeps hot hits allocation-free and avoids mutating retention order on every
+lookup.
+
+Eviction affects retention only. A stack composition keeps each already-read
+aperture in local words, so it remains exact even when its depth exceeds cache
+capacity and a later layer evicts an earlier one. Repeating that query may
+rebuild layers, but it never exposes a truncated or partially intersected mask.
+Invalidated queue tokens are discarded lazily and compacted before they can
+grow beyond a bounded multiple of capacity.
 
 ## Native Emitter Index Contract
 
@@ -112,7 +122,10 @@ movement or hierarchy index. `ZLevelLightingCacheSystem.QueryEmitters`:
 
 The index follows translated and rotated grids through the existing component
 tree update lifecycle. Queries are main-thread and sequential because the
-system owns one reusable tree scratch buffer.
+system owns one reusable tree scratch buffer. P3.4a optionally caps native
+point-light entries visited by a query. Reaching the cap stops the current tree,
+and callbacks for later selected trees stop without visiting another entry.
+Intersecting grid-tree selection itself remains the native map broad phase.
 
 ## Lower-Floor Projection Contract
 
@@ -153,6 +166,42 @@ WTZ Engine provides `blend_mode light_add`, which uses the same
 `source-alpha + destination` blend function as native point lights. The older
 generic `add` mode is intentionally unchanged.
 
+## P3.4a Retention And Frame Budgets
+
+Projection work is shared by all automatic viewports in one client frame. The
+first projection call initializes the frame budget; later viewports consume the
+remainder instead of receiving an independent allowance. The active floor is
+unaffected because it stays on Clyde's native path.
+
+All controls are local archived client CVars. A server cannot force a client to
+perform more rendering work:
+
+| CVar | Default | Hard maximum | Charged work |
+| --- | ---: | ---: | --- |
+| `zlevel.lighting_max_emitter_candidates_per_frame` | 4,096 | 65,536 | Native point-light tree entries visited |
+| `zlevel.lighting_max_emitters_per_frame` | 256 | 4,096 | Lower-floor sources planned |
+| `zlevel.lighting_max_aperture_layers_per_frame` | 4,096 | 1,000,000 | Adjacent boundary layers composed |
+| `zlevel.lighting_max_aperture_builds_per_frame` | 32 | 4,096 | Cold aperture chunks built |
+| `zlevel.lighting_max_runs_per_frame` | 8,192 | 1,000,000 | Horizontal aperture runs generated |
+
+Projection sorts discovered sources by descending world Z, then entity UID.
+The nearest lower floor therefore survives an emitter/planning limit first.
+The candidate broad-phase cap can only prioritize among entries it had budget
+to discover; it does not scan omitted entries merely to rank them.
+
+Fail-soft behavior is transactional per emitter. If layer, cold-build, or run
+budget expires while planning a source, every run produced for that source is
+removed and planning stops for that viewport. Earlier complete sources remain.
+Work already performed still consumes its budget, which prevents a pathological
+source from being retried repeatedly in the same frame. A low cold-build limit
+can warm part of the cache without drawing a partial light; later frames finish
+the stack deterministically.
+
+Lower-floor tile/FOV composition deliberately does not consume these light
+budgets. Sharing one pool would allow dense lights to leave visible lower tiles
+black. P3.4b will give tile composition its own limits and nearest-first
+selection while retaining the shared aperture cache.
+
 ## Shared Aperture FOV Composition
 
 Lower-floor tile composition and projected light consume the same composed
@@ -174,20 +223,23 @@ The client command `zlevelrendermetrics` reports the latest rendered frame:
 - lights rejected because their world Z differs from the eye;
 - occluders rejected because their world Z differs from the eye.
 
-It also reports cumulative P3.2 input-cache counters:
+It also reports cumulative input-cache counters:
 
 - aperture hits, misses, builds, tile checks, invalidations, retained chunks,
-  open bits, and build timings;
+  capacity, open bits, FIFO evictions, and build timings;
 - emitter queries, candidates, accepted sources, world-Z and bounds rejections,
-  and query timings.
+  candidate-budget exhaustion, and query timings.
 
 P3.3 adds projection frames, input/projected/radius-rejected emitters, current
 batches and runs, visible tiles, composed chunks and boundary layers, generated
 vertices and draw calls, plus build and render timings.
 
-Run `zlevelrendermetrics reset` to reset cumulative P3.2/P3.3 counters. Retained
-cache entries and native per-frame Clyde counters are not destroyed by this
-command.
+P3.4a adds current used/maximum values and cumulative exhaustion counts for
+candidate, emitter, aperture-layer, cold-build, and run budgets.
+
+Run `zlevelrendermetrics reset` to reset cumulative Content lighting counters.
+Retained cache entries and native per-frame Clyde counters are not destroyed by
+this command.
 
 The same values appear when `zlevel.debug_overlay` is enabled. Counters reset at
 the start of each Clyde frame; retained cache size is sampled live.
@@ -251,7 +303,17 @@ reuse. Its 3-, 6-, and 10-floor cases assert that accepted source depth never
 exceeds `MaxVisibleLevelDistance` and that warmed planning and geometry do not
 allocate proportionally to frame count.
 
-## P3.3 Deliberate Limits
+## P3.4a Budget Fixture
+
+`ZLevelLightingBudgetTest` validates client CVar clamps, bounded FIFO retention,
+exact stack recomposition while capacity is smaller than stack depth, native
+candidate early-out, nearest-floor emitter priority, progressive cold-cache
+warming, whole-emitter rollback for layer and run exhaustion, and budget sharing
+between projection calls in one frame. The combined `ZLevelLighting` filter
+also reruns all P3.2 and P3.3 cache, movement, shader, attenuation, allocation,
+and depth regressions.
+
+## Current Deliberate Limits
 
 - Only the active floor contributes native point-light shadow maps and FOV
   occluders. Lower-floor light is projected through visibility apertures, but
@@ -261,10 +323,11 @@ allocate proportionally to frame count.
   gameplay policy and is not inferred by this compositor.
 - Upper floors remain hidden from a lower viewer unless mapping preview is
   active. Upward player-facing FOV and targeting are still separate policy work.
-- Cache capacity, per-frame work budgets, and predictable fail-soft degradation
-  remain assigned to P3.4.
+- Lower-tile/FOV composition and mapping preview do not yet have independent
+  frame budgets. P3.4b owns their nearest-first, whole-unit fail-soft policy.
 - Lights and occluders on different overlapping grids compare world Z, not each
   grid's local Z.
-- The cache is bounded by authored sparse content lifetime, but P3.3 does not
-  impose a separate eviction budget. P3.4 will use measured stress behavior to
-  select a predictable policy.
+- The emitter candidate budget bounds point-light entry visits after native
+  grid-tree selection. A viewport intersecting extreme numbers of moving grids
+  still pays the engine's spatial tree-selection cost; P8 stress profiling will
+  determine whether that native stage needs its own budget.

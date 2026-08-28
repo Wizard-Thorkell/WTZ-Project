@@ -376,6 +376,7 @@ public sealed class ZLevelLightingProjectionTest : GameTest
         var batches = 0;
         for (var i = 0; i < count; i++)
         {
+            projection.BeginBudgetFrameForTesting();
             batches += projection.BuildProjection(mapId, bounds, viewerWorldZ);
         }
 

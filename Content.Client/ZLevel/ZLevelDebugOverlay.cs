@@ -189,8 +189,9 @@ public sealed class ZLevelDebugOverlay : Overlay
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 154f),
-            $"vertical light aperture chunks:{lighting.CachedApertureChunks} open:{lighting.CachedOpenApertureTiles} " +
-            $"hit:{lighting.ApertureCacheHitPercent:0.0}% emit:{lighting.EmitterAccepted}/{lighting.EmitterCandidates}",
+            $"vertical light aperture chunks:{lighting.CachedApertureChunks}/{lighting.ApertureCacheCapacity} " +
+            $"evict:{lighting.ApertureEvictions} hit:{lighting.ApertureCacheHitPercent:0.0}% " +
+            $"emit:{lighting.EmitterAccepted}/{lighting.EmitterCandidates}",
             metricsColor);
 
         var projection = _lightingProjectionSystem.Snapshot();
@@ -200,6 +201,17 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"vertical light project batch/run:{projection.CurrentBatches}/{projection.CurrentRuns} " +
             $"build avg/max:{projection.AverageBuildMilliseconds:0.000}/{projection.MaxBuildMilliseconds:0.000}ms " +
             $"draw avg/max:{projection.AverageRenderMilliseconds:0.000}/{projection.MaxRenderMilliseconds:0.000}ms",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 182f),
+            $"vertical light budget c/e/l/b/r:" +
+            $"{projection.CurrentEmitterCandidatesUsed}/{projection.CurrentEmittersUsed}/" +
+            $"{projection.CurrentApertureLayersUsed}/{projection.CurrentApertureBuildsUsed}/" +
+            $"{projection.CurrentRunsUsed} exhausted:" +
+            $"{projection.CandidateBudgetExhaustions}/{projection.EmitterBudgetExhaustions}/" +
+            $"{projection.ApertureLayerBudgetExhaustions}/{projection.ApertureBuildBudgetExhaustions}/" +
+            $"{projection.RunBudgetExhaustions}",
             metricsColor);
     }
 

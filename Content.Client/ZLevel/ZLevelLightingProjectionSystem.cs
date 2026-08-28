@@ -3,12 +3,15 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.Graphics;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using IGameTiming = Robust.Shared.Timing.IGameTiming;
 
 namespace Content.Client.ZLevel;
 
@@ -23,6 +26,19 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     public const float TransmissionPerLevel = 0.72f;
     public const float NativeLightHeightSquared = 1f;
 
+    public const int DefaultMaxEmitterCandidatesPerFrame = 4_096;
+    public const int DefaultMaxEmittersPerFrame = 256;
+    public const int DefaultMaxApertureLayersPerFrame = 4_096;
+    public const int DefaultMaxApertureBuildsPerFrame = 32;
+    public const int DefaultMaxRunsPerFrame = 8_192;
+    public const int MaximumEmitterCandidatesPerFrame = 65_536;
+    public const int MaximumEmittersPerFrame = 4_096;
+    public const int MaximumApertureLayersPerFrame = 1_000_000;
+    public const int MaximumApertureBuildsPerFrame = 4_096;
+    public const int MaximumRunsPerFrame = 1_000_000;
+
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
+    [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly IOverlayManager _overlayManager = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
@@ -53,14 +69,72 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
     private long _lastRenderTimestampTicks;
     private long _maxRenderTimestampTicks;
 
+    private int _maxEmitterCandidatesPerFrame = DefaultMaxEmitterCandidatesPerFrame;
+    private int _maxEmittersPerFrame = DefaultMaxEmittersPerFrame;
+    private int _maxApertureLayersPerFrame = DefaultMaxApertureLayersPerFrame;
+    private int _maxApertureBuildsPerFrame = DefaultMaxApertureBuildsPerFrame;
+    private int _maxRunsPerFrame = DefaultMaxRunsPerFrame;
+    private int _remainingEmitterCandidates;
+    private int _remainingEmitters;
+    private int _remainingApertureLayers;
+    private int _remainingApertureBuilds;
+    private int _remainingRuns;
+    private int _currentEmitterCandidatesUsed;
+    private int _currentEmittersUsed;
+    private int _currentApertureLayersUsed;
+    private int _currentApertureBuildsUsed;
+    private int _currentRunsUsed;
+    private uint _budgetFrame;
+    private bool _budgetInitialized;
+    private bool _candidateBudgetExhaustedThisFrame;
+    private bool _emitterBudgetExhaustedThisFrame;
+    private bool _apertureLayerBudgetExhaustedThisFrame;
+    private bool _apertureBuildBudgetExhaustedThisFrame;
+    private bool _runBudgetExhaustedThisFrame;
+    private long _candidateBudgetExhaustions;
+    private long _emitterBudgetExhaustions;
+    private long _apertureLayerBudgetExhaustions;
+    private long _apertureBuildBudgetExhaustions;
+    private long _runBudgetExhaustions;
+
     private ZLevelLightingProjectionOverlay _overlay = default!;
 
     public IReadOnlyList<ZLevelLightProjectionBatch> Batches => _batches;
     public IReadOnlyList<ZLevelLightProjectionRun> Runs => _runs;
+    public int MaxEmitterCandidatesPerFrame => _maxEmitterCandidatesPerFrame;
+    public int MaxEmittersPerFrame => _maxEmittersPerFrame;
+    public int MaxApertureLayersPerFrame => _maxApertureLayersPerFrame;
+    public int MaxApertureBuildsPerFrame => _maxApertureBuildsPerFrame;
+    public int MaxRunsPerFrame => _maxRunsPerFrame;
 
     public override void Initialize()
     {
         base.Initialize();
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxEmitterCandidatesPerFrame,
+            value => SetBudget(ref _maxEmitterCandidatesPerFrame, value, MaximumEmitterCandidatesPerFrame),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxEmittersPerFrame,
+            value => SetBudget(ref _maxEmittersPerFrame, value, MaximumEmittersPerFrame),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxApertureLayersPerFrame,
+            value => SetBudget(ref _maxApertureLayersPerFrame, value, MaximumApertureLayersPerFrame),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxApertureBuildsPerFrame,
+            value => SetBudget(ref _maxApertureBuildsPerFrame, value, MaximumApertureBuildsPerFrame),
+            true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingMaxRunsPerFrame,
+            value => SetBudget(ref _maxRunsPerFrame, value, MaximumRunsPerFrame),
+            true);
         _overlay = new ZLevelLightingProjectionOverlay(this, EntityManager);
         _overlayManager.AddOverlay(_overlay);
     }
@@ -81,6 +155,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _batches.Clear();
         _runs.Clear();
         _emitters.Clear();
+        EnsureFrameBudget();
 
         if (mapId == MapId.Nullspace ||
             _visibility.MaxVisibleLevelDistance <= 0 ||
@@ -102,17 +177,37 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             return 0;
         }
 
-        _cache.QueryEmitters(
+        var query = _cache.QueryEmitters(
             mapId,
             worldBounds,
             minimumWorldZ,
             maximumWorldZ,
-            _emitters);
+            _emitters,
+            _remainingEmitterCandidates);
+        _remainingEmitterCandidates -= query.CandidatesVisited;
+        _currentEmitterCandidatesUsed += query.CandidatesVisited;
+        if (query.CandidateBudgetExceeded)
+        {
+            RecordBudgetExhaustion(
+                ref _candidateBudgetExhaustedThisFrame,
+                ref _candidateBudgetExhaustions);
+        }
+
         SortEmitters();
         _emitterInputs += _emitters.Count;
 
         foreach (var emitter in _emitters)
         {
+            if (_remainingEmitters <= 0)
+            {
+                RecordBudgetExhaustion(
+                    ref _emitterBudgetExhaustedThisFrame,
+                    ref _emitterBudgetExhaustions);
+                break;
+            }
+
+            _remainingEmitters--;
+            _currentEmittersUsed++;
             var depth = viewerWorldZ - emitter.WorldZ;
             var verticalDistance = depth * VerticalDistancePerLevel;
             var projectedRadiusSquared = emitter.Radius * emitter.Radius -
@@ -136,14 +231,22 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
                 continue;
 
             var firstRun = _runs.Count;
-            var firstTileCount = _visibleTiles;
-            AddGridRuns(
+            var planResult = AddGridRuns(
                 (emitter.GridUid, grid),
                 worldBounds,
                 emitter.WorldPosition,
                 projectedRadius,
                 targetLocalZ,
-                viewerLocalZ);
+                viewerLocalZ,
+                out var visibleTiles);
+
+            if (planResult != ZLevelProjectionPlanResult.Complete)
+            {
+                var addedRuns = _runs.Count - firstRun;
+                if (addedRuns > 0)
+                    _runs.RemoveRange(firstRun, addedRuns);
+                break;
+            }
 
             var runCount = _runs.Count - firstRun;
             if (runCount == 0)
@@ -159,8 +262,10 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
                 transmission,
                 firstRun,
                 runCount,
-                checked((int) (_visibleTiles - firstTileCount))));
+                visibleTiles));
             _emittersProjected++;
+            _visibleRuns += runCount;
+            _visibleTiles += visibleTiles;
         }
 
         _emitters.Clear();
@@ -190,6 +295,12 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _renderTimestampTicks = 0;
         _lastRenderTimestampTicks = 0;
         _maxRenderTimestampTicks = 0;
+        _candidateBudgetExhaustions = 0;
+        _emitterBudgetExhaustions = 0;
+        _apertureLayerBudgetExhaustions = 0;
+        _apertureBuildBudgetExhaustions = 0;
+        _runBudgetExhaustions = 0;
+        _budgetInitialized = false;
     }
 
     public ZLevelLightingProjectionMetrics Snapshot()
@@ -216,7 +327,28 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             _renderDrawCalls,
             _renderTimestampTicks,
             _lastRenderTimestampTicks,
-            _maxRenderTimestampTicks);
+            _maxRenderTimestampTicks,
+            _candidateBudgetExhaustions,
+            _emitterBudgetExhaustions,
+            _apertureLayerBudgetExhaustions,
+            _apertureBuildBudgetExhaustions,
+            _runBudgetExhaustions,
+            _currentEmitterCandidatesUsed,
+            _currentEmittersUsed,
+            _currentApertureLayersUsed,
+            _currentApertureBuildsUsed,
+            _currentRunsUsed,
+            _maxEmitterCandidatesPerFrame,
+            _maxEmittersPerFrame,
+            _maxApertureLayersPerFrame,
+            _maxApertureBuildsPerFrame,
+            _maxRunsPerFrame);
+    }
+
+    internal void BeginBudgetFrameForTesting()
+    {
+        _budgetInitialized = false;
+        EnsureFrameBudget();
     }
 
     internal void RecordRender(
@@ -237,14 +369,16 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _maxRenderTimestampTicks = Math.Max(_maxRenderTimestampTicks, elapsed);
     }
 
-    private void AddGridRuns(
+    private ZLevelProjectionPlanResult AddGridRuns(
         Entity<MapGridComponent> grid,
         Box2 worldBounds,
         Vector2 emitterWorldPosition,
         float projectedRadius,
         int targetLocalZ,
-        int viewerLocalZ)
+        int viewerLocalZ,
+        out int visibleTiles)
     {
+        visibleTiles = 0;
         var (_, _, _, inverseWorldMatrix) =
             _transform.GetWorldPositionRotationMatrixWithInv(grid.Owner);
         var localBounds = inverseWorldMatrix.TransformBox(worldBounds);
@@ -255,11 +389,11 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             emitterLocalPosition + radiusVector);
 
         if (!localBounds.Intersects(lightBounds))
-            return;
+            return ZLevelProjectionPlanResult.Complete;
 
         var bounds = localBounds.Intersect(lightBounds);
         if (bounds.Width <= 0f || bounds.Height <= 0f)
-            return;
+            return ZLevelProjectionPlanResult.Complete;
 
         var tileSize = grid.Comp.TileSize;
         var minimumTile = new Vector2i(
@@ -269,7 +403,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             (int) MathF.Ceiling(bounds.Right / tileSize) - 1,
             (int) MathF.Ceiling(bounds.Top / tileSize) - 1);
         if (minimumTile.X > maximumTile.X || minimumTile.Y > maximumTile.Y)
-            return;
+            return ZLevelProjectionPlanResult.Complete;
 
         var minimumChunk = SharedMapSystem.GetChunkIndices(
             minimumTile,
@@ -283,32 +417,49 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             for (var chunkX = minimumChunk.X; chunkX <= maximumChunk.X; chunkX++)
             {
                 var chunkIndices = new Vector2i(chunkX, chunkY);
-                if (!_cache.TryComposeApertureStack(
-                        grid,
-                        chunkIndices,
-                        targetLocalZ,
-                        viewerLocalZ,
-                        out var stack))
+                var stackResult = TryComposeApertureStack(
+                    grid,
+                    chunkIndices,
+                    targetLocalZ,
+                    viewerLocalZ,
+                    out var stack);
+                switch (stackResult)
                 {
-                    continue;
+                    case ZLevelApertureStackQueryResult.LayerBudgetExceeded:
+                        return ZLevelProjectionPlanResult.ApertureLayerBudgetExceeded;
+                    case ZLevelApertureStackQueryResult.BuildBudgetExceeded:
+                        return ZLevelProjectionPlanResult.ApertureBuildBudgetExceeded;
+                    case ZLevelApertureStackQueryResult.Invalid:
+                        continue;
                 }
 
                 _stackChunks++;
-                _stackBoundaryLayers += viewerLocalZ - targetLocalZ;
                 if (stack.OpenCount == 0)
                     continue;
 
-                AddChunkRuns(grid.Owner, targetLocalZ, minimumTile, maximumTile, stack);
+                if (!AddChunkRuns(
+                        grid.Owner,
+                        targetLocalZ,
+                        minimumTile,
+                        maximumTile,
+                        stack,
+                        ref visibleTiles))
+                {
+                    return ZLevelProjectionPlanResult.RunBudgetExceeded;
+                }
             }
         }
+
+        return ZLevelProjectionPlanResult.Complete;
     }
 
-    private void AddChunkRuns(
+    private bool AddChunkRuns(
         EntityUid gridUid,
         int targetLocalZ,
         Vector2i minimumTile,
         Vector2i maximumTile,
-        in ZLevelApertureStack stack)
+        in ZLevelApertureStack stack,
+        ref int visibleTiles)
     {
         var origin = stack.ChunkIndices * ZLevelApertureChunk.ChunkSize;
         var minimumRelativeX = Math.Max(0, minimumTile.X - origin.X);
@@ -320,7 +471,7 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
             ZLevelApertureChunk.ChunkSize - 1,
             maximumTile.Y - origin.Y);
         if (minimumRelativeX > maximumRelativeX || minimumRelativeY > maximumRelativeY)
-            return;
+            return true;
 
         for (var relativeY = minimumRelativeY; relativeY <= maximumRelativeY; relativeY++)
         {
@@ -339,16 +490,110 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
                     relativeX++;
 
                 var runEnd = relativeX - 1;
+                if (_remainingRuns <= 0)
+                {
+                    RecordBudgetExhaustion(
+                        ref _runBudgetExhaustedThisFrame,
+                        ref _runBudgetExhaustions);
+                    return false;
+                }
+
+                _remainingRuns--;
+                _currentRunsUsed++;
                 _runs.Add(new ZLevelLightProjectionRun(
                     gridUid,
                     targetLocalZ,
                     origin.Y + relativeY,
                     origin.X + runStart,
                     origin.X + runEnd));
-                _visibleRuns++;
-                _visibleTiles += runEnd - runStart + 1;
+                visibleTiles += runEnd - runStart + 1;
             }
         }
+
+        return true;
+    }
+
+    private ZLevelApertureStackQueryResult TryComposeApertureStack(
+        Entity<MapGridComponent> grid,
+        Vector2i chunkIndices,
+        int targetLocalZ,
+        int viewerLocalZ,
+        out ZLevelApertureStack stack)
+    {
+        var budget = new ZLevelApertureQueryBudget(
+            _remainingApertureLayers,
+            _remainingApertureBuilds);
+        var result = _cache.TryComposeApertureStack(
+            grid,
+            chunkIndices,
+            targetLocalZ,
+            viewerLocalZ,
+            ref budget,
+            out stack);
+
+        var layersUsed = _remainingApertureLayers - budget.RemainingLayers;
+        var buildsUsed = _remainingApertureBuilds - budget.RemainingBuilds;
+        _remainingApertureLayers = budget.RemainingLayers;
+        _remainingApertureBuilds = budget.RemainingBuilds;
+        _currentApertureLayersUsed += layersUsed;
+        _currentApertureBuildsUsed += buildsUsed;
+        _stackBoundaryLayers += layersUsed;
+
+        switch (result)
+        {
+            case ZLevelApertureStackQueryResult.LayerBudgetExceeded:
+                RecordBudgetExhaustion(
+                    ref _apertureLayerBudgetExhaustedThisFrame,
+                    ref _apertureLayerBudgetExhaustions);
+                break;
+            case ZLevelApertureStackQueryResult.BuildBudgetExceeded:
+                RecordBudgetExhaustion(
+                    ref _apertureBuildBudgetExhaustedThisFrame,
+                    ref _apertureBuildBudgetExhaustions);
+                break;
+        }
+
+        return result;
+    }
+
+    private void SetBudget(ref int field, int configured, int maximum)
+    {
+        field = Math.Clamp(configured, 0, maximum);
+        _budgetInitialized = false;
+    }
+
+    private void EnsureFrameBudget()
+    {
+        var frame = _timing.CurFrame;
+        if (_budgetInitialized && _budgetFrame == frame)
+            return;
+
+        _budgetInitialized = true;
+        _budgetFrame = frame;
+        _remainingEmitterCandidates = _maxEmitterCandidatesPerFrame;
+        _remainingEmitters = _maxEmittersPerFrame;
+        _remainingApertureLayers = _maxApertureLayersPerFrame;
+        _remainingApertureBuilds = _maxApertureBuildsPerFrame;
+        _remainingRuns = _maxRunsPerFrame;
+        _currentEmitterCandidatesUsed = 0;
+        _currentEmittersUsed = 0;
+        _currentApertureLayersUsed = 0;
+        _currentApertureBuildsUsed = 0;
+        _currentRunsUsed = 0;
+        _candidateBudgetExhaustedThisFrame = false;
+        _emitterBudgetExhaustedThisFrame = false;
+        _apertureLayerBudgetExhaustedThisFrame = false;
+        _apertureBuildBudgetExhaustedThisFrame = false;
+        _runBudgetExhaustedThisFrame = false;
+    }
+
+    private static void RecordBudgetExhaustion(ref bool frameFlag, ref long counter)
+    {
+        if (frameFlag)
+            return;
+
+        frameFlag = true;
+        counter++;
     }
 
     private void RecordFrame(long started)
@@ -383,10 +628,19 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
 
         public int Compare(ZLevelLightEmitter x, ZLevelLightEmitter y)
         {
-            var z = x.WorldZ.CompareTo(y.WorldZ);
+            // Higher lower-floor world Z is closer to the viewer and survives fail-soft limits first.
+            var z = y.WorldZ.CompareTo(x.WorldZ);
             return z != 0 ? z : x.Uid.CompareTo(y.Uid);
         }
     }
+}
+
+internal enum ZLevelProjectionPlanResult : byte
+{
+    Complete,
+    ApertureLayerBudgetExceeded,
+    ApertureBuildBudgetExceeded,
+    RunBudgetExceeded,
 }
 
 public readonly record struct ZLevelLightProjectionBatch(
@@ -438,7 +692,22 @@ public readonly record struct ZLevelLightingProjectionMetrics(
     long RenderDrawCalls,
     long RenderTimestampTicks,
     long LastRenderTimestampTicks,
-    long MaxRenderTimestampTicks)
+    long MaxRenderTimestampTicks,
+    long CandidateBudgetExhaustions,
+    long EmitterBudgetExhaustions,
+    long ApertureLayerBudgetExhaustions,
+    long ApertureBuildBudgetExhaustions,
+    long RunBudgetExhaustions,
+    int CurrentEmitterCandidatesUsed,
+    int CurrentEmittersUsed,
+    int CurrentApertureLayersUsed,
+    int CurrentApertureBuildsUsed,
+    int CurrentRunsUsed,
+    int MaxEmitterCandidatesPerFrame,
+    int MaxEmittersPerFrame,
+    int MaxApertureLayersPerFrame,
+    int MaxApertureBuildsPerFrame,
+    int MaxRunsPerFrame)
 {
     public double BuildMilliseconds => ToMilliseconds(BuildTimestampTicks);
     public double AverageBuildMilliseconds => Frames == 0 ? 0d : BuildMilliseconds / Frames;

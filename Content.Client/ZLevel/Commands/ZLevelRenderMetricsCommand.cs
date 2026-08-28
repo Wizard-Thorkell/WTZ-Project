@@ -47,7 +47,8 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
 
         var lighting = cache.Snapshot();
         shell.WriteLine(
-            $"vertical apertures: chunks={lighting.CachedApertureChunks}, open tiles={lighting.CachedOpenApertureTiles}, " +
+            $"vertical apertures: chunks={lighting.CachedApertureChunks}/{lighting.ApertureCacheCapacity}, " +
+            $"open tiles={lighting.CachedOpenApertureTiles}, evicted={lighting.ApertureEvictions}, " +
             $"hit/miss={lighting.ApertureCacheHits}/{lighting.ApertureCacheMisses} " +
             $"({lighting.ApertureCacheHitPercent:0.0}% hit), invalidated={lighting.ApertureInvalidatedChunks}");
         shell.WriteLine(
@@ -59,7 +60,7 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"{lighting.EmitterAccepted}/{lighting.EmitterCandidates}, z/bounds-rejected=" +
             $"{lighting.EmitterWorldZRejected}/{lighting.EmitterBoundsRejected}, avg/last/max=" +
             $"{lighting.EmitterAverageQueryMilliseconds:0.000}/{lighting.EmitterLastQueryMilliseconds:0.000}/" +
-            $"{lighting.EmitterMaxQueryMilliseconds:0.000}ms");
+            $"{lighting.EmitterMaxQueryMilliseconds:0.000}ms, budget={lighting.EmitterCandidateBudgetExhaustions}");
 
         var projected = projection.Snapshot();
         shell.WriteLine(
@@ -71,6 +72,17 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"vertical projection build: chunks/layers={projected.StackChunks}/{projected.StackBoundaryLayers}, " +
             $"avg/last/max={projected.AverageBuildMilliseconds:0.000}/" +
             $"{projected.LastBuildMilliseconds:0.000}/{projected.MaxBuildMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"vertical projection frame budgets used/max: candidates=" +
+            $"{projected.CurrentEmitterCandidatesUsed}/{projected.MaxEmitterCandidatesPerFrame}, emitters=" +
+            $"{projected.CurrentEmittersUsed}/{projected.MaxEmittersPerFrame}, layers=" +
+            $"{projected.CurrentApertureLayersUsed}/{projected.MaxApertureLayersPerFrame}, builds=" +
+            $"{projected.CurrentApertureBuildsUsed}/{projected.MaxApertureBuildsPerFrame}, runs=" +
+            $"{projected.CurrentRunsUsed}/{projected.MaxRunsPerFrame}");
+        shell.WriteLine(
+            $"vertical projection budget exhaustions: candidates={projected.CandidateBudgetExhaustions}, " +
+            $"emitters={projected.EmitterBudgetExhaustions}, layers={projected.ApertureLayerBudgetExhaustions}, " +
+            $"builds={projected.ApertureBuildBudgetExhaustions}, runs={projected.RunBudgetExhaustions}");
         shell.WriteLine(
             $"vertical projection draw: frames={projected.RenderFrames}, batches/runs=" +
             $"{projected.RenderBatches}/{projected.RenderRuns}, vertices/calls=" +

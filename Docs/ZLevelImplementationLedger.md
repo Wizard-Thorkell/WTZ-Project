@@ -2192,6 +2192,115 @@ P2.4 is split into independently gated subpackages:
 - Next package: add measured cache/frame budgets, deterministic fail-soft
   degradation, lower-floor shadow policy, and visual regression hardening.
 
+## Completed Package: P3.4a Bounded Lighting Retention And Projection Work
+
+### Scope
+
+- Bound retained vertical aperture chunks with a configurable client FIFO and
+  exact recomputation after eviction.
+- Add shared per-client-frame limits for native light candidates, planned
+  emitters, composed aperture layers, cold aperture builds, and generated runs.
+- Process discovered lower lights nearest-floor first and reject an overflowing
+  source as one complete unit instead of publishing a truncated light shape.
+- Let cold-cache frames make bounded forward progress without exposing partial
+  stacks, and share the same allowance across automatic viewports.
+- Expose capacity, evictions, used/maximum work, and cumulative exhaustion in
+  `zlevelrendermetrics` and the debug overlay.
+
+### Acceptance Criteria
+
+- Aperture retention clamps to a finite range and never exceeds configured
+  capacity after a build or runtime configuration change.
+- Evicting a layer while composing a deeper stack does not alter the returned
+  mask; a later query can recompute the same result exactly.
+- All work controls are local archived client CVars. A server cannot raise a
+  client's projection workload.
+- Active-floor native light is unchanged and does not consume Content budgets.
+- The nearest discovered lower-floor emitter survives a planner limit first.
+- Layer, cold-build, or run exhaustion leaves no batch or run belonging to the
+  incomplete emitter; earlier complete emitters remain valid.
+- A cold-build limit warms retained state progressively across frames, while
+  budget exhaustion is counted at most once per category per frame.
+
+### Evidence
+
+- The eight dedicated P3.4a cases pass 8/8. They cover lower and upper CVar
+  clamps, FIFO eviction, exact depth-two composition with capacity one,
+  candidate early-out, nearest-floor priority, progressive cold-cache warming,
+  whole-emitter layer/run rollback, and same-frame budget sharing.
+- The combined cache, projection, and budget filter passes 19/19, retaining the
+  P3.2/P3.3 moving-frame, shader, attenuation, depth, and warmed-allocation
+  coverage.
+- The complete Content filter containing `ZLevel` passes 202/202 with no
+  failures or skips. Structural unit tests pass 2/2 and generated 3-, 6-, and
+  10-floor stress baselines pass 3/3.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes with
+  zero errors. Reported warnings are established dependency, vulnerability,
+  analyzer, and upstream-obsolescence findings.
+- The warmed projection benchmark still permits only its fixed 512-byte runtime
+  bookkeeping allowance. FIFO cache hits do not mutate queue order or allocate.
+
+### Decisions
+
+- Use insertion-order FIFO rather than LRU. It gives deterministic bounded
+  retention without adding a write or queue token to every hot lookup.
+- Keep aperture words already read in local stack state. Capacity can therefore
+  be smaller than source depth without corrupting an in-flight composition.
+- Charge work already performed even when an emitter rolls back, then stop that
+  viewport's planner. Retrying later sources would make cost and quality depend
+  on source shape in less predictable ways.
+- Share budgets by `IGameTiming.CurFrame`. Multiple automatic viewports consume
+  one allowance, while tests explicitly advance a budget frame when measuring
+  repeated independent plans.
+- Sort queried sources by descending world Z and entity UID. A hard candidate
+  cap can prioritize only entries it discovered; native intersecting-grid tree
+  selection remains outside the point-light entry budget.
+- Keep lower-tile/FOV composition independent from light planning. P3.4b will
+  add a separate nearest-first pool so dense light cannot starve visible tiles.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to client lighting retention/budgets,
+      fail-soft planning, diagnostics, focused tests, and lighting documents.
+- [x] Invariant review: active-floor native ownership, Z 0, world/local frames,
+      nearest-floor ordering, multi-layer stacks, exact eviction recomputation,
+      same-frame sharing, and complete-emitter rollback are represented.
+- [x] Automated verification: 8/8 dedicated, 19/19 lighting, 202/202 cumulative
+      Z-level integration, 2/2 unit, 3/3 baseline, and zero-error full build
+      pass.
+- [x] Performance evidence: candidate, emitter, layer, cold-build, run, and
+      retention limits are finite and observable; warmed allocation coverage
+      remains green.
+- [x] Documentation: controls, ordering, rollback, observability, fixtures, and
+      deliberate deferrals are recorded here and in `Docs/ZLevelLighting.md`.
+- [x] Dependency check: WTZ Engine remains clean at
+      `9d63eec79515c766a875f0d32803250298ddbcde`; no paired engine change is
+      required.
+- [x] Git check: staged diff and whitespace checks pass; status contains only
+      the nine declared files and no generated test or baseline artifacts.
+- [x] Mini review: findings and residual risks were confirmed against the final
+      staged implementation and are recorded below.
+- [x] Commit: package prepared as `Bound Z-level lighting projection work` on
+      `zlevel/lighting-hardening`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: capacity eviction during a stack query is safe because intersection
+  state is value-copied before a later build can evict the source cache entry.
+- Finding: whole-emitter rollback prevents a run budget from drawing striped or
+  otherwise malformed light; visible-run metrics count only accepted plans.
+- Finding: a small cold-build limit becomes deterministic cache warming rather
+  than an all-or-nothing frame spike.
+- Residual risk: lower-floor tile/FOV and mapping-preview composition are still
+  unbudgeted and need an independent fail-soft policy in P3.4b.
+- Residual risk: lower-floor source-specific wall shadows remain absent. P3.4c
+  must implement or explicitly constrain that visual policy and capture real
+  pixel baselines.
+- Residual risk: the candidate cap starts after native intersecting-grid tree
+  selection. P8 stress profiling must cover pathological moving-grid overlap.
+- Next package: bound lower-tile/FOV and mapping-preview composition without
+  allowing light work to starve scene visibility.
+
 P2.2 is split into independently gated subpackages:
 
 | Package | Deliverable | Status |
@@ -3153,3 +3262,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.1 | `Make active-floor rendering world-Z aware` | 135 engine client integration, 29 engine unit, 4 serialization, 1 replication, 182 Content Z-level, 3 baseline, full build, diff check | Complete |
 | 2026-08-28 | P3.2 | `Cache vertical lighting inputs` | 6 package, 188 Content Z-level, 136/29 engine client, 1026/446 engine shared, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.3 | `Project lower-floor Z-level lighting` | 6 projection, 11 projection/cache, 194 Content Z-level, 136/30 engine client, 3 baseline, full build, allocation, diff check | Complete |
+| 2026-08-28 | P3.4a | `Bound Z-level lighting projection work` | 8 package, 19 lighting, 202 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |

@@ -3,12 +3,14 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using Content.Shared.CCVar;
 using Content.Shared.Maps;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.ComponentTrees;
 using Robust.Client.GameObjects;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -24,18 +26,26 @@ namespace Content.Client.ZLevel;
 /// </summary>
 public sealed class ZLevelLightingCacheSystem : EntitySystem
 {
+    public const int DefaultApertureCacheCapacity = 4_096;
+    public const int MinimumApertureCacheCapacity = 1;
+    public const int MaximumApertureCacheCapacity = 65_536;
+
+    [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly LightTreeSystem _lightTree = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
 
     private EntityQuery<TransformComponent> _transformQuery;
     private readonly Dictionary<ZLevelApertureChunkKey, ZLevelApertureChunk> _apertures = new();
+    private readonly Queue<ZLevelApertureCacheToken> _apertureOrder = new();
+    private readonly List<ZLevelApertureCacheToken> _apertureOrderScratch = new();
     private readonly List<ZLevelApertureChunkKey> _removeScratch = new();
     private readonly List<(EntityUid Uid, LightTreeComponent Comp)> _lightTreeScratch = new();
     private static readonly DynamicTree<ComponentTreeEntry<PointLightComponent>>.QueryCallbackDelegate<EmitterQueryState>
         EmitterQueryCallback = QueryEmitter;
     private long _nextRevision;
     private int _cachedOpenTiles;
+    private int _apertureCacheCapacity = DefaultApertureCacheCapacity;
 
     private long _apertureQueries;
     private long _apertureCacheHits;
@@ -48,6 +58,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
     private long _apertureBuildTimestampTicks;
     private long _apertureLastBuildTimestampTicks;
     private long _apertureMaxBuildTimestampTicks;
+    private long _apertureEvictions;
 
     private long _emitterQueries;
     private long _emitterCandidates;
@@ -57,15 +68,22 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
     private long _emitterQueryTimestampTicks;
     private long _emitterLastQueryTimestampTicks;
     private long _emitterMaxQueryTimestampTicks;
+    private long _emitterCandidateBudgetExhaustions;
 
     public int CachedApertureChunkCount => _apertures.Count;
     public int CachedOpenApertureTileCount => _cachedOpenTiles;
+    public int ApertureCacheCapacity => _apertureCacheCapacity;
 
     public override void Initialize()
     {
         base.Initialize();
 
         _transformQuery = GetEntityQuery<TransformComponent>();
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelLightingApertureCacheCapacity,
+            OnApertureCacheCapacityChanged,
+            true);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
         SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnBoundaryChanged);
@@ -76,6 +94,8 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
     public override void Shutdown()
     {
         _apertures.Clear();
+        _apertureOrder.Clear();
+        _apertureOrderScratch.Clear();
         _removeScratch.Clear();
         _lightTreeScratch.Clear();
         _cachedOpenTiles = 0;
@@ -110,6 +130,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         var elapsed = Stopwatch.GetTimestamp() - started;
 
         _apertures.Add(key, aperture);
+        _apertureOrder.Enqueue(new ZLevelApertureCacheToken(key, aperture.Revision));
         _cachedOpenTiles += aperture.OpenCount;
         _apertureBuilds++;
         _apertureBuildTileChecks += ZLevelApertureChunk.TileCount;
@@ -117,6 +138,9 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         _apertureBuildTimestampTicks += elapsed;
         _apertureLastBuildTimestampTicks = elapsed;
         _apertureMaxBuildTimestampTicks = Math.Max(_apertureMaxBuildTimestampTicks, elapsed);
+        TrimApertureCache();
+        if (_apertureOrder.Count > _apertureCacheCapacity * 2)
+            CompactApertureOrder();
         return true;
     }
 
@@ -142,9 +166,31 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         int viewerLocalZ,
         out ZLevelApertureStack stack)
     {
+        var budget = ZLevelApertureQueryBudget.Unlimited;
+        return TryComposeApertureStack(
+                   grid,
+                   chunkIndices,
+                   targetLocalZ,
+                   viewerLocalZ,
+                   ref budget,
+                   out stack) == ZLevelApertureStackQueryResult.Success;
+    }
+
+    /// <summary>
+    /// Intersects an aperture stack while charging caller-owned layer and cold-build budgets.
+    /// A budget failure never exposes a partial stack.
+    /// </summary>
+    public ZLevelApertureStackQueryResult TryComposeApertureStack(
+        Entity<MapGridComponent> grid,
+        Vector2i chunkIndices,
+        int targetLocalZ,
+        int viewerLocalZ,
+        ref ZLevelApertureQueryBudget budget,
+        out ZLevelApertureStack stack)
+    {
         stack = default;
         if (targetLocalZ >= viewerLocalZ || grid.Comp.Deleted)
-            return false;
+            return ZLevelApertureStackQueryResult.Invalid;
 
         var word0 = ulong.MaxValue;
         var word1 = ulong.MaxValue;
@@ -153,8 +199,20 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
 
         for (var lowerZ = targetLocalZ; lowerZ < viewerLocalZ; lowerZ++)
         {
+            if (budget.RemainingLayers <= 0)
+                return ZLevelApertureStackQueryResult.LayerBudgetExceeded;
+
+            var key = new ZLevelApertureChunkKey(grid.Owner, chunkIndices, lowerZ);
+            var cached = _apertures.ContainsKey(key);
+            if (!cached && budget.RemainingBuilds <= 0)
+                return ZLevelApertureStackQueryResult.BuildBudgetExceeded;
+
+            budget.RemainingLayers--;
+            if (!cached)
+                budget.RemainingBuilds--;
+
             if (!TryGetApertureChunk(grid, chunkIndices, lowerZ, out var aperture))
-                return false;
+                return ZLevelApertureStackQueryResult.Invalid;
 
             word0 &= aperture.Word0;
             word1 &= aperture.Word1;
@@ -178,7 +236,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
             BitOperations.PopCount(word1) +
             BitOperations.PopCount(word2) +
             BitOperations.PopCount(word3));
-        return true;
+        return ZLevelApertureStackQueryResult.Success;
     }
 
     /// <summary>
@@ -192,8 +250,30 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         int maximumWorldZ,
         List<ZLevelLightEmitter> results)
     {
+        return QueryEmitters(
+            mapId,
+            worldBounds,
+            minimumWorldZ,
+            maximumWorldZ,
+            results,
+            int.MaxValue).Accepted;
+    }
+
+    /// <summary>
+    /// Queries native point lights while bounding broad-phase entry visits.
+    /// </summary>
+    public ZLevelLightEmitterQueryResult QueryEmitters(
+        MapId mapId,
+        Box2 worldBounds,
+        int minimumWorldZ,
+        int maximumWorldZ,
+        List<ZLevelLightEmitter> results,
+        int maximumCandidates)
+    {
         if (minimumWorldZ > maximumWorldZ)
             throw new ArgumentOutOfRangeException(nameof(minimumWorldZ));
+        if (maximumCandidates < 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumCandidates));
 
         var started = Stopwatch.GetTimestamp();
         var initialCount = results.Count;
@@ -202,16 +282,24 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
             worldBounds,
             minimumWorldZ,
             maximumWorldZ,
-            results);
+            results,
+            maximumCandidates);
 
-        _lightTreeScratch.Clear();
-        _lightTree.QueryAabb(
-            ref state,
-            EmitterQueryCallback,
-            mapId,
-            worldBounds,
-            _lightTreeScratch);
-        _lightTreeScratch.Clear();
+        if (maximumCandidates == 0)
+        {
+            state.CandidateBudgetExceeded = true;
+        }
+        else
+        {
+            _lightTreeScratch.Clear();
+            _lightTree.QueryAabb(
+                ref state,
+                EmitterQueryCallback,
+                mapId,
+                worldBounds,
+                _lightTreeScratch);
+            _lightTreeScratch.Clear();
+        }
 
         var elapsed = Stopwatch.GetTimestamp() - started;
         _emitterQueries++;
@@ -222,7 +310,13 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         _emitterQueryTimestampTicks += elapsed;
         _emitterLastQueryTimestampTicks = elapsed;
         _emitterMaxQueryTimestampTicks = Math.Max(_emitterMaxQueryTimestampTicks, elapsed);
-        return results.Count - initialCount;
+        if (state.CandidateBudgetExceeded)
+            _emitterCandidateBudgetExhaustions++;
+
+        return new ZLevelLightEmitterQueryResult(
+            results.Count - initialCount,
+            state.Candidates,
+            state.CandidateBudgetExceeded);
     }
 
     public void InvalidateGrid(EntityUid gridUid)
@@ -235,6 +329,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         _apertureInvalidations++;
         _apertureInvalidatedChunks += _apertures.Count;
         _apertures.Clear();
+        _apertureOrder.Clear();
         _cachedOpenTiles = 0;
     }
 
@@ -251,6 +346,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         _apertureBuildTimestampTicks = 0;
         _apertureLastBuildTimestampTicks = 0;
         _apertureMaxBuildTimestampTicks = 0;
+        _apertureEvictions = 0;
         _emitterQueries = 0;
         _emitterCandidates = 0;
         _emitterAccepted = 0;
@@ -259,6 +355,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         _emitterQueryTimestampTicks = 0;
         _emitterLastQueryTimestampTicks = 0;
         _emitterMaxQueryTimestampTicks = 0;
+        _emitterCandidateBudgetExhaustions = 0;
     }
 
     public ZLevelLightingCacheMetrics Snapshot()
@@ -275,6 +372,7 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
             _apertureBuildTimestampTicks,
             _apertureLastBuildTimestampTicks,
             _apertureMaxBuildTimestampTicks,
+            _apertureEvictions,
             _emitterQueries,
             _emitterCandidates,
             _emitterAccepted,
@@ -283,8 +381,10 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
             _emitterQueryTimestampTicks,
             _emitterLastQueryTimestampTicks,
             _emitterMaxQueryTimestampTicks,
+            _emitterCandidateBudgetExhaustions,
             _apertures.Count,
-            _cachedOpenTiles);
+            _cachedOpenTiles,
+            _apertureCacheCapacity);
     }
 
     private ZLevelApertureChunk BuildApertureChunk(
@@ -331,6 +431,12 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         ref EmitterQueryState state,
         in ComponentTreeEntry<PointLightComponent> entry)
     {
+        if (state.Candidates >= state.MaximumCandidates)
+        {
+            state.CandidateBudgetExceeded = true;
+            return false;
+        }
+
         state.Candidates++;
         var system = state.System;
         var worldZ = system._transform.GetWorldZLevel((entry.Uid, entry.Transform, null));
@@ -415,6 +521,9 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
 
         _cachedOpenTiles -= removed.OpenCount;
         _apertureInvalidatedChunks++;
+
+        if (_apertures.Count == 0)
+            _apertureOrder.Clear();
     }
 
     private void RemoveWhere<TState>(Func<ZLevelApertureChunkKey, TState, bool> predicate, TState state)
@@ -437,6 +546,55 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
 
         _apertureInvalidatedChunks += _removeScratch.Count;
         _removeScratch.Clear();
+
+        if (_apertures.Count == 0)
+            _apertureOrder.Clear();
+    }
+
+    private void OnApertureCacheCapacityChanged(int configuredCapacity)
+    {
+        _apertureCacheCapacity = Math.Clamp(
+            configuredCapacity,
+            MinimumApertureCacheCapacity,
+            MaximumApertureCacheCapacity);
+        TrimApertureCache();
+        if (_apertureOrder.Count > _apertureCacheCapacity * 2)
+            CompactApertureOrder();
+    }
+
+    private void TrimApertureCache()
+    {
+        while (_apertures.Count > _apertureCacheCapacity &&
+               _apertureOrder.TryDequeue(out var oldest))
+        {
+            if (!_apertures.TryGetValue(oldest.Key, out var current) ||
+                current.Revision != oldest.Revision)
+            {
+                continue;
+            }
+
+            _apertures.Remove(oldest.Key);
+            _cachedOpenTiles -= current.OpenCount;
+            _apertureEvictions++;
+        }
+    }
+
+    private void CompactApertureOrder()
+    {
+        _apertureOrderScratch.Clear();
+        foreach (var (key, aperture) in _apertures)
+        {
+            _apertureOrderScratch.Add(new ZLevelApertureCacheToken(key, aperture.Revision));
+        }
+
+        _apertureOrderScratch.Sort(static (left, right) => left.Revision.CompareTo(right.Revision));
+        _apertureOrder.Clear();
+        foreach (var token in _apertureOrderScratch)
+        {
+            _apertureOrder.Enqueue(token);
+        }
+
+        _apertureOrderScratch.Clear();
     }
 
     private struct EmitterQueryState(
@@ -444,19 +602,53 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         Box2 worldBounds,
         int minimumWorldZ,
         int maximumWorldZ,
-        List<ZLevelLightEmitter> results)
+        List<ZLevelLightEmitter> results,
+        int maximumCandidates)
     {
         public readonly ZLevelLightingCacheSystem System = system;
         public readonly Box2 WorldBounds = worldBounds;
         public readonly int MinimumWorldZ = minimumWorldZ;
         public readonly int MaximumWorldZ = maximumWorldZ;
         public readonly List<ZLevelLightEmitter> Results = results;
+        public readonly int MaximumCandidates = maximumCandidates;
         public int Candidates;
         public int Accepted;
         public int WorldZRejected;
         public int BoundsRejected;
+        public bool CandidateBudgetExceeded;
     }
 }
+
+public enum ZLevelApertureStackQueryResult : byte
+{
+    Success,
+    Invalid,
+    LayerBudgetExceeded,
+    BuildBudgetExceeded,
+}
+
+public struct ZLevelApertureQueryBudget
+{
+    public int RemainingLayers;
+    public int RemainingBuilds;
+
+    public static ZLevelApertureQueryBudget Unlimited => new(int.MaxValue, int.MaxValue);
+
+    public ZLevelApertureQueryBudget(int remainingLayers, int remainingBuilds)
+    {
+        RemainingLayers = remainingLayers;
+        RemainingBuilds = remainingBuilds;
+    }
+}
+
+public readonly record struct ZLevelLightEmitterQueryResult(
+    int Accepted,
+    int CandidatesVisited,
+    bool CandidateBudgetExceeded);
+
+internal readonly record struct ZLevelApertureCacheToken(
+    ZLevelApertureChunkKey Key,
+    long Revision);
 
 public readonly record struct ZLevelApertureChunkKey(
     EntityUid GridUid,
@@ -589,6 +781,7 @@ public readonly record struct ZLevelLightingCacheMetrics(
     long ApertureBuildTimestampTicks,
     long ApertureLastBuildTimestampTicks,
     long ApertureMaxBuildTimestampTicks,
+    long ApertureEvictions,
     long EmitterQueries,
     long EmitterCandidates,
     long EmitterAccepted,
@@ -597,8 +790,10 @@ public readonly record struct ZLevelLightingCacheMetrics(
     long EmitterQueryTimestampTicks,
     long EmitterLastQueryTimestampTicks,
     long EmitterMaxQueryTimestampTicks,
+    long EmitterCandidateBudgetExhaustions,
     int CachedApertureChunks,
-    int CachedOpenApertureTiles)
+    int CachedOpenApertureTiles,
+    int ApertureCacheCapacity)
 {
     public double ApertureCacheHitPercent => ApertureQueries == 0
         ? 0d
