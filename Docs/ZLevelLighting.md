@@ -1,8 +1,8 @@
 # WTZ Z-Level Lighting And FOV
 
-This document defines the rendering ownership established by roadmap package
-P3.1. It is the baseline for the aperture cache in P3.2, vertical light
-projection in P3.3, and frame budgets in P3.4.
+This document defines the rendering ownership established by roadmap packages
+P3.1 and P3.2. It is the baseline for vertical light projection in P3.3 and
+frame budgets in P3.4.
 
 ## Ownership
 
@@ -62,8 +62,57 @@ Sparse chunks that contain only non-zero layers contribute to the grid AABB.
 Adding and removing boundary tiles expands and contracts that AABB, and this
 state survives map save/load.
 
-P3.2 may add aperture and emitter indexes, but those indexes must be separate
-from the GPU mesh cache and use targeted revision invalidation.
+The P3.2 aperture cache and emitter index are separate from the GPU mesh cache.
+They describe vertical lighting inputs and never own native tile meshes or GPU
+objects.
+
+## Vertical Aperture Cache Contract
+
+The Content client cache key is:
+
+```text
+(grid entity, chunk indices, lower grid-local Z)
+```
+
+Each entry stores the 256 `Visibility` boundary decisions for one 16 by 16 map
+chunk in four `ulong` words. A set bit means light or FOV policy may cross from
+the lower local layer to the layer immediately above it. Entries are built
+lazily from `SharedZLevelBoundarySystem`; they do not duplicate boundary rules.
+
+Targeted invalidation rules:
+
+- A normal tile edit invalidates the boundary below local Z 0 in that chunk.
+- A sparse Z tile edit invalidates the boundary immediately below the edited
+  local layer in that chunk.
+- Adding, removing, moving, anchoring, or changing an explicit boundary provider
+  invalidates its exact chunk and lower layer.
+- A replicated or local `ZLevelMap` policy change invalidates entries belonging
+  to every grid on that map. The same event now invalidates the shared boundary
+  cache, preventing an old default policy from repopulating a fresh light cache.
+- Removing a grid removes only entries owned by that grid.
+
+Entries carry monotonically increasing revisions so tests and future consumers
+can distinguish a retained neighbor from a rebuilt chunk. P3.2 deliberately
+does not add capacity eviction: P3.4 owns bounded retention and fail-soft policy
+after P3.3 reveals the real visible working set.
+
+## Native Emitter Index Contract
+
+WTZ reuses Robust's live `LightTreeSystem`; it does not maintain a second light
+movement or hierarchy index. `ZLevelLightingCacheSystem.QueryEmitters`:
+
+1. uses caller-retained tree and result buffers;
+2. selects intersecting native component trees with an allocation-free
+   approximate grid query;
+3. resolves each source's effective world Z through its current hierarchy and
+   `ZLevelFrame` origin;
+4. applies an exact light-circle versus world-AABB check after broad-phase
+   selection; and
+5. returns immutable snapshots of the source properties needed by P3.3.
+
+The index follows translated and rotated grids through the existing component
+tree update lifecycle. Queries are main-thread and sequential because the
+system owns one reusable tree scratch buffer.
 
 ## Observability
 
@@ -73,6 +122,16 @@ The client command `zlevelrendermetrics` reports the latest rendered frame:
 - grid/chunk/layer cache hits, misses, and retained entries;
 - lights rejected because their world Z differs from the eye;
 - occluders rejected because their world Z differs from the eye.
+
+It also reports cumulative P3.2 input-cache counters:
+
+- aperture hits, misses, builds, tile checks, invalidations, retained chunks,
+  open bits, and build timings;
+- emitter queries, candidates, accepted sources, world-Z and bounds rejections,
+  and query timings.
+
+Run `zlevelrendermetrics reset` to reset cumulative P3.2 counters. Retained cache
+entries and native per-frame Clyde counters are not destroyed by this command.
 
 The same values appear when `zlevel.debug_overlay` is enabled. Counters reset at
 the start of each Clyde frame; retained cache size is sampled live.
@@ -115,13 +174,23 @@ shader behavior changes. Headless integration tests validate state and
 invalidation contracts but cannot judge light color, shadow shape, or transient
 floor flashes.
 
-## P3.1 Deliberate Limits
+## P3.2 Scale Fixture
+
+`ZLevelLightingCacheTest.CacheWorkloadScalesWithAuthoredFloorCount` builds
+equivalent one-chunk workloads with 3, 6, and 10 floors. It asserts linear cold
+build work, one live emitter per authored floor, and no managed allocation in
+the warmed aperture and emitter query loops. Timing is diagnostic output rather
+than a machine-dependent pass threshold.
+
+## P3.2 Deliberate Limits
 
 - Only the active floor contributes native point light and FOV occlusion.
 - Lower floors can remain visible through Content composition, but their light
   is not projected upward yet.
-- Vertical attenuation, aperture/emitter caches, work budgets, and fail-soft
-  projection are assigned to P3.2 through P3.4.
+- P3.2 prepares apertures and emitters but does not project lower-floor light or
+  modify FOV. P3.3 owns that visible behavior and attenuation.
+- Cache capacity, per-frame work budgets, and predictable fail-soft degradation
+  remain assigned to P3.4.
 - Lights and occluders on different overlapping grids compare world Z, not each
   grid's local Z.
 - The cache is bounded by authored sparse content lifetime, but P3.1 does not

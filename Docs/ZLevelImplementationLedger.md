@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/lighting-fov`.
-- Active package: `P3.2 chunked vertical aperture/emitter cache and targeted invalidation`.
+- Active branch: `zlevel/lighting-projection`.
+- Active package: `P3.3 bounded lower-floor light/FOV projection and attenuation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1805,8 +1805,8 @@ P2.4 is split into independently gated subpackages:
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P3.1 | Lighting/FOV architecture, visual baselines, metrics, and cache contract | Complete |
-| P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | In progress |
-| P3.3 | Bounded lower-floor light/FOV projection and attenuation | Pending |
+| P3.2 | Chunked vertical aperture/emitter cache and targeted invalidation | Complete |
+| P3.3 | Bounded lower-floor light/FOV projection and attenuation | In progress |
 | P3.4 | Frame budgets, fail-soft degradation, visual regressions, and hardening | Pending |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
@@ -1930,6 +1930,135 @@ P2.4 is split into independently gated subpackages:
   overlay audit belongs to P3.4 rendering hardening.
 - Next package: build a chunked cache of vertical visibility apertures and light
   emitters with revisioned, targeted invalidation and measurable cold/hot paths.
+
+## Completed Package: P3.2 Vertical Lighting Input Cache
+
+### Scope
+
+- Cache `Visibility` apertures in 16 by 16 chunks keyed by grid, chunk, and
+  lower grid-local Z, with four-word bitsets and monotonic revisions.
+- Invalidate exact cache entries after base/sparse tile edits and explicit
+  boundary changes, all entries on a reconfigured map, and all entries owned by
+  a removed grid.
+- Publish one map-configuration change event for local configuration, component
+  lifecycle, and replicated state, and use it to invalidate the authoritative
+  shared boundary cache as well as the client aperture cache.
+- Reuse Robust's live point-light component tree as the emitter index, resolving
+  current world positions and world Z across translated, rotated, and displaced
+  grid frames.
+- Add caller-owned component-tree query buffers to WTZ Engine so warmed emitter
+  discovery does not allocate per query.
+- Expose aperture/emitter counts, rejections, hit rate, invalidation, and timing
+  through `zlevelrendermetrics`, its `reset` option, and the debug overlay.
+
+### Acceptance Criteria
+
+- Cold chunk construction matches `SharedZLevelBoundarySystem` for tiled and
+  explicit policies, including negative chunks and negative local layers.
+- A tile or provider change rebuilds only its exact chunk/lower layer; unrelated
+  revisions survive, map policy changes clear every affected grid, and grid
+  removal cleans only that grid.
+- Emitter discovery returns live source properties on the requested world floors
+  and follows moving grid transforms without a parallel movement index.
+- Warming caller-owned aperture, emitter-result, and component-tree buffers
+  removes allocation proportional to query count.
+- Equivalent 3-, 6-, and 10-floor workloads build linearly by authored boundary
+  count and retain one discoverable emitter per floor.
+- Existing Z 0, mapping, atmosphere, combat, interaction, and save/load tests
+  remain green.
+
+### Evidence
+
+- The six dedicated package cases pass 6/6. They cover cache hit/miss and
+  revisions, targeted tile/policy/provider/grid invalidation, negative indices,
+  explicit marker replication and anchoring, moving frames, native emitter
+  properties, reusable buffers, and 3/6/10-floor scale.
+- The complete Content filter containing `ZLevel` passes 188/188 with no skips.
+  The full solution builds with zero errors and the established 700-warning
+  dependency, analyzer, vulnerability, and upstream-obsolescence baseline.
+- WTZ Engine passes 136/136 client integration tests, 29/29 client unit tests,
+  1,026/1,026 shared integration tests, and 446/446 shared unit tests. Its direct
+  query-buffer test validates one native light and 100 warmed allocation checks.
+- The generated server baselines pass 3/3. Their measured phases retain 6,336
+  allocated bytes, 100% boundary-cache hits, and zero evictions; measured times
+  were 7.842 ms, 17.971 ms, and 23.103 ms for 3, 6, and 10 floors.
+- The client scale fixture retained 2, 5, and 9 aperture chunks for 3, 6, and 10
+  floors. Warming both input paths produced zero managed bytes in every case.
+  Diagnostic cold totals were 14.263 ms, 16.169 ms, and 4.484 ms; JIT/pool state
+  makes these comparison observations rather than pass thresholds.
+- The paired WTZ Engine revision is
+  `dca90bdf1f9e93539a03078186eb72922257054d` on
+  `zlevel/lighting-aperture-cache`.
+
+### Decisions
+
+- Keep aperture policy in Content and source it from the shared boundary
+  authority. The cache stores decisions, not a second rules engine.
+- Reuse `LightTreeSystem` as the only live emitter index. Duplicating light
+  movement and hierarchy bookkeeping would add invalidation races before P3.3
+  has a consumer.
+- Store apertures in grid-local Z because their tiles and invalidation events are
+  grid-local; filter emitters by world Z because overlapping frames must agree
+  in one map-space coordinate.
+- Use approximate grid selection only as the component-tree broad phase, then
+  apply the exact light-circle check. This removed the fixed per-query fixture
+  intersection allocation without changing accepted emitters.
+- Keep the cache lifecycle-bounded but not capacity-bounded in P3.2. P3.4 will
+  select eviction and fail-soft policy from the visible working set measured
+  after P3.3 projection exists.
+- Keep emitter queries sequential on the client main thread. The system owns one
+  retained tree scratch buffer and does not claim reentrant or parallel use.
+
+### Completion Gate
+
+- [x] Scope check: the project diff is limited to vertical lighting inputs,
+      shared map-policy invalidation, metrics, tests, and documentation; the
+      engine diff contains only reusable component-tree querying and its test.
+- [x] Invariant review: Z 0, negative local Z, world/local frame conversion,
+      translated and rotated grids, explicit boundaries, replication, mapping
+      anchoring, and lifecycle cleanup are represented.
+- [x] Automated verification: 6/6 package, 188/188 Content Z-level, 3/3 server
+      baseline, 136/136 engine client integration, 29/29 engine client unit,
+      1,026/1,026 engine shared integration, and 446/446 engine shared unit tests
+      pass, followed by a zero-error full solution build.
+- [x] Performance evidence: scale fixtures cover 3/6/10 floors; warmed aperture,
+      emitter, and direct engine tree queries allocate no bytes proportional to
+      query count, while historical server baselines remain stable.
+- [x] Documentation: ownership, cache keys, invalidation, emitter discovery,
+      metrics, scale behavior, limitations, and the P3.3 handoff are recorded in
+      `Docs/ZLevelLighting.md` and this ledger.
+- [x] Dependency check: WTZ Engine commit
+      `dca90bdf1f9e93539a03078186eb72922257054d` is committed, pushed, clean, and
+      paired by the project submodule pointer.
+- [x] Git check: engine and project `git diff --check` pass apart from checkout
+      line-ending notices; generated baseline artifacts remain ignored and no
+      unrelated files are included.
+- [x] Mini review: findings, residual risks, and P3.3 are recorded below.
+- [x] Commit: engine saved as `Add reusable component-tree query buffers`;
+      project package prepared as `Cache vertical lighting inputs`.
+
+### Mini Review
+
+- Finding: changing `ZLevelMap.DefaultBoundaryMode` previously left the shared
+  boundary cache stale. A common lifecycle/state event now invalidates both the
+  authority cache and its client lighting consumer.
+- Finding: explicit boundary markers only participate while anchored. The
+  integration fixture now creates a real supporting tile and asserts server and
+  client anchoring, preventing an invalid test setup from imitating cache drift.
+- Finding: caller-owned lists alone were insufficient because precise grid
+  fixture selection allocated once per component-tree query. Propagating the
+  existing approximate-query contract removed that cost while exact emitter
+  filtering preserved results.
+- Residual risk: P3.2 prepares inputs but deliberately produces no lower-floor
+  illumination or cross-floor FOV. Visual correctness begins in P3.3.
+- Residual risk: retained aperture chunks have lifecycle cleanup but no capacity
+  or per-frame build budget. P3.4 owns bounded retention and predictable
+  degradation after projection load is measurable.
+- Residual risk: the retained emitter tree buffer makes the query API
+  non-reentrant. Current render work is main-thread and sequential; a future
+  parallel renderer must provide per-job buffers instead.
+- Next package: consume these inputs to project bounded lower-floor light and FOV
+  through ordered `Visibility` apertures with deterministic attenuation.
 
 P2.2 is split into independently gated subpackages:
 
@@ -2890,3 +3019,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P2.4d3b | `Aim projectiles at lower-floor coordinates` | 33 combat, 27 native interaction, 1 native weapon, 164 integration, full build, diff check | Complete |
 | 2026-08-28 | P2.4d3c | `Harden Z-level combat request authority` | 51 combat, 7 network throw, 4 native combat, 24 native interaction, 182 integration, full build, diff check | Complete |
 | 2026-08-28 | P3.1 | `Make active-floor rendering world-Z aware` | 135 engine client integration, 29 engine unit, 4 serialization, 1 replication, 182 Content Z-level, 3 baseline, full build, diff check | Complete |
+| 2026-08-28 | P3.2 | `Cache vertical lighting inputs` | 6 package, 188 Content Z-level, 136/29 engine client, 1026/446 engine shared, 3 baseline, full build, allocation, diff check | Complete |

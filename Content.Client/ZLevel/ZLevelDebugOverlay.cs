@@ -40,6 +40,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedZLevelTraceSystem _traceSystem;
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
+    private readonly ZLevelLightingCacheSystem _lightingCacheSystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
     private readonly EntityQuery<ZLevelPositionComponent> _zLevelQuery;
     private readonly Font _font;
@@ -62,6 +63,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _traceSystem = _entityManager.System<SharedZLevelTraceSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
+        _lightingCacheSystem = _entityManager.System<ZLevelLightingCacheSystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
         _zLevelQuery = _entityManager.GetEntityQuery<ZLevelPositionComponent>();
 
@@ -179,6 +181,14 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"render layers:{render.GridLayersDrawn} chunks:{render.GridChunksDrawn} " +
             $"cache layers:{render.CachedGridChunkLayers} hit:{render.GridChunkCacheHitPercent:0.0}% " +
             $"z-reject light:{render.LightsRejectedByZ} occ:{render.OccludersRejectedByZ}",
+            metricsColor);
+
+        var lighting = _lightingCacheSystem.Snapshot();
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 154f),
+            $"vertical light aperture chunks:{lighting.CachedApertureChunks} open:{lighting.CachedOpenApertureTiles} " +
+            $"hit:{lighting.ApertureCacheHitPercent:0.0}% emit:{lighting.EmitterAccepted}/{lighting.EmitterCandidates}",
             metricsColor);
     }
 

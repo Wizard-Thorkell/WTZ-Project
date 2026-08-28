@@ -25,6 +25,41 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 public sealed class ZLevelMapFormatTest : GameTest
 {
     [Test]
+    public async Task ChangingDefaultBoundaryModeInvalidatesBoundaryCache()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var format = SEntMan.System<SharedZLevelMapSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            var tile = Vector2i.Zero;
+
+            format.Configure(testMap.MapUid, 0, 1, 0, ZLevelDefaultBoundaryMode.TileAboveCloses);
+            map.SetZLevelTile(testMap.Grid, grid, new ZLevelTileIndices(tile.X, tile.Y, 1), new Tile(1));
+            Assert.That(boundaries.IsOpen(
+                testMap.Grid,
+                grid,
+                tile,
+                0,
+                1,
+                ZLevelBoundaryChannels.Visibility), Is.False);
+            Assert.That(boundaries.CachedBoundaryCount, Is.GreaterThan(0));
+
+            format.Configure(testMap.MapUid, 0, 1, 0, ZLevelDefaultBoundaryMode.ExplicitOnly);
+            Assert.That(boundaries.IsOpen(
+                testMap.Grid,
+                grid,
+                tile,
+                0,
+                1,
+                ZLevelBoundaryChannels.Visibility), Is.True);
+        });
+    }
+
+    [Test]
     public async Task FloorOperationsNeverCopyOrDeleteActors()
     {
         var server = Pair.Server;

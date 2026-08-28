@@ -23,6 +23,9 @@ public sealed class SharedZLevelMapSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
+        SubscribeLocalEvent<ZLevelMapComponent, ComponentStartup>(OnConfigurationStartup);
+        SubscribeLocalEvent<ZLevelMapComponent, ComponentShutdown>(OnConfigurationShutdown);
+        SubscribeLocalEvent<ZLevelMapComponent, AfterAutoHandleStateEvent>(OnConfigurationStateHandled);
         SubscribeLocalEvent<BeforeSerializationEvent>(OnBeforeSerialization);
     }
 
@@ -59,6 +62,28 @@ public sealed class SharedZLevelMapSystem : EntitySystem
         config.DefaultLevel = defaultLevel;
         config.DefaultBoundaryMode = boundaryMode;
         Dirty(mapUid, config);
+        RaiseConfigurationChanged(mapUid);
+    }
+
+    private void OnConfigurationStartup(Entity<ZLevelMapComponent> entity, ref ComponentStartup args)
+    {
+        RaiseConfigurationChanged(entity.Owner);
+    }
+
+    private void OnConfigurationShutdown(Entity<ZLevelMapComponent> entity, ref ComponentShutdown args)
+    {
+        RaiseConfigurationChanged(entity.Owner);
+    }
+
+    private void OnConfigurationStateHandled(Entity<ZLevelMapComponent> entity, ref AfterAutoHandleStateEvent args)
+    {
+        RaiseConfigurationChanged(entity.Owner);
+    }
+
+    private void RaiseConfigurationChanged(EntityUid mapUid)
+    {
+        var ev = new ZLevelMapConfigurationChangedEvent(mapUid);
+        RaiseLocalEvent(mapUid, ref ev, true);
     }
 
     public bool TryValidate(EntityUid mapUid, out string error)

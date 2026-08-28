@@ -10,7 +10,7 @@ namespace Content.Shared.ZLevel.Components;
 /// Declares that a map is authored for native Z-level gameplay and records the
 /// serialized contract needed to load and edit it safely.
 /// </summary>
-[RegisterComponent, NetworkedComponent, AutoGenerateComponentState]
+[RegisterComponent, NetworkedComponent, AutoGenerateComponentState(raiseAfterAutoHandleState: true)]
 [Access(typeof(SharedZLevelMapSystem))]
 public sealed partial class ZLevelMapComponent : Component
 {

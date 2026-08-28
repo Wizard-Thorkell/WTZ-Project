@@ -57,6 +57,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         SubscribeLocalEvent<PlacementEntityEvent>(OnPlacement);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
+        SubscribeLocalEvent<ZLevelMapConfigurationChangedEvent>(OnMapConfigurationChanged);
         SubscribeLocalEvent<MapGridComponent, EntityTerminatingEvent>(OnGridTerminating);
 
         Subs.CVar(
@@ -268,6 +269,26 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         {
             if (key.GridUid == entity.Owner)
                 remove.Add(key);
+        }
+
+        foreach (var key in remove)
+        {
+            _boundaryCache.Remove(key);
+        }
+
+        if (remove.Count > 0)
+            _metrics.RecordBoundaryInvalidatedEntries(remove.Count);
+    }
+
+    private void OnMapConfigurationChanged(ref ZLevelMapConfigurationChangedEvent args)
+    {
+        var remove = new List<BoundaryCacheKey>();
+        foreach (var key in _boundaryCache.Keys)
+        {
+            if (!_transformQuery.TryComp(key.GridUid, out var transform) || transform.MapUid != args.MapUid)
+                continue;
+
+            remove.Add(key);
         }
 
         foreach (var key in remove)
