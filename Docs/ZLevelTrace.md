@@ -140,6 +140,25 @@ counters. Core time includes normalization, geometry, boundaries and optional
 physics, but excludes immutable-array snapshot creation after the buffered core
 returns.
 
+## Interaction Authority
+
+`SharedZLevelInteractionSystem` is the entity-facing authority layered over the
+geometric trace primitive:
+
+- `CanDirectlyInteract` applies the default same-world-Z policy.
+- `AreOnSameWorldLevel` compares physical entities without redirecting through
+  a remote eye; pulling and held-item ownership use this path.
+- `CanInteractThroughOpenBoundary` is the explicit opt-in for vertical use. It
+  requires one common frame and a completed trace through the `Interaction`
+  channel. It does not replace the consumer's normal accessibility, range, or
+  obstruction checks.
+
+A server-owned `EyeComponent.Target` supplies both the world Z and XY origin for
+world interaction. Self, held/equipped items, direct parent/child targets, and
+same-container operations remain local to the actor. Core interaction entry
+points reject another world Z even when range checks are bypassed; examine and
+authenticated administrative inspection retain their separate capabilities.
+
 ## Current Limits
 
 - A request can evaluate boundaries from one common or explicit grid frame.

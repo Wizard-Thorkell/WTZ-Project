@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/generated-effects`.
-- Active package: `P2.4 central direct and remote interaction validation`.
+- Active branch: `zlevel/interaction-authority`.
+- Active package: `P2.4b interaction metrics and deliberate vertical consumers`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -809,7 +809,152 @@ treated as Debug-run noise.
 | P2.1 | Authoritative hitscan migration and Z 0 parity | Complete |
 | P2.2 | Physical projectiles and thrown-entity traversal | Complete |
 | P2.3 | Explosions, fire, heat, and generated effects | Complete |
-| P2.4 | Central direct and remote interaction validation | Pending |
+| P2.4 | Central direct and remote interaction validation | In progress |
+
+P2.4 is split into independently gated subpackages:
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P2.4a | Central spatial origin, same-floor authority, and opt-in trace primitive | Complete |
+| P2.4b | Interaction metrics and deliberate vertical consumers | In progress |
+| P2.4c | Verb, UI, action, drag/drop, do-after, and remote-view request audit | Pending |
+| P2.4d | Client targeting polish, regression matrix, and P2 completion review | Pending |
+
+### P2.4 Contracts
+
+- Physical use, pickup, pull, drag/drop, tool use, activation, and alt-click are
+  same-world-Z by default.
+- A server-owned `EyeComponent.Target` is the spatial origin for a world
+  interaction, while self, held-item, equipment, and same-container operations
+  remain local to the actor.
+- Cross-floor use is opt-in and must complete a `ZLevelTrace` through the
+  `Interaction` boundary channel; bypassing range does not bypass floor policy.
+- Examine and authenticated administrative inspection remain separate targeting
+  capabilities and do not weaken gameplay interaction authority.
+- Low-level coordinate and physics helpers remain 2D primitives. Entity-facing
+  interaction entry points own the floor policy so specialized consumers can
+  state deliberate exceptions instead of inheriting one implicitly.
+
+## Completed Package: P2.4a Central Interaction Authority
+
+### Scope
+
+- Add one shared entity-facing authority for physical same-floor checks,
+  effective world-interaction origins, and explicit vertical interaction traces.
+- Resolve a server-owned remote eye as both the world-Z and XY origin for world
+  targets while keeping self, held/equipped, parent/child, and same-container
+  operations local to the actor.
+- Enforce the default same-world-Z policy at `UserInteraction`, hand use, tool
+  use, ranged-use callbacks, low-priority after-interact callbacks, activation,
+  alt-click, entity range checks, BUI message attempts, in-hand use, and pull.
+- Keep pulling and held-item ownership physical, independent of remote-eye
+  redirection.
+- Provide an explicit `Interaction`-channel trace policy without opting any
+  gameplay consumer into vertical use yet.
+
+### Acceptance Criteria
+
+- Calling any covered public interaction entry point directly cannot emit its
+  gameplay or contact event against a target on another world Z.
+- A remote eye ten tiles from its body can interact with a target at the eye,
+  cannot interact with an overlapping target on the body's floor, and does not
+  break activation of an item in the actor's container.
+- Physical pull/use comparisons ignore remote-eye redirection.
+- Explicit vertical permission rejects closed boundaries and openings for other
+  channels, accepts only the `Interaction` channel, honors explicit closes and
+  combined XYZ range, and works through a translated/rotated frame whose local
+  layer one is world Z six.
+- Existing Z 0 range, obstruction, container, and pulling behavior remains
+  unchanged.
+
+### Explicit Deferrals
+
+- P2.4b owns counters for accepted/rejected interaction policies and the first
+  deliberate consumers of `CanInteractThroughOpenBoundary`.
+- P2.4c owns execution-time audits for general verbs, UI requests, target
+  actions, drag/drop, do-after, relays, and other remote-view request funnels.
+- P2.4d owns client-targeting polish, the final interaction regression matrix,
+  manual gameplay validation, and the P2 completion review.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to shared interaction authority, covered
+      core call sites, pulling, focused tests, and Z-level documentation.
+- [x] Invariant review: Z 0, local/world frames, a translated/rotated frame with
+      origin five, remote eyes, containers, physical pulling, server authority,
+      and independent boundary channels were reviewed.
+- [x] Automated verification: 4/4 dedicated authority cases, 12/12 interaction,
+      range, and pulling regressions, and 135/135 focused Z-level integration
+      tests passed without skips; the complete solution compiled with zero
+      errors.
+- [x] Performance evidence: the default same-floor path performs bounded entity,
+      transform, container, and integer-Z queries, allocates no result
+      collections, and returns before tracing. Explicit vertical checks reuse one
+      retained trace buffer. The code is event-driven and adds no per-tick work;
+      policy counters and load profiling are assigned to P2.4b and P8.
+- [x] Documentation: policy, public APIs, exceptions, tests, decisions,
+      limitations, and the next package are recorded here and in
+      `Docs/ZLevelTrace.md`.
+- [x] Dependency check: `RobustToolbox` remains clean at
+      `b768b2ac33d01d13dbc9ca7c0a0d092c345410ea`; no WTZ Engine change is
+      required.
+- [x] Git check: `git diff --check` passes apart from checkout line-ending
+      notices, and no unrelated worktree changes are included.
+- [x] Mini review: findings and residual risks are recorded below.
+- [x] Commit: package prepared as the isolated `Centralize native Z-level
+      interaction authority` commit on `zlevel/interaction-authority`; remote
+      verification follows the package commit.
+
+### Evidence
+
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passed with
+  zero errors. Its 711 warnings are existing dependency, vulnerability,
+  analyzer, and upstream obsolescence warnings.
+- The dedicated cases cover direct public APIs, directed before/after callbacks,
+  remote-eye XY and world-Z authority, actor-local container items, physical
+  checks, and channel-specific explicit vertical traces.
+- The final focused Z-level matrix passed 135/135 with no skips. The 12/12
+  regression matrix covers the complete click interaction fixture, legacy 2D
+  obstruction/range behavior, pulling, and the new authority fixture.
+- `git diff --check` passed with only normal LF-to-CRLF checkout notices.
+
+### Decisions
+
+- Keep `ZLevelTrace` geometric. `SharedZLevelInteractionSystem` owns entity and
+  gameplay-origin policy, while each consumer still owns access, obstruction,
+  range, and effects.
+- Treat only a server-owned `EyeComponent.Target` as a remote spatial origin.
+  Existing Station AI range/access overrides remain authoritative after the
+  floor guard; a client cannot nominate its own origin.
+- Keep low-level `MapCoordinates` helpers planar. They cannot infer a target
+  floor, so every entity-facing entry point must enforce vertical policy before
+  calling them.
+- Require explicit opt-in for cross-floor interaction. Bypassing vanilla range
+  for admin or mapping convenience never bypasses the floor policy.
+
+### Mini Review
+
+- Finding: the previous guard covered the high-level click funnel but direct
+  calls to hand use, tool use, activation, alt-click, and before/after callbacks
+  could still bypass it. All covered public entry points now defend themselves.
+- Finding: comparing the actor body to the target incorrectly rejected Station
+  AI interactions viewed from another floor. The server-owned eye now supplies
+  one coherent XY and world-Z origin.
+- Finding: the first remote-eye implementation selected the correct floor but
+  left ordinary raycasts at the body. A ten-tile separation test exposed this,
+  and range/obstruction now start at the same effective origin.
+- Finding: directed before/after events needed entity-bound test listeners;
+  correcting the fixture now proves that rejected calls emit no callback rather
+  than merely returning an unhandled result.
+- Residual risk: general verb execution and several specialized request funnels
+  can define their own access semantics. P2.4c must validate them at execution
+  time without breaking authenticated admin operations or Station AI.
+- Residual risk: the opt-in vertical trace primitive has no gameplay consumer or
+  dedicated policy metrics yet. P2.4b owns both so accidental cross-floor use is
+  visible and reviewable.
+- Next package: instrument interaction-policy outcomes, remove duplicate guard
+  work in nested range overloads, and migrate only deliberate vertical consumers
+  backed by `Interaction`-channel tests.
 
 P2.2 is split into independently gated subpackages:
 
@@ -1761,3 +1906,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-27 | P2.3b | `Make fire and atmosphere overlays Z-aware` | 12 atmosphere, 14 explosion, 120 integration, 9 prototype, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.3c1 | `Layer decals across Z levels` | 4 decal, 5 map format, 109 integration, 2 unit, 3 baseline, diff check | Complete |
 | 2026-08-27 | P2.3c2 | `Keep generated effects on their Z levels` | 10 package, 132 integration, 2 unit, 3 baseline, full build, diff check | Complete |
+| 2026-08-27 | P2.4a | `Centralize native Z-level interaction authority` | 4 authority, 12 regression, 135 integration, full build, diff check | Complete |

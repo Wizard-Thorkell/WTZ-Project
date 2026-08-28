@@ -75,7 +75,7 @@ namespace Content.Shared.Interaction
         [Dependency] private readonly SharedPlayerRateLimitManager _rateLimit = default!;
         [Dependency] private readonly TagSystem _tagSystem = default!;
         [Dependency] private readonly UseDelaySystem _useDelay = default!;
-        [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
+        [Dependency] private readonly SharedZLevelInteractionSystem _zLevelInteraction = default!;
 
         [Dependency] private readonly EntityQuery<IgnoreUIRangeComponent> _ignoreUiRangeQuery = default!;
         [Dependency] private readonly EntityQuery<FixturesComponent> _fixtureQuery = default!;
@@ -156,6 +156,12 @@ namespace Content.Shared.Interaction
         private void OnBoundInterfaceInteractAttempt(Entity<UserInterfaceComponent> ent, ref BoundUserInterfaceMessageAttempt ev)
         {
             _uiQuery.TryComp(ev.Target, out var aUiComp);
+            if (!_zLevelInteraction.CanDirectlyInteract(ev.Actor, ev.Target))
+            {
+                ev.Cancel();
+                return;
+            }
+
             if (!_actionBlockerSystem.CanInteract(ev.Actor, ev.Target))
             {
                 // We permit ghosts to open uis unless explicitly blocked
@@ -408,8 +414,7 @@ namespace Content.Shared.Interaction
             if (target != null && Deleted(target.Value))
                 return;
 
-            // EntityCoordinates only carry X/Y. Enforce the vertical layer on the authoritative path.
-            if (target != null && _zLevel.GetWorldZLevel(user) != _zLevel.GetWorldZLevel(target.Value))
+            if (target != null && !_zLevelInteraction.CanDirectlyInteract(user, target.Value))
                 return;
 
             if (!altInteract && _combatQuery.TryComp(user, out var combatMode) && combatMode.IsInCombatMode)
@@ -418,7 +423,7 @@ namespace Content.Shared.Interaction
                     return;
             }
 
-            if (!ValidateInteractAndFace(user, coordinates))
+            if (!ValidateInteractAndFace(user, coordinates, target))
                 return;
 
             if (altInteract && target != null)
@@ -492,7 +497,9 @@ namespace Content.Shared.Interaction
 
         public void InteractHand(EntityUid user, EntityUid target)
         {
-            if (IsDeleted(user) || IsDeleted(target))
+            if (IsDeleted(user) ||
+                IsDeleted(target) ||
+                !_zLevelInteraction.CanDirectlyInteract(user, target))
                 return;
 
             var complexInteractions = _actionBlockerSystem.CanComplexInteract(user);
@@ -544,7 +551,11 @@ namespace Content.Shared.Interaction
         public void InteractUsingRanged(EntityUid user, EntityUid used, EntityUid? target,
             EntityCoordinates clickLocation, bool inRangeUnobstructed)
         {
-            if (IsDeleted(user) || IsDeleted(used) || IsDeleted(target))
+            if (IsDeleted(user) ||
+                IsDeleted(used) ||
+                IsDeleted(target) ||
+                !_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
+                target is { } targetUid && !_zLevelInteraction.CanDirectlyInteract(user, targetUid))
                 return;
 
             if (target != null)
@@ -581,14 +592,19 @@ namespace Content.Shared.Interaction
             InteractDoAfter(user, used, target, clickLocation, inRangeUnobstructed, checkDeletion: false);
         }
 
-        protected bool ValidateInteractAndFace(EntityUid user, EntityCoordinates coordinates)
+        protected bool ValidateInteractAndFace(EntityUid user, EntityCoordinates coordinates, EntityUid? target = null)
         {
+            if (!_zLevelInteraction.TryGetSpatialOrigin(user, target, out var spatialOrigin))
+                return false;
+
             // Verify user is on the same map as the entity they clicked on
-            if (_transform.GetMapId(coordinates) != Transform(user).MapID)
+            if (_transform.GetMapId(coordinates) != Transform(spatialOrigin).MapID)
                 return false;
 
             // Only rotate to face if they're not moving.
-            if (!HasComp<NoRotateOnInteractComponent>(user) && (!TryComp(user, out InputMoverComponent? mover) || (mover.HeldMoveButtons & MoveButtons.AnyDirection) == 0x0))
+            if (spatialOrigin == user &&
+                !HasComp<NoRotateOnInteractComponent>(user) &&
+                (!TryComp(user, out InputMoverComponent? mover) || (mover.HeldMoveButtons & MoveButtons.AnyDirection) == 0x0))
             {
                 _rotateToFaceSystem.TryFaceCoordinates(user, _transform.ToMapCoordinates(coordinates).Position);
             }
@@ -701,6 +717,9 @@ namespace Content.Shared.Interaction
             if (!Resolve(other, ref other.Comp))
                 return false;
 
+            if (!_zLevelInteraction.CanDirectlyInteract(origin, other))
+                return false;
+
             var ev = new InRangeOverrideEvent(origin, other);
             RaiseLocalEvent(origin, ref ev);
 
@@ -759,7 +778,15 @@ namespace Content.Shared.Interaction
             bool popup = false,
             bool overlapCheck = true)
         {
-            Ignored combinedPredicate = e => e == origin.Owner || (predicate?.Invoke(e) ?? false);
+            if (!_zLevelInteraction.TryGetSpatialOrigin(origin, other, out var spatialOrigin) ||
+                !_zLevelInteraction.CanDirectlyInteract(origin, other) ||
+                !TryComp(spatialOrigin, out TransformComponent? spatialTransform))
+            {
+                return false;
+            }
+
+            Ignored combinedPredicate = e =>
+                e == origin.Owner || e == spatialOrigin || (predicate?.Invoke(e) ?? false);
             var inRange = true;
             MapCoordinates originPos = default;
             var targetPos = _transform.ToMapCoordinates(otherCoordinates);
@@ -772,21 +799,20 @@ namespace Content.Shared.Interaction
             // Alternatively we could check centre distances first though
             // that means we wouldn't be able to easily check overlap interactions.
             if (range > 0f &&
-                _fixtureQuery.TryComp(origin, out var fixtureA) &&
+                _fixtureQuery.TryComp(spatialOrigin, out var fixtureA) &&
                 // These fixture counts are stuff that has the component but no fixtures for <reasons> (e.g. buttons).
                 // At least until they get removed.
                 fixtureA.FixtureCount > 0 &&
                 _fixtureQuery.TryComp(other, out var fixtureB) &&
-                fixtureB.FixtureCount > 0 &&
-                Resolve(origin, ref origin.Comp))
+                fixtureB.FixtureCount > 0)
             {
-                var (worldPosA, worldRotA) = _transform.GetWorldPositionRotation(origin.Comp);
+                var (worldPosA, worldRotA) = _transform.GetWorldPositionRotation(spatialTransform);
                 var xfA = new Transform(worldPosA, worldRotA);
                 var xfB = new Transform(targetPos.Position, targetRot);
 
                 // Different map or the likes.
                 if (!_broadphase.TryGetNearest(
-                        origin,
+                        spatialOrigin,
                         other,
                         out _,
                         out _,
@@ -816,14 +842,14 @@ namespace Content.Shared.Interaction
                 else
                 {
                     // We'll still do the raycast from the centres but we'll bump the range as we know they're in range.
-                    originPos = _transform.GetMapCoordinates(origin, xform: origin.Comp);
+                    originPos = _transform.GetMapCoordinates(spatialOrigin, xform: spatialTransform);
                     range = (originPos.Position - targetPos.Position).Length();
                 }
             }
             // No fixtures, e.g. wallmounts.
             else
             {
-                originPos = _transform.GetMapCoordinates(origin, origin);
+                originPos = _transform.GetMapCoordinates(spatialOrigin, spatialTransform);
             }
 
             // Do a raycast to check if relevant
@@ -981,8 +1007,11 @@ namespace Content.Shared.Interaction
             Ignored? predicate = null,
             bool popup = false)
         {
+            if (!_zLevelInteraction.TryGetSpatialOrigin(origin, null, out var spatialOrigin))
+                return false;
+
             Ignored combinedPredicate = e => e == origin || (predicate?.Invoke(e) ?? false);
-            var originPosition = _transform.GetMapCoordinates(origin);
+            var originPosition = _transform.GetMapCoordinates(spatialOrigin);
             var inRange = InRangeUnobstructed(originPosition, other, range, collisionMask, combinedPredicate, ShouldCheckAccess(origin));
 
             if (!inRange && popup && _gameTiming.IsFirstTimePredicted)
@@ -1004,6 +1033,12 @@ namespace Content.Shared.Interaction
         {
             if (checkDeletion && (IsDeleted(user) || IsDeleted(used) || IsDeleted(target)))
                 return false;
+
+            if (!_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
+                target is { } targetUid && !_zLevelInteraction.CanDirectlyInteract(user, targetUid))
+            {
+                return false;
+            }
 
             var ev = new BeforeRangedInteractEvent(user, used, target, clickLocation, canReach);
             RaiseLocalEvent(used, ev);
@@ -1039,7 +1074,11 @@ namespace Content.Shared.Interaction
             bool checkCanInteract = true,
             bool checkCanUse = true)
         {
-            if (IsDeleted(user) || IsDeleted(used) || IsDeleted(target))
+            if (IsDeleted(user) ||
+                IsDeleted(used) ||
+                IsDeleted(target) ||
+                !_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
+                !_zLevelInteraction.CanDirectlyInteract(user, target))
                 return false;
 
             if (checkCanInteract && !_actionBlockerSystem.CanInteract(user, target))
@@ -1094,6 +1133,12 @@ namespace Content.Shared.Interaction
 
             if (checkDeletion && (IsDeleted(user) || IsDeleted(used) || IsDeleted(target)))
                 return false;
+
+            if (!_zLevelInteraction.AreOnSameWorldLevel(user, used) ||
+                target is { } targetUid && !_zLevelInteraction.CanDirectlyInteract(user, targetUid))
+            {
+                return false;
+            }
 
             var afterInteractEvent = new AfterInteractEvent(user, used, target, clickLocation, canReach);
             RaiseLocalEvent(used, afterInteractEvent);
@@ -1159,6 +1204,9 @@ namespace Content.Shared.Interaction
             if (checkDeletion && (IsDeleted(user) || IsDeleted(used)))
                 return false;
 
+            if (!_zLevelInteraction.CanDirectlyInteract(user, used))
+                return false;
+
             DebugTools.Assert(!IsDeleted(user) && !IsDeleted(used));
             _delayQuery.TryComp(used, out var delayComponent);
             if (checkUseDelay && delayComponent != null && _useDelay.IsDelayed((used, delayComponent)))
@@ -1219,7 +1267,9 @@ namespace Content.Shared.Interaction
             bool checkCanInteract = true,
             bool checkUseDelay = true)
         {
-            if (IsDeleted(user) || IsDeleted(used))
+            if (IsDeleted(user) ||
+                IsDeleted(used) ||
+                !_zLevelInteraction.AreOnSameWorldLevel(user, used))
                 return false;
 
             _delayQuery.TryComp(used, out var delayComponent);
@@ -1256,6 +1306,9 @@ namespace Content.Shared.Interaction
         /// <returns>True if the interaction was handled, false otherwise.</returns>
         public bool AltInteract(EntityUid user, EntityUid target)
         {
+            if (!_zLevelInteraction.CanDirectlyInteract(user, target))
+                return false;
+
             // Get list of alt-interact verbs
             var verbs = _verbSystem.GetLocalVerbs(target, user, typeof(AlternativeVerb));
 

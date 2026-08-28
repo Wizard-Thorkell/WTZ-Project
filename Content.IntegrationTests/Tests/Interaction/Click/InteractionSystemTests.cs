@@ -7,6 +7,7 @@ using Content.Shared.Hands.EntitySystems;
 using Content.Shared.Interaction;
 using Content.Shared.Interaction.Components;
 using Content.Shared.Item;
+using Content.Shared.Verbs;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
@@ -18,7 +19,7 @@ namespace Content.IntegrationTests.Tests.Interaction.Click
 {
     [TestFixture]
     [TestOf(typeof(InteractionSystem))]
-    public sealed class InteractionSystemTests : GameTest
+    public sealed partial class InteractionSystemTests : GameTest
     {
         [TestPrototypes]
         private const string Prototypes = @"
@@ -139,6 +140,250 @@ namespace Content.IntegrationTests.Tests.Interaction.Click
                 Assert.That(systems.GetEntitySystem<SharedZLevelSystem>().SetZLevelPosition(user, 1), Is.True);
                 interaction.UserInteraction(user, entities.GetComponent<TransformComponent>(target).Coordinates, target);
                 Assert.That(interacted, Is.True);
+            });
+
+            listener.ClearHandlers();
+        }
+
+        [Test]
+        public async Task DirectInteractionEntryPointsRejectAnotherWorldZLevel()
+        {
+            var server = Pair.Server;
+            var entities = server.ResolveDependency<IEntityManager>();
+            var systems = server.ResolveDependency<IEntitySystemManager>();
+            var map = await Pair.CreateTestMap();
+
+            EntityUid user = default;
+            EntityUid used = default;
+            EntityUid target = default;
+            await server.WaitAssertion(() =>
+            {
+                user = entities.SpawnEntity(null, map.MapCoords);
+                entities.EnsureComponent<ComplexInteractionComponent>(user);
+                used = entities.SpawnEntity(null, map.MapCoords);
+                entities.EnsureComponent<TestDirectedInteractionComponent>(used);
+                target = entities.SpawnEntity(null, map.MapCoords);
+                Assert.That(systems.GetEntitySystem<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+            });
+
+            var interaction = systems.GetEntitySystem<InteractionSystem>();
+            var listener = systems.GetEntitySystem<TestInteractionSystem>();
+            var handInteractions = 0;
+            var usingInteractions = 0;
+            var activations = 0;
+            var alternativeVerbs = 0;
+            var beforeRangedInteractions = 0;
+            var afterInteractions = 0;
+
+            await server.WaitAssertion(() =>
+            {
+                listener.InteractHandEvent = ev =>
+                {
+                    handInteractions++;
+                    ev.Handled = true;
+                };
+                listener.InteractUsingEvent = ev =>
+                {
+                    usingInteractions++;
+                    ev.Handled = true;
+                };
+                listener.ActivateInWorldEvent = ev =>
+                {
+                    activations++;
+                    ev.Handled = true;
+                };
+                listener.AlternativeVerbsEvent = ev => ev.Verbs.Add(new AlternativeVerb
+                {
+                    Text = "Z-level interaction test",
+                    Act = () => alternativeVerbs++,
+                });
+                listener.BeforeRangedInteractEvent = ev =>
+                {
+                    beforeRangedInteractions++;
+                    ev.Handled = true;
+                };
+                listener.AfterInteractEvent = ev =>
+                {
+                    afterInteractions++;
+                    ev.Handled = true;
+                };
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(interaction.InRangeUnobstructed(user, target), Is.False);
+                    interaction.InteractHand(user, target);
+                    Assert.That(interaction.InteractUsing(
+                        user,
+                        used,
+                        target,
+                        entities.GetComponent<TransformComponent>(target).Coordinates,
+                        checkCanInteract: false,
+                        checkCanUse: false), Is.False);
+                    Assert.That(interaction.InteractionActivate(
+                        user,
+                        target,
+                        checkCanInteract: false,
+                        checkUseDelay: false,
+                        checkAccess: false), Is.False);
+                    Assert.That(interaction.AltInteract(user, target), Is.False);
+                    Assert.That(interaction.RangedInteractDoBefore(
+                        user,
+                        used,
+                        target,
+                        entities.GetComponent<TransformComponent>(target).Coordinates,
+                        canReach: true), Is.False);
+                    Assert.That(interaction.InteractDoAfter(
+                        user,
+                        used,
+                        target,
+                        entities.GetComponent<TransformComponent>(target).Coordinates,
+                        canReach: true), Is.False);
+                    Assert.That(handInteractions, Is.Zero);
+                    Assert.That(usingInteractions, Is.Zero);
+                    Assert.That(activations, Is.Zero);
+                    Assert.That(alternativeVerbs, Is.Zero);
+                    Assert.That(beforeRangedInteractions, Is.Zero);
+                    Assert.That(afterInteractions, Is.Zero);
+                });
+
+                var zLevels = systems.GetEntitySystem<SharedZLevelSystem>();
+                Assert.That(zLevels.SetZLevelPosition(user, 1), Is.True);
+                Assert.That(zLevels.SetZLevelPosition(used, 1), Is.True);
+
+                listener.BeforeRangedInteractEvent = null;
+                listener.AfterInteractEvent = null;
+
+                Assert.That(interaction.InRangeUnobstructed(user, target), Is.True);
+                interaction.InteractHand(user, target);
+                Assert.That(interaction.InteractUsing(
+                    user,
+                    used,
+                    target,
+                    entities.GetComponent<TransformComponent>(target).Coordinates,
+                    checkCanInteract: false,
+                    checkCanUse: false), Is.True);
+                Assert.That(interaction.InteractionActivate(
+                    user,
+                    target,
+                    checkCanInteract: false,
+                    checkUseDelay: false,
+                    checkAccess: false), Is.True);
+                Assert.That(interaction.AltInteract(user, target), Is.True);
+
+                listener.BeforeRangedInteractEvent = ev =>
+                {
+                    beforeRangedInteractions++;
+                    ev.Handled = true;
+                };
+                listener.AfterInteractEvent = ev =>
+                {
+                    afterInteractions++;
+                    ev.Handled = true;
+                };
+                Assert.That(interaction.RangedInteractDoBefore(
+                    user,
+                    used,
+                    target,
+                    entities.GetComponent<TransformComponent>(target).Coordinates,
+                    canReach: true), Is.True);
+                Assert.That(interaction.InteractDoAfter(
+                    user,
+                    used,
+                    target,
+                    entities.GetComponent<TransformComponent>(target).Coordinates,
+                    canReach: true), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(handInteractions, Is.EqualTo(1));
+                    Assert.That(usingInteractions, Is.EqualTo(1));
+                    Assert.That(activations, Is.EqualTo(1));
+                    Assert.That(alternativeVerbs, Is.EqualTo(1));
+                    Assert.That(beforeRangedInteractions, Is.EqualTo(1));
+                    Assert.That(afterInteractions, Is.EqualTo(1));
+                });
+            });
+
+            listener.ClearHandlers();
+        }
+
+        [Test]
+        public async Task RemoteEyeIsSpatialOriginWithoutBreakingLocalItems()
+        {
+            var server = Pair.Server;
+            var entities = server.ResolveDependency<IEntityManager>();
+            var systems = server.ResolveDependency<IEntitySystemManager>();
+            var map = await Pair.CreateTestMap();
+
+            EntityUid user = default;
+            EntityUid remoteEye = default;
+            EntityUid remoteTarget = default;
+            EntityUid bodyFloorTarget = default;
+            EntityUid localItem = default;
+            await server.WaitAssertion(() =>
+            {
+                var zLevels = systems.GetEntitySystem<SharedZLevelSystem>();
+                user = entities.SpawnEntity(null, map.MapCoords);
+                entities.EnsureComponent<ComplexInteractionComponent>(user);
+                var remoteCoordinates = map.MapCoords.Offset(new Vector2(10f, 0f));
+                remoteEye = entities.SpawnEntity(null, remoteCoordinates);
+                remoteTarget = entities.SpawnEntity(null, remoteCoordinates);
+                bodyFloorTarget = entities.SpawnEntity(null, remoteCoordinates);
+                localItem = entities.SpawnEntity(null, map.MapCoords);
+                Assert.That(zLevels.SetZLevelPosition(remoteEye, 1), Is.True);
+                Assert.That(zLevels.SetZLevelPosition(remoteTarget, 1), Is.True);
+
+                var containerSystem = systems.GetEntitySystem<SharedContainerSystem>();
+                var container = containerSystem.EnsureContainer<Container>(user, "zlevel-remote-local-item");
+                Assert.That(containerSystem.Insert(localItem, container), Is.True);
+
+                var eye = entities.EnsureComponent<EyeComponent>(user);
+                systems.GetEntitySystem<SharedEyeSystem>().SetTarget(user, remoteEye, eye);
+            });
+
+            var interaction = systems.GetEntitySystem<InteractionSystem>();
+            var zLevelInteraction = systems.GetEntitySystem<SharedZLevelInteractionSystem>();
+            var listener = systems.GetEntitySystem<TestInteractionSystem>();
+            var handInteractions = 0;
+            var activations = 0;
+
+            await server.WaitAssertion(() =>
+            {
+                listener.InteractHandEvent = ev =>
+                {
+                    handInteractions++;
+                    ev.Handled = true;
+                };
+                listener.ActivateInWorldEvent = ev =>
+                {
+                    activations++;
+                    ev.Handled = true;
+                };
+
+                Assert.That(zLevelInteraction.TryGetSpatialOrigin(user, remoteTarget, out var origin), Is.True);
+                Assert.That(origin, Is.EqualTo(remoteEye));
+                Assert.That(interaction.InRangeUnobstructed(user, remoteTarget), Is.True);
+                interaction.UserInteraction(
+                    user,
+                    entities.GetComponent<TransformComponent>(remoteTarget).Coordinates,
+                    remoteTarget);
+                interaction.UserInteraction(
+                    user,
+                    entities.GetComponent<TransformComponent>(bodyFloorTarget).Coordinates,
+                    bodyFloorTarget);
+
+                Assert.That(interaction.InteractionActivate(
+                    user,
+                    localItem,
+                    checkCanInteract: false,
+                    checkUseDelay: false,
+                    checkAccess: false), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(handInteractions, Is.EqualTo(1));
+                    Assert.That(activations, Is.EqualTo(1));
+                    Assert.That(zLevelInteraction.TryGetSpatialOrigin(user, localItem, out var localOrigin), Is.True);
+                    Assert.That(localOrigin, Is.EqualTo(user));
+                });
             });
 
             listener.ClearHandlers();
@@ -431,20 +676,49 @@ namespace Content.IntegrationTests.Tests.Interaction.Click
         {
             public EntityEventHandler<InteractUsingEvent>? InteractUsingEvent;
             public EntityEventHandler<InteractHandEvent>? InteractHandEvent;
+            public EntityEventHandler<ActivateInWorldEvent>? ActivateInWorldEvent;
+            public EntityEventHandler<GetVerbsEvent<AlternativeVerb>>? AlternativeVerbsEvent;
+            public EntityEventHandler<BeforeRangedInteractEvent>? BeforeRangedInteractEvent;
+            public EntityEventHandler<AfterInteractEvent>? AfterInteractEvent;
 
             public override void Initialize()
             {
                 base.Initialize();
                 SubscribeLocalEvent<InteractUsingEvent>((e) => InteractUsingEvent?.Invoke(e));
                 SubscribeLocalEvent<InteractHandEvent>((e) => InteractHandEvent?.Invoke(e));
+                SubscribeLocalEvent<ActivateInWorldEvent>((e) => ActivateInWorldEvent?.Invoke(e));
+                SubscribeLocalEvent<GetVerbsEvent<AlternativeVerb>>((e) => AlternativeVerbsEvent?.Invoke(e));
+                SubscribeLocalEvent<TestDirectedInteractionComponent, BeforeRangedInteractEvent>(OnBeforeRangedInteract);
+                SubscribeLocalEvent<TestDirectedInteractionComponent, AfterInteractEvent>(OnAfterInteract);
+            }
+
+            private void OnBeforeRangedInteract(
+                Entity<TestDirectedInteractionComponent> ent,
+                ref BeforeRangedInteractEvent ev)
+            {
+                BeforeRangedInteractEvent?.Invoke(ev);
+            }
+
+            private void OnAfterInteract(
+                Entity<TestDirectedInteractionComponent> ent,
+                ref AfterInteractEvent ev)
+            {
+                AfterInteractEvent?.Invoke(ev);
             }
 
             public void ClearHandlers()
             {
                 InteractUsingEvent = null;
                 InteractHandEvent = null;
+                ActivateInWorldEvent = null;
+                AlternativeVerbsEvent = null;
+                BeforeRangedInteractEvent = null;
+                AfterInteractEvent = null;
             }
         }
+
+        [RegisterComponent]
+        public sealed partial class TestDirectedInteractionComponent : Component;
 
     }
 }
