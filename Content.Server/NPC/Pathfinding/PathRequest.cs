@@ -16,10 +16,14 @@ public abstract class PathRequest
 
     public readonly int StartWorldZ;
 
+    public readonly CancellationToken CancelToken;
+
     public Task<PathResult> Task => Tcs.Task;
     public readonly TaskCompletionSource<PathResult> Tcs;
 
     public List<PathPoly> Polys = new();
+
+    public float Cost;
 
     public bool Started = false;
 
@@ -53,7 +57,8 @@ public abstract class PathRequest
         Flags = flags;
         CollisionLayer = layer;
         CollisionMask = mask;
-        Tcs = new TaskCompletionSource<PathResult>(cancelToken);
+        CancelToken = cancelToken;
+        Tcs = new TaskCompletionSource<PathResult>();
     }
 }
 

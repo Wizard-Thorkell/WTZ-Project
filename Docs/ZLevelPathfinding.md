@@ -184,18 +184,45 @@ Default limits are controlled by
 `zlevel.pathfinding_max_local_paths` (128), and
 `zlevel.pathfinding_max_traversal_edges` (512), each clamped to a hard server
 ceiling. P5.3a defines no gameplay fallback and does not encode vertical travel
-as a fake `PathPoly`; P5.3b will populate these contracts with real local A* legs.
+as a fake `PathPoly`; P5.3b populates these contracts with real local A* legs.
+
+## P5.3b Hierarchical Planning
+
+`PathfindingSystem.GetZLevelPath` is the opt-in authoritative planner for an
+explicit pair of map/world-floor endpoints or two entities. It captures one
+deterministic traversal snapshot, groups directed connectors by exact source
+endpoint, and runs a bounded Dijkstra search over connector destinations. Each
+expanded state batches all required native same-floor A* requests with
+`Task.WhenAll`; geometry alone never makes a connector reachable.
+
+Successful output alternates immutable local `PathPoly` legs and authored
+traversal legs. Vertical cost comes from each traversal profile and local cost is
+the A* accumulated polygon cost, including collision and interaction modifiers.
+Equal-cost choices retain snapshot/insertion order. The native cost deliberately
+does not invent sub-polygon travel distance, so P5.4 execution telemetry may
+justify a finer endpoint cost without changing reachability or route contracts.
+
+State expansion, local A* dispatch, and traversal-edge evaluation consume their
+own caller-owned budgets. Exhaustion returns the corresponding typed status;
+invalid requests, no-path, cancellation, topology staleness, environment
+staleness, and combined staleness remain distinct. `PathRequest` now retains the
+actual cancellation token, and A*/BFS observe it while queued instead of treating
+the token as inert `Task` state. `GetPathDistance` returns the same accumulated
+A* cost used by hierarchical planning.
+
+The planner validates the graph revision after every local batch and before
+publishing a route. `ValidateZLevelPathRoute` then checks local polygon validity
+and resolves each authored traversal again, returning the first invalid leg.
+Unrelated graph revisions do not invalidate a route whose exact connector and
+local polygons still execute. Route query outcomes, work counts, leg counts, and
+timings are exposed through `zlevelmetrics` and reset with the existing
+pathfinding metrics.
+
+The existing `GetPath` overloads remain same-floor and still reject cross-floor
+requests. P5.4 will migrate selected AI consumers to the typed API and execute
+traversal legs through normal delayed connector behavior.
 
 ## Remaining P5 Packages
-
-### P5.3b Hierarchical Planning
-
-- Search detached traversal snapshots with configurable edge and expansion
-  budgets.
-- Compose local path legs between the start, connectors, and destination.
-- Reject stale topology/environment revisions and expose the first invalid leg
-  for P5.4 replanning.
-- Return a typed route rather than encoding vertical actions as fake polygons.
 
 ### P5.4 AI Execution And Dynamic Connectors
 
@@ -259,3 +286,20 @@ baselines pass with 100% warmed boundary/gravity cache hits, zero PVS budget
 exhaustion, and 6,216 measured bytes each. The final measured baseline times for
 this gate are 4.1361 ms, 8.2035 ms, and 13.1701 ms respectively; timing is retained
 as local comparison evidence rather than a release threshold.
+
+## P5.3b Verification
+
+The focused pathfinding fixture passes 8/8. It covers same-floor typed routes,
+native polygon invalidation, deterministic selection between equal-cost stairs,
+`local -> traversal -> local` composition, an unreachable connector behind a
+real blocker, all three search budgets, cancellation after local requests are
+queued, topology/environment/combined staleness, selective traversal validation,
+route diagnostics, and process metrics.
+
+The final complete Content Z-level integration matrix passes 253/253 and the
+Content unit/analyzer matrix passes 9/9. The generated 3, 6, and 10-floor stress
+baselines pass 3/3 with 100% warmed boundary/gravity cache hits, zero PVS budget
+exhaustion or fail-open candidates, and 6,336 measured bytes each. Local measured
+times are 6.9764, 13.5241, and 23.7440 ms; timing remains comparison evidence, not
+a release threshold. A full incremental `SpaceStation14.slnx` build completes
+with zero errors and 27 established warnings.

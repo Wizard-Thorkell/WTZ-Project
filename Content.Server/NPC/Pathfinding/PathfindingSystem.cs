@@ -341,19 +341,7 @@ namespace Content.Server.NPC.Pathfinding
             if (path.Result != PathResult.Path)
                 return null;
 
-            if (path.Path.Count == 0)
-                return 0f;
-
-            var distance = 0f;
-            var lastNode = path.Path[0];
-
-            for (var i = 1; i < path.Path.Count; i++)
-            {
-                var node = path.Path[i];
-                distance += GetTileCost(request, lastNode, node);
-            }
-
-            return distance;
+            return request.Cost;
         }
 
         public async Task<PathResultEvent> GetPath(

@@ -19,12 +19,21 @@ public enum ZLevelPathRouteStatus : byte
     TopologyChanged,
     EnvironmentChanged,
     TopologyAndEnvironmentChanged,
+    LocalNavigationChanged,
 }
 
 public enum ZLevelPathLegKind : byte
 {
     Local,
     Traversal,
+}
+
+public enum ZLevelPathRouteValidationStatus : byte
+{
+    Valid,
+    InvalidRoute,
+    LocalNavigationChanged,
+    TraversalChanged,
 }
 
 /// <summary>
@@ -55,6 +64,38 @@ public struct ZLevelPathSearchBudget
         RemainingStateExpansions = remainingStateExpansions;
         RemainingLocalPaths = remainingLocalPaths;
         RemainingTraversalEdges = remainingTraversalEdges;
+    }
+
+    public bool IsValid =>
+        RemainingStateExpansions >= 0 &&
+        RemainingLocalPaths >= 0 &&
+        RemainingTraversalEdges >= 0;
+
+    internal bool TryTakeStateExpansion()
+    {
+        if (RemainingStateExpansions <= 0)
+            return false;
+
+        RemainingStateExpansions--;
+        return true;
+    }
+
+    internal bool TryTakeLocalPaths(int count)
+    {
+        if (count < 0 || RemainingLocalPaths < count)
+            return false;
+
+        RemainingLocalPaths -= count;
+        return true;
+    }
+
+    internal bool TryTakeTraversalEdge()
+    {
+        if (RemainingTraversalEdges <= 0)
+            return false;
+
+        RemainingTraversalEdges--;
+        return true;
     }
 }
 
@@ -239,4 +280,14 @@ public readonly record struct ZLevelPathRouteResult(
     ZLevelPathSearchDiagnostics Diagnostics)
 {
     public bool Succeeded => Status == ZLevelPathRouteStatus.Success && Route != null;
+}
+
+public readonly record struct ZLevelPathRouteValidationResult(
+    ZLevelPathRouteValidationStatus Status,
+    int LegIndex)
+{
+    public bool IsValid => Status == ZLevelPathRouteValidationStatus.Valid;
+
+    public static ZLevelPathRouteValidationResult Valid =>
+        new(ZLevelPathRouteValidationStatus.Valid, -1);
 }

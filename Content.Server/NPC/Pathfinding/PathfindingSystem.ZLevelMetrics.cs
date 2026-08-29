@@ -56,6 +56,7 @@ public sealed partial class PathfindingSystem
 
     public void ResetZLevelMetrics()
     {
+        ResetZLevelRouteMetrics();
         Interlocked.Exchange(ref _zLevelBreadcrumbBuilds, 0);
         Interlocked.Exchange(ref _zLevelFixtureCandidates, 0);
         Interlocked.Exchange(ref _zLevelFixtureFloorRejects, 0);

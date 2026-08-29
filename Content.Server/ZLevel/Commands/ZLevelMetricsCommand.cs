@@ -217,6 +217,21 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"poly queries/hits={pathfindingMetrics.PolyQueries}/{pathfindingMetrics.PolyHits} " +
             $"({pathfindingMetrics.PolyHitPercent:0.00}%), " +
             $"different-floor-rejections={pathfindingMetrics.DifferentFloorRouteRejections}");
+        var pathRouteMetrics = pathfinding.SnapshotZLevelRouteMetrics();
+        shell.WriteLine(
+            $"  hierarchical paths: queries/success/no-path/invalid/cancelled=" +
+            $"{pathRouteMetrics.Queries}/{pathRouteMetrics.Successes}/{pathRouteMetrics.NoPaths}/" +
+            $"{pathRouteMetrics.InvalidRequests}/{pathRouteMetrics.Cancellations}, " +
+            $"states/local-paths/edges/legs={pathRouteMetrics.StatesExpanded}/" +
+            $"{pathRouteMetrics.LocalPathsRequested}/{pathRouteMetrics.TraversalEdgesEvaluated}/" +
+            $"{pathRouteMetrics.Legs}, avg/last/max={pathRouteMetrics.AverageMilliseconds:0.000}/" +
+            $"{pathRouteMetrics.LastMilliseconds:0.000}/{pathRouteMetrics.MaxMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  hierarchical path limits: state/local/edge=" +
+            $"{pathRouteMetrics.StateBudgetExhaustions}/{pathRouteMetrics.LocalPathBudgetExhaustions}/" +
+            $"{pathRouteMetrics.TraversalEdgeBudgetExhaustions}, stale topology/environment/both/local=" +
+            $"{pathRouteMetrics.TopologyChanges}/{pathRouteMetrics.EnvironmentChanges}/" +
+            $"{pathRouteMetrics.CombinedChanges}/{pathRouteMetrics.LocalNavigationChanges}");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

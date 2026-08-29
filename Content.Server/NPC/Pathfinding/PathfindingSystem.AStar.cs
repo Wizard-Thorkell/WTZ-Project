@@ -16,10 +16,11 @@ public sealed partial class PathfindingSystem
 
         if (request.Start.Equals(request.End))
         {
+            request.Cost = 0f;
             return PathResult.Path;
         }
 
-        if (request.Task.IsCanceled)
+        if (request.CancelToken.IsCancellationRequested)
         {
             return PathResult.NoPath;
         }
@@ -151,6 +152,7 @@ public sealed partial class PathfindingSystem
 
         DebugTools.Assert(route.Count > 0);
         request.Polys = route;
+        request.Cost = request.CostSoFar[currentNode];
         return PathResult.Path;
     }
 }

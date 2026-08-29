@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.3b hierarchical route search and typed composition`.
+- Active package: `P5.4 AI traversal execution and dynamic connectors`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.3a complete; P5.3b active) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.3b complete; P5.4 active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -67,8 +67,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5.1 | Navigation inventory and indexed authored traversal-edge contract | Complete |
 | P5.2 | Floor-specific local polygon navigation | Complete |
 | P5.3a | Detached graph snapshots, typed routes, revisions, and budgets | Complete |
-| P5.3b | Hierarchical route search and typed route composition | Active |
-| P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Pending |
+| P5.3b | Hierarchical route search and typed route composition | Complete |
+| P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Active |
 
 ## Phase P0 Packages
 
@@ -4682,6 +4682,116 @@ allocation is inside Robust physics enumeration.
 - Next package: P5.3b runs bounded hierarchical search over these snapshots,
   awaits native same-floor A*, composes the typed route, and rejects stale work.
 
+## Completed Package: P5.3b Hierarchical Route Search And Typed Composition
+
+### Scope
+
+- Add an opt-in server API that searches detached traversal snapshots and
+  composes native local A* paths with authored vertical transitions.
+- Bound state expansion, local-path dispatch, and traversal-edge evaluation
+  independently, with typed cancellation, no-path, and stale outcomes.
+- Validate an already planned route by returning its first invalid local or
+  traversal leg without rejecting unrelated graph revisions.
+- Expose query outcomes, work counts, leg counts, and elapsed time through
+  `zlevelmetrics` while leaving legacy cross-floor `GetPath` behavior unchanged.
+
+### Acceptance Criteria
+
+- A connector is usable only when native same-floor navigation can reach its
+  exact source; overlapping geometry or straight-line distance is insufficient.
+- Equal graph/input state produces deterministic route selection, and every
+  successful route is a connected sequence of typed local/traversal legs.
+- Cancellation after requests are queued terminates bounded work, each budget
+  reports its own exhaustion status, and topology/environment/both staleness are
+  distinguishable.
+- Local polygon invalidation and exact connector removal identify the first
+  affected leg, while an unrelated connector registration leaves the route valid.
+- No current NPC consumer silently changes behavior before P5.4 execution exists.
+
+### Verification Evidence
+
+- The final focused `ZLevelPathfindingTest` matrix passes 8/8. It covers local
+  routes and invalidation, equal-cost deterministic stairs, three-leg composition,
+  blocked connector reachability, all budgets, queued cancellation, all graph
+  staleness variants, selective validation, diagnostics, and metrics.
+- The deterministic two-stair case records exactly 3 expanded states, 4 local A*
+  requests, 2 evaluated traversal edges, and a 3-leg winning route. These bounded
+  work counters and query timings are available through `zlevelmetrics`.
+- The final complete Content Z-level integration matrix passes 253/253, and the
+  Content unit/analyzer matrix passes 9/9.
+- The final 3, 6, and 10-floor artifacts pass 3/3 with 100% warmed boundary and
+  gravity cache hits, zero PVS budget exhaustion/fail-open candidates, and 6,336
+  measured bytes each. Local times are 6.9764, 13.5241, and 23.7440 ms.
+- A full incremental `SpaceStation14.slnx` build completes with zero errors and
+  27 established warnings; none points to a P5.3b file.
+
+### Decisions
+
+- Keep hierarchical planning opt-in through `GetZLevelPath`; the native
+  `GetPath` overloads remain same-floor until P5.4 has an execution consumer.
+- Batch all local A* candidates for one expanded state. This preserves the
+  engine's per-tick path queue and parallel processing instead of running one
+  connector query per tick in serial.
+- Use a deterministic bounded Dijkstra over exact connector endpoints. Local
+  reachability and collision policy come from native A*, while graph snapshots
+  provide only authored vertical actions.
+- Store the real cancellation token on `PathRequest`; its former
+  `TaskCompletionSource(object)` use treated the token as inert task state.
+- Publish the A* accumulated cost and use it for route composition and
+  `GetPathDistance`, replacing a legacy distance loop that never advanced its
+  previous node.
+- Validate pending searches conservatively against global graph revisions, but
+  validate completed routes by exact legs so unrelated mutations do not force a
+  replan.
+- Do not impose a current-thread allocation ceiling on an async multi-tick route:
+  continuations may change threads and make that measurement misleading. Explicit
+  work budgets, operation counts, timings, and unchanged stress baselines are the
+  package's performance evidence.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to hierarchical search/composition,
+      native request cancellation/cost, route validation/metrics, tests, and P5
+      documentation.
+- [x] Invariant review: Z 0, local/world floors, moving frames, map ownership,
+      exact connector endpoints, directed edges, support/boundaries, and stale
+      local navigation were reviewed.
+- [x] Automated verification: 8/8 focused, 253/253 Content integration, 9/9
+      Content unit/analyzer, 3/3 baselines, and the full solution build pass.
+- [x] Performance evidence: exact search work is asserted, all outcome/work/time
+      metrics are exposed, budgets fail explicitly, and stress baselines remain
+      free of cache/PVS exhaustion.
+- [x] Documentation: architecture, API ownership, cancellation, costs, budgets,
+      validation, tests, measurements, limitations, and next work are recorded.
+- [x] Dependency check: no WTZ Engine change is required; the paired engine tree
+      remains at `3aaca280f628876939afcc10a9be920b3898902a`.
+- [x] Git check: generated baseline artifacts remain ignored; parent/engine
+      status and `git diff --check` are verified immediately before commit.
+- [x] Mini review: no blocking planner issue remains; gameplay execution and
+      dynamic connectors are assigned to P5.4 below.
+- [x] Commit: the isolated `Compose hierarchical Z-level paths` commit is
+      prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: WTZ now plans a real cross-floor route without making empty space
+  walkable or encoding stairs as fake polygon neighbors.
+- Finding: local reachability, authored transitions, work limits, cancellation,
+  staleness, and post-plan validation are independently observable and testable.
+- Finding: legacy callers remain behaviorally stable, which gives P5.4 a narrow
+  migration surface instead of changing every NPC at once.
+- Residual risk: no NPC executes typed traversal legs yet, so cross-floor AI is
+  not gameplay-enabled by this package alone.
+- Residual risk: native A* costs are polygon-granular; points in one broad polygon
+  can tie even when their physical distances differ. Ordering is deterministic,
+  and P5.4 telemetry will decide whether endpoint refinement is warranted.
+- Residual risk: pending search revisions remain global and search allocates
+  per-state/query collections. P5.4/P8 scale metrics will determine whether
+  map-scoped revisions, pooling, or a priority queue are justified.
+- Next package: P5.4 migrates a controlled AI path consumer, executes normal
+  delayed traversal actions, validates/replans each leg, and models dynamic
+  elevator state before closing the P5 phase gate.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4726,3 +4836,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.1 | `Index authored Z-level traversal edges` | 3 focused, 16 movement, 244 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P5.2 | `Separate pathfinding navigation by Z level` | 3 focused, 247 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P5.3a | `Define hierarchical Z-level route contracts` | 1 focused, 248 Content integration, 9 Content unit/analyzer, 3 baseline, full build, cache/allocation/diff review | Complete |
+| 2026-08-29 | P5.3b | `Compose hierarchical Z-level paths` | 8 focused, 253 Content integration, 9 Content unit/analyzer, 3 baseline, full build, budget/timing/diff review | Complete |
