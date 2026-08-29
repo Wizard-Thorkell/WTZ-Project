@@ -163,6 +163,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         // Cancel any active pathfinding jobs as they're irrelevant.
         component.PathfindToken?.Cancel();
         component.PathfindToken = null;
+        ClearZLevelRoute(uid, component);
     }
 
     /// <summary>
@@ -170,14 +171,20 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
     /// </summary>
     public NPCSteeringComponent Register(EntityUid uid, EntityCoordinates coordinates, NPCSteeringComponent? component = null)
     {
+        var targetWorldZ = ResolveTargetWorldZ(uid, coordinates, out var trackedTarget);
         if (Resolve(uid, ref component, false))
         {
-            if (component.Coordinates.Equals(coordinates))
+            if (component.Coordinates.Equals(coordinates) &&
+                component.TargetWorldZ == targetWorldZ &&
+                component.ZLevelTrackedTarget == trackedTarget)
+            {
                 return component;
+            }
 
             component.PathfindToken?.Cancel();
             component.PathfindToken = null;
             component.CurrentPath.Clear();
+            ClearZLevelRoute(uid, component);
         }
         else
         {
@@ -187,6 +194,8 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
 
         ResetStuck(component, Transform(uid).Coordinates);
         component.Coordinates = coordinates;
+        component.TargetWorldZ = targetWorldZ;
+        component.ZLevelTrackedTarget = trackedTarget;
         return component;
     }
 
@@ -315,7 +324,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         if (Deleted(steering.Coordinates.EntityId))
         {
             SetDirection(uid, mover, steering, Vector2.Zero);
-            steering.Status = SteeringStatus.NoPath;
+            SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.TargetDeleted);
             return;
         }
 
@@ -330,7 +339,7 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
         if (!mover.CanMove)
         {
             SetDirection(uid, mover, steering, Vector2.Zero);
-            steering.Status = SteeringStatus.NoPath;
+            SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.CannotMove);
             return;
         }
 
@@ -428,17 +437,23 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
     {
         // If we already have a pathfinding request then don't grab another.
         // If we're in range then just beeline them; this can avoid stutter stepping and is an easy way to look nicer.
-        if (steering.Pathfind || targetDistance < steering.RepathRange)
+        if (steering.Pathfind ||
+            !TryRefreshTargetWorldZ(uid, steering, out _))
             return;
 
-        // Short-circuit with no path.
-        var worldZ = _transform.GetWorldZLevel(
-            (uid, xform, CompOrNull<ZLevelPositionComponent>(uid)));
+        var worldZ = GetWorldZ(uid, xform);
+        var targetWorldZ = steering.TargetWorldZ;
+        var needsZLevelRoute = worldZ != targetWorldZ;
+        if (!needsZLevelRoute && targetDistance < steering.RepathRange)
+            return;
+
+        // Short-circuit with no local path.
         var targetPoly = _pathfindingSystem.GetPoly(steering.Coordinates, worldZ);
 
         // If this still causes issues future sloth adjust the collision mask.
         // Thanks past sloth I already realised.
-        if (targetPoly != null &&
+        if (!needsZLevelRoute &&
+            targetPoly != null &&
             steering.Coordinates.Position.Equals(Vector2.Zero) &&
             TryComp<PhysicsComponent>(uid, out var physics) &&
             _interaction.InRangeUnobstructed(uid, steering.Coordinates.EntityId, range: 30f, (CollisionGroup)physics.CollisionMask))
@@ -448,38 +463,113 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
             return;
         }
 
-        steering.PathfindToken = new CancellationTokenSource();
-
+        var request = new CancellationTokenSource();
+        steering.PathfindToken = request;
         var flags = _pathfindingSystem.GetFlags(uid);
 
-        var result = await _pathfindingSystem.GetPathSafe(
-            uid,
-            xform.Coordinates,
-            steering.Coordinates,
-            steering.Range,
-            steering.PathfindToken.Token,
-            flags);
-
-        steering.PathfindToken = null;
-
-        if (result.Result == PathResult.NoPath)
+        if (needsZLevelRoute)
         {
-            steering.CurrentPath.Clear();
-            steering.FailedPathCount++;
+            var targetMap = _transform.ToMapCoordinates(steering.Coordinates);
+            var result = await _pathfindingSystem.GetZLevelPath(
+                uid,
+                new ZLevelPathEndpoint(xform.MapID, xform.Coordinates, worldZ),
+                new ZLevelPathEndpoint(targetMap.MapId, steering.Coordinates, targetWorldZ),
+                steering.Range,
+                request.Token,
+                flags);
 
-            if (steering.FailedPathCount >= NPCSteeringComponent.FailedPathLimit)
+            if (!TryFinishPathRequest(uid, steering, request))
+                return;
+
+            if (!TryRefreshTargetWorldZ(uid, steering, out _) ||
+                steering.TargetWorldZ != targetWorldZ)
             {
-                steering.Status = SteeringStatus.NoPath;
+                RecordStaleZLevelPathResult();
+                return;
             }
 
+            if (!result.Succeeded)
+            {
+                HandlePathFailure(steering);
+                return;
+            }
+
+            if (!IsZLevelRouteTargetCurrent(result.Route!, steering))
+            {
+                RecordStaleZLevelPathResult();
+                return;
+            }
+
+            if (!TryInstallZLevelRoute(uid, result.Route!, steering))
+            {
+                HandlePathFailure(steering);
+                return;
+            }
+
+            steering.FailedPathCount = 0;
+            return;
+        }
+
+        var path = await _pathfindingSystem.GetPathSafe(
+            uid,
+            xform.Coordinates,
+            worldZ,
+            steering.Coordinates,
+            targetWorldZ,
+            steering.Range,
+            request.Token,
+            flags);
+
+        if (!TryFinishPathRequest(uid, steering, request))
+            return;
+
+        if (!TryRefreshTargetWorldZ(uid, steering, out _) ||
+            steering.TargetWorldZ != targetWorldZ)
+        {
+            RecordStaleZLevelPathResult();
+            return;
+        }
+
+        if (path.Result == PathResult.NoPath)
+        {
+            HandlePathFailure(steering);
             return;
         }
 
         var targetPos = _transform.ToMapCoordinates(steering.Coordinates);
         var ourPos = _transform.GetMapCoordinates(uid, xform: xform);
 
-        PrunePath(uid, ourPos, targetPos.Position - ourPos.Position, result.Path);
-        steering.CurrentPath = new Queue<PathPoly>(result.Path);
+        PrunePath(uid, ourPos, targetPos.Position - ourPos.Position, path.Path);
+        steering.CurrentPath = new Queue<PathPoly>(path.Path);
+        steering.FailedPathCount = 0;
+    }
+
+    private bool TryFinishPathRequest(
+        EntityUid uid,
+        NPCSteeringComponent steering,
+        CancellationTokenSource request)
+    {
+        if (!TryComp<NPCSteeringComponent>(uid, out var current) ||
+            !ReferenceEquals(current, steering) ||
+            !ReferenceEquals(steering.PathfindToken, request))
+        {
+            request.Dispose();
+            RecordStaleZLevelPathResult();
+            return false;
+        }
+
+        steering.PathfindToken = null;
+        request.Dispose();
+        return true;
+    }
+
+    private static void HandlePathFailure(NPCSteeringComponent steering)
+    {
+        steering.CurrentPath.Clear();
+        steering.FailedPathCount++;
+
+        if (steering.FailedPathCount >= NPCSteeringComponent.FailedPathLimit)
+            steering.Status = SteeringStatus.NoPath;
     }
 
     // TODO: Move these to movercontroller

@@ -3,13 +3,22 @@
 
 #nullable enable
 
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
+using Content.Server.NPC;
+using Content.Server.NPC.Components;
+using Content.Server.NPC.HTN;
+using Content.Server.NPC.HTN.PrimitiveTasks.Operators;
 using Content.Server.NPC.Pathfinding;
+using Content.Server.NPC.Systems;
 using Content.Server.ZLevel.Navigation;
+using Content.Server.ZLevel.Systems;
+using Content.Shared.Damage.Components;
+using Content.Shared.DoAfter;
 using Content.Shared.Maps;
 using Content.Shared.NPC;
 using Content.Shared.Physics;
@@ -20,6 +29,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Components;
 using Robust.UnitTesting.Pool;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
@@ -602,6 +612,698 @@ public sealed class ZLevelPathfindingTest : GameTest
         Assert.That(await RequestLegacyPath(testMap), Is.EqualTo(PathResult.Path));
     }
 
+    [Test]
+    public async Task HierarchicalRouteSnapshotsEntityEndpointBeforeAwaitingPaths()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        Task<ZLevelPathRouteResult>? task = null;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitPost(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            task = pathfinding.GetZLevelPath(
+                npc,
+                new ZLevelPathEndpoint(testMap.MapId, Coordinates(testMap, 0.5f), 0),
+                new ZLevelPathEndpoint(testMap.MapId, new EntityCoordinates(target, Vector2.Zero), 1),
+                0.2f,
+                CancellationToken.None,
+                pathfinding.GetFlags(npc));
+            Assert.That(task.IsCompleted, Is.False);
+
+            SEntMan.System<SharedTransformSystem>().SetCoordinates(target, Coordinates(testMap, 3.5f));
+        });
+        await Pair.RunTicksSync(10);
+        var result = await task!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.True);
+                Assert.That(result.Route!.End.Coordinates.EntityId, Is.EqualTo(testMap.Grid.Owner));
+                Assert.That(
+                    SEntMan.System<SharedTransformSystem>().ToMapCoordinates(result.Route.End.Coordinates).Position.X,
+                    Is.EqualTo(5.5f).Within(0.001f));
+            });
+
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, result.Route!, steering), Is.False,
+                "A route to the pre-await target position must be stale after meaningful local movement.");
+        });
+    }
+
+    [Test]
+    public async Task HierarchicalRouteRejectsStaleActorEndpointAfterAwait()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        Task<ZLevelPathRouteResult>? task = null;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitPost(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            task = pathfinding.GetZLevelPath(
+                npc,
+                new ZLevelPathEndpoint(testMap.MapId, Coordinates(testMap, 0.5f), 0),
+                new ZLevelPathEndpoint(testMap.MapId, new EntityCoordinates(target, Vector2.Zero), 1),
+                0.2f,
+                CancellationToken.None,
+                pathfinding.GetFlags(npc));
+            Assert.That(task.IsCompleted, Is.False);
+
+            SEntMan.System<SharedTransformSystem>().SetCoordinates(npc, Coordinates(testMap, 5.5f));
+        });
+        await Pair.RunTicksSync(10);
+        var result = await task!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.True);
+                Assert.That(
+                    SEntMan.System<SharedTransformSystem>().ToMapCoordinates(result.Route!.Start.Coordinates).Position.X,
+                    Is.EqualTo(0.5f).Within(0.001f));
+            });
+
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, result.Route!, steering), Is.False,
+                "A route must not install after its actor moved away from the captured start.");
+        });
+    }
+
+    [Test]
+    public async Task MoveToOperatorPlansAndInstallsHierarchicalRoute()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        MoveToOperator? moveTo = null;
+        NPCBlackboard? blackboard = null;
+        Task<(bool Valid, Dictionary<string, object>? Effects)>? planTask = null;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+
+            moveTo = new MoveToOperator();
+            moveTo.Initialize(SEntMan.EntitySysManager);
+            blackboard = new NPCBlackboard();
+            blackboard.SetValue(NPCBlackboard.Owner, npc);
+            blackboard.SetValue(moveTo.TargetKey, new EntityCoordinates(target, Vector2.Zero));
+            blackboard.SetValue(moveTo.RangeKey, 0.2f);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitPost(() =>
+        {
+            planTask = moveTo!.Plan(blackboard!, CancellationToken.None);
+            Assert.That(planTask.IsCompleted, Is.False);
+        });
+        await Pair.RunTicksSync(10);
+        var plan = await planTask!;
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(plan.Valid, Is.True);
+                Assert.That(plan.Effects, Is.Not.Null);
+                Assert.That(plan.Effects, Does.ContainKey($"{NPCBlackboard.PathfindKey}:ZLevel"));
+            });
+
+            foreach (var (key, value) in plan.Effects!)
+            {
+                blackboard!.SetValue(key, value);
+            }
+
+            moveTo!.Startup(blackboard!);
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.ZLevelRoute, Is.Not.Null);
+                Assert.That(steering.TargetWorldZ, Is.EqualTo(1));
+                Assert.That(steering.Status, Is.EqualTo(SteeringStatus.Moving));
+            });
+
+            moveTo.ConditionalShutdown(blackboard!);
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringExecutesAuthoredVerticalRouteWithTraversalDelay()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        ZLevelPathRouteResult routeResult = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            var coordinates = Coordinates(testMap, 2.5f);
+            SpawnUpStairs(testMap, 2.5f);
+
+            target = SEntMan.SpawnEntity(null, coordinates);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            SEntMan.EnsureComponent<GodmodeComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        Task<ZLevelPathRouteResult>? routeTask = null;
+        await Server.WaitPost(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            routeTask = pathfinding.GetZLevelPath(
+                npc,
+                new ZLevelPathEndpoint(testMap.MapId, Coordinates(testMap, 2.5f), 0),
+                new ZLevelPathEndpoint(testMap.MapId, new EntityCoordinates(target, Vector2.Zero), 1),
+                0.2f,
+                CancellationToken.None,
+                pathfinding.GetFlags(npc));
+        });
+        await Pair.RunTicksSync(10);
+        routeResult = await routeTask!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(routeResult.Status, Is.EqualTo(ZLevelPathRouteStatus.Success));
+            Assert.That(routeResult.Route, Is.Not.Null);
+            Assert.That(routeResult.Route!.Legs.Any(leg => leg.Kind == ZLevelPathLegKind.Traversal), Is.True);
+        });
+
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            steeringSystem.ResetZLevelMetrics();
+            SEntMan.System<SharedTransformSystem>().SetCoordinates(npc, Coordinates(testMap, 2.5f));
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            steering.Range = 0.2f;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.TargetWorldZ, Is.EqualTo(1));
+                Assert.That(steeringSystem.TryInstallZLevelRoute(npc, routeResult.Route!, steering), Is.True);
+            });
+        });
+
+        await Pair.RunTicksSync(2);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.Zero);
+                Assert.That(SEntMan.HasComponent<ActiveDoAfterComponent>(npc), Is.True,
+                    "NPC traversal should expose the same progress bar contract as player traversal.");
+                Assert.That(SEntMan.GetComponent<NPCSteeringComponent>(npc).Status,
+                    Is.EqualTo(SteeringStatus.Moving));
+            });
+        });
+
+        await Pair.RunSeconds(1f);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.Zero,
+                "The authored traversal delay must not complete early.");
+        });
+
+        await Pair.RunSeconds(1.2f);
+        await Pair.RunTicksSync(2);
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            var metrics = steeringSystem.SnapshotZLevelMetrics();
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var state = $"route={steering.ZLevelRoute != null}, leg={steering.ZLevelLegIndex}, " +
+                        $"loaded={steering.LoadedZLevelLegIndex}, local={steering.CurrentPath.Count}, " +
+                        $"failures={steering.FailedPathCount}, targetZ={steering.TargetWorldZ}, " +
+                        $"lastReplan={steering.LastZLevelReplanReason}, " +
+                        $"replans={metrics.Replans}, executionFailures={metrics.ExecutionFailures}";
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.EqualTo(1));
+                Assert.That(steering.Status, Is.EqualTo(SteeringStatus.InRange), state);
+                Assert.That(metrics.RoutesInstalled, Is.EqualTo(1));
+                Assert.That(metrics.RoutesCompleted, Is.EqualTo(1));
+                Assert.That(metrics.TraversalsStarted, Is.EqualTo(1));
+                Assert.That(metrics.TraversalsCompleted, Is.EqualTo(1));
+                Assert.That(metrics.Replans, Is.Zero);
+                Assert.That(metrics.ExecutionFailures, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringPlansAndExecutesCrossFloorRoute()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            SEntMan.EnsureComponent<GodmodeComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.System<NPCSteeringSystem>();
+            steering.ResetZLevelMetrics();
+            steering.Register(npc, new EntityCoordinates(target, Vector2.Zero)).Range = 0.2f;
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunSeconds(1f);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.That(metrics.RoutesInstalled, Is.EqualTo(1),
+                "Runtime steering should request and install the typed route itself.");
+        });
+
+        var checkpoints = new List<string>();
+        for (var i = 0; i < 16; i++)
+        {
+            await Pair.RunSeconds(0.5f);
+            await Server.WaitAssertion(() =>
+            {
+                var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+                var transform = SEntMan.GetComponent<TransformComponent>(npc);
+                var body = SEntMan.GetComponent<PhysicsComponent>(npc);
+                checkpoints.Add(
+                    $"{(i + 1) * 0.5f:F1}s:x={transform.LocalPosition.X:F2},z=" +
+                    $"{SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel},v={body.LinearVelocity.X:F2}," +
+                    $"status={steering.Status},failure={steering.LastZLevelExecutionFailureReason}," +
+                    $"leg={steering.ZLevelLegIndex},local={steering.CurrentPath.Count}");
+            });
+        }
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            var transform = SEntMan.GetComponent<TransformComponent>(npc);
+            var distance = transform.Coordinates.TryDistance(
+                SEntMan,
+                new EntityCoordinates(target, Vector2.Zero),
+                out var value)
+                ? value
+                : float.PositiveInfinity;
+            var state = $"status={steering.Status}, z={SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel}, " +
+                        $"position={transform.LocalPosition}, distance={distance}, route={steering.ZLevelRoute != null}, " +
+                        $"leg={steering.ZLevelLegIndex}, local={steering.CurrentPath.Count}, " +
+                        $"lastReplan={steering.LastZLevelReplanReason}, " +
+                        $"failure={steering.LastZLevelExecutionFailureReason}, installed={metrics.RoutesInstalled}, " +
+                        $"completed={metrics.RoutesCompleted}, replans={metrics.Replans}; " +
+                        string.Join(" | ", checkpoints);
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.EqualTo(1), state);
+                Assert.That(steering.Status, Is.EqualTo(SteeringStatus.InRange), state);
+                Assert.That(distance, Is.LessThanOrEqualTo(steering.Range), state);
+                Assert.That(metrics.RoutesInstalled, Is.EqualTo(1), state);
+                Assert.That(metrics.RoutesCompleted, Is.EqualTo(1), state);
+                Assert.That(metrics.TraversalsStarted, Is.EqualTo(1), state);
+                Assert.That(metrics.TraversalsCompleted, Is.EqualTo(1), state);
+                Assert.That(metrics.Replans, Is.Zero, state);
+                Assert.That(metrics.ExecutionFailures, Is.Zero, state);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringReplansWhenAuthoredTraversalIsDeleted()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        EntityUid stairs = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            stairs = SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        var route = await RequestNPCZLevelPath(testMap, npc, target);
+        Assert.That(route.Succeeded, Is.True);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            steeringSystem.ResetZLevelMetrics();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, route.Route!, steering), Is.True);
+            Assert.That(SEntMan.System<PathfindingSystem>().ValidateZLevelPathRoute(route.Route!).IsValid, Is.True);
+
+            SEntMan.DeleteEntity(stairs);
+            Assert.That(SEntMan.System<PathfindingSystem>().ValidateZLevelPathRoute(route.Route!).Status,
+                Is.EqualTo(ZLevelPathRouteValidationStatus.TraversalChanged));
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.ZLevelRoute, Is.Null);
+                Assert.That(steering.LastZLevelReplanReason, Is.EqualTo(NPCZLevelReplanReason.RouteInvalid));
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.Zero);
+                Assert.That(SEntMan.HasComponent<ActiveDoAfterComponent>(npc), Is.False);
+                Assert.That(metrics.RoutesInstalled, Is.EqualTo(1));
+                Assert.That(metrics.Replans, Is.EqualTo(1));
+                Assert.That(metrics.TraversalsStarted, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringReplansWhenTrackedTargetChangesFloor()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        var route = await RequestNPCZLevelPath(testMap, npc, target);
+        Assert.That(route.Succeeded, Is.True);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            steeringSystem.ResetZLevelMetrics();
+            var offsetTarget = new EntityCoordinates(target, new Vector2(0.25f, 0f));
+            Assert.Multiple(() =>
+            {
+                Assert.That(steeringSystem.ResolveTargetWorldZ(npc, offsetTarget, out var tracked), Is.EqualTo(1));
+                Assert.That(tracked, Is.EqualTo(target));
+            });
+
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, route.Route!, steering), Is.True);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 0), Is.True);
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.TargetWorldZ, Is.Zero);
+                Assert.That(steering.ZLevelRoute, Is.Null);
+                Assert.That(steering.LastZLevelReplanReason,
+                    Is.EqualTo(NPCZLevelReplanReason.TargetFloorChanged));
+                Assert.That(metrics.RoutesInstalled, Is.EqualTo(1));
+                Assert.That(metrics.Replans, Is.EqualTo(1));
+                Assert.That(metrics.TraversalsStarted, Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringCancelsPendingTraversalWhenRouteReplans()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        EntityUid stairs = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            stairs = SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 2.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            SEntMan.EnsureComponent<GodmodeComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        var route = await RequestNPCZLevelPath(testMap, npc, target);
+        Assert.That(route.Succeeded, Is.True);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            steeringSystem.ResetZLevelMetrics();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, route.Route!, steering), Is.True);
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.That(SEntMan.System<ZLevelTraversalSystem>().IsTraversalPending(npc, stairs), Is.True);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 0), Is.True);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<ZLevelTraversalSystem>().IsTraversalPending(npc), Is.False);
+                Assert.That(steering.ZLevelRoute, Is.Null);
+                Assert.That(steering.LastZLevelReplanReason,
+                    Is.EqualTo(NPCZLevelReplanReason.TargetFloorChanged));
+                Assert.That(metrics.TraversalsStarted, Is.EqualTo(1));
+                Assert.That(metrics.TraversalsCompleted, Is.Zero);
+                Assert.That(metrics.Replans, Is.EqualTo(1));
+            });
+        });
+
+        await Pair.RunSeconds(2.2f);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(npc).ZLevel, Is.Zero,
+                "A cancelled traversal must not complete after its original delay.");
+        });
+    }
+
+    [Test]
+    public async Task DeletingTraversalCancelsEveryPendingUser()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid stairs = default;
+        EntityUid firstUser = default;
+        EntityUid secondUser = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            stairs = SpawnUpStairs(testMap, 2.5f);
+            firstUser = SpawnTraversalUser(testMap, 2.5f);
+            secondUser = SpawnTraversalUser(testMap, 2.5f);
+
+            var traversal = SEntMan.System<ZLevelTraversalSystem>();
+            Assert.Multiple(() =>
+            {
+                Assert.That(traversal.TryStartTraversal(stairs, firstUser), Is.True);
+                Assert.That(traversal.TryStartTraversal(stairs, secondUser), Is.True);
+                Assert.That(traversal.IsTraversalPending(firstUser, stairs), Is.True);
+                Assert.That(traversal.IsTraversalPending(secondUser, stairs), Is.True);
+            });
+
+            SEntMan.DeleteEntity(stairs);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var traversal = SEntMan.System<ZLevelTraversalSystem>();
+            var firstDoAfters = SEntMan.GetComponent<DoAfterComponent>(firstUser);
+            var secondDoAfters = SEntMan.GetComponent<DoAfterComponent>(secondUser);
+            Assert.Multiple(() =>
+            {
+                Assert.That(traversal.IsTraversalPending(firstUser), Is.False);
+                Assert.That(traversal.IsTraversalPending(secondUser), Is.False);
+                Assert.That(firstDoAfters.DoAfters.Values.All(doAfter => doAfter.Cancelled), Is.True);
+                Assert.That(secondDoAfters.DoAfters.Values.All(doAfter => doAfter.Cancelled), Is.True);
+            });
+        });
+
+        await Pair.RunSeconds(2.2f);
+        await Server.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(firstUser).ZLevel, Is.Zero);
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(secondUser).ZLevel, Is.Zero);
+                Assert.That(SEntMan.HasComponent<ActiveDoAfterComponent>(firstUser), Is.False);
+                Assert.That(SEntMan.HasComponent<ActiveDoAfterComponent>(secondUser), Is.False);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NPCSteeringDistinguishesGridMotionFromTargetMotion()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            SpawnUpStairs(testMap, 2.5f);
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+
+            npc = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, 0.5f));
+            SEntMan.RemoveComponent<HTNComponent>(npc);
+            SEntMan.RemoveComponent<ActiveNPCComponent>(npc);
+            SEntMan.EnsureComponent<GodmodeComponent>(npc);
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        var route = await RequestNPCZLevelPath(testMap, npc, target);
+        Assert.That(route.Succeeded, Is.True);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            steeringSystem.ResetZLevelMetrics();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, route.Route!, steering), Is.True);
+
+            SEntMan.System<SharedTransformSystem>().SetLocalPosition(testMap.Grid, new Vector2(8f, -5f));
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var planned = SEntMan.System<SharedTransformSystem>()
+                .ToMapCoordinates(steering.ZLevelPlannedTargetCoordinates);
+            var current = SEntMan.System<SharedTransformSystem>()
+                .ToMapCoordinates(new EntityCoordinates(target, Vector2.Zero));
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.ZLevelRoute, Is.Not.Null,
+                    "Moving the route's coordinate frame must not look like target motion.");
+                Assert.That(planned, Is.EqualTo(current));
+                Assert.That(steering.LastZLevelReplanReason, Is.EqualTo(NPCZLevelReplanReason.None));
+                Assert.That(metrics.Replans, Is.Zero);
+            });
+
+            SEntMan.System<SharedTransformSystem>().SetCoordinates(target, Coordinates(testMap, 3.5f));
+        });
+        await Pair.RunTicksSync(10);
+
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var planned = SEntMan.System<SharedTransformSystem>()
+                .ToMapCoordinates(steering.ZLevelPlannedTargetCoordinates);
+            var current = SEntMan.System<SharedTransformSystem>()
+                .ToMapCoordinates(new EntityCoordinates(target, Vector2.Zero));
+            var metrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(steering.ZLevelRoute, Is.Not.Null,
+                    "The replacement route should be installed after meaningful target motion.");
+                Assert.That(planned, Is.EqualTo(current));
+                Assert.That(steering.LastZLevelReplanReason, Is.EqualTo(NPCZLevelReplanReason.TargetMoved));
+                Assert.That(metrics.RoutesInstalled, Is.EqualTo(2));
+                Assert.That(metrics.Replans, Is.EqualTo(1));
+            });
+        });
+    }
+
     private void ConfigureCorridors(TestMapData testMap)
     {
         var map = SEntMan.System<SharedMapSystem>();
@@ -679,11 +1381,42 @@ public sealed class ZLevelPathfindingTest : GameTest
         return await task!;
     }
 
+    private async Task<ZLevelPathRouteResult> RequestNPCZLevelPath(
+        TestMapData testMap,
+        EntityUid npc,
+        EntityUid target)
+    {
+        Task<ZLevelPathRouteResult>? task = null;
+        await Server.WaitPost(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            task = pathfinding.GetZLevelPath(
+                npc,
+                new ZLevelPathEndpoint(testMap.MapId, SEntMan.GetComponent<TransformComponent>(npc).Coordinates, 0),
+                new ZLevelPathEndpoint(testMap.MapId, new EntityCoordinates(target, Vector2.Zero), 1),
+                0.2f,
+                CancellationToken.None,
+                pathfinding.GetFlags(npc));
+        });
+        await Pair.RunTicksSync(10);
+        return await task!;
+    }
+
     private EntityUid SpawnUpStairs(TestMapData testMap, float x)
     {
         var stairs = SEntMan.SpawnEntity("ZLevelStairsUp", Coordinates(testMap, x));
         SEntMan.System<ZLevelTraversalGraphSystem>().RefreshTraversal(stairs);
         return stairs;
+    }
+
+    private EntityUid SpawnTraversalUser(TestMapData testMap, float x)
+    {
+        var user = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, x));
+        SEntMan.RemoveComponent<HTNComponent>(user);
+        SEntMan.RemoveComponent<ActiveNPCComponent>(user);
+        SEntMan.EnsureComponent<GodmodeComponent>(user);
+        Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(user, 0), Is.True);
+        return user;
     }
 
     private static EntityCoordinates Coordinates(TestMapData testMap, float x)

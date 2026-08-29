@@ -63,6 +63,8 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
 
     private const string MovementCancelToken = "MovementCancelToken";
 
+    private string ZLevelPathfindKey => $"{PathfindKey}:ZLevel";
+
     public override void Initialize(IEntitySystemManager sysManager)
     {
         base.Initialize(sysManager);
@@ -92,8 +94,12 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
         }
 
         var range = blackboard.GetValueOrDefault<float>(RangeKey, _entManager);
+        var ownerWorldZ = _steering.ResolveTargetWorldZ(owner, xform.Coordinates, out _);
+        var targetWorldZ = _steering.ResolveTargetWorldZ(owner, targetCoordinates, out _);
 
-        if (xform.Coordinates.TryDistance(_entManager, targetCoordinates, out var distance) && distance <= range)
+        if (ownerWorldZ == targetWorldZ &&
+            xform.Coordinates.TryDistance(_entManager, targetCoordinates, out var distance) &&
+            distance <= range)
         {
             // In range
             return (true, new Dictionary<string, object>()
@@ -110,10 +116,31 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
             });
         }
 
+        if (ownerWorldZ != targetWorldZ)
+        {
+            var targetMap = _transform.ToMapCoordinates(targetCoordinates);
+            var route = await _pathfind.GetZLevelPath(
+                owner,
+                new ZLevelPathEndpoint(xform.MapID, xform.Coordinates, ownerWorldZ),
+                new ZLevelPathEndpoint(targetMap.MapId, targetCoordinates, targetWorldZ),
+                range,
+                cancelToken,
+                _pathfind.GetFlags(blackboard));
+
+            if (!route.Succeeded)
+                return (false, null);
+
+            return (true, new Dictionary<string, object>()
+            {
+                {NPCBlackboard.OwnerCoordinates, targetCoordinates},
+                {ZLevelPathfindKey, route.Route!}
+            });
+        }
+
         var path = await _pathfind.GetPath(
-            blackboard.GetValue<EntityUid>(NPCBlackboard.Owner),
+            owner,
             xform.Coordinates,
-                targetCoordinates,
+            targetCoordinates,
             range,
             cancelToken,
             _pathfind.GetFlags(blackboard));
@@ -151,11 +178,15 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
             comp.Range = range;
         }
 
-        if (blackboard.TryGetValue<PathResultEvent>(PathfindKey, out var result, _entManager))
+        if (blackboard.TryGetValue<ZLevelPathRoute>(ZLevelPathfindKey, out var route, _entManager))
         {
-            if (blackboard.TryGetValue<EntityCoordinates>(NPCBlackboard.OwnerCoordinates, out var coordinates, _entManager))
+            _steering.TryInstallZLevelRoute(uid, route, comp);
+        }
+        else if (blackboard.TryGetValue<PathResultEvent>(PathfindKey, out var result, _entManager))
+        {
+            if (_entManager.TryGetComponent(uid, out TransformComponent? transform))
             {
-                var mapCoords = _transform.ToMapCoordinates(coordinates);
+                var mapCoords = _transform.GetMapCoordinates(uid, xform: transform);
                 _steering.PrunePath(uid, mapCoords, _transform.ToMapCoordinates(targetCoordinates).Position - mapCoords.Position, result.Path);
             }
 
@@ -196,6 +227,7 @@ public sealed partial class MoveToOperator : HTNOperator, IHtnConditionalShutdow
 
         // OwnerCoordinates is only used in planning so dump it.
         blackboard.Remove<PathResultEvent>(PathfindKey);
+        blackboard.Remove<ZLevelPathRoute>(ZLevelPathfindKey);
 
         if (RemoveKeyOnFinish)
         {

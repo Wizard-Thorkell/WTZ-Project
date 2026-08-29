@@ -100,11 +100,36 @@ public sealed partial class NPCSteeringSystem
     {
         var ourCoordinates = xform.Coordinates;
         var destinationCoordinates = steering.Coordinates;
-        var inLos = true;
+        var currentWorldZ = GetWorldZ(uid, xform);
+        var preparation = PrepareZLevelRoute(uid, steering, xform);
+        if (preparation == ZLevelRoutePreparation.Failed)
+        {
+            SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.RoutePreparationFailed);
+            return false;
+        }
+
+        if (preparation == ZLevelRoutePreparation.Repath)
+        {
+            CheckPath(uid, steering, xform, true, float.PositiveInfinity);
+            return false;
+        }
+
+        if (preparation == ZLevelRoutePreparation.Hold)
+        {
+            _physics.SetLinearVelocity(uid, Vector2.Zero, body: body);
+            ResetStuck(steering, ourCoordinates);
+            return false;
+        }
+
+        var sameTargetFloor = currentWorldZ == steering.TargetWorldZ;
+        var inLos = sameTargetFloor;
 
         // Check if we're in LOS if that's required.
         // TODO: Need something uhh better not sure on the interaction between these.
-        if (!steering.ForceMove && steering.ArriveOnLineOfSight)
+        if (steering.ZLevelRoute == null &&
+            sameTargetFloor &&
+            !steering.ForceMove &&
+            steering.ArriveOnLineOfSight)
         {
             // TODO: use vision range
             inLos = _interaction.InRangeUnobstructed(uid, steering.Coordinates, 10f);
@@ -115,9 +140,10 @@ public sealed partial class NPCSteeringSystem
 
                 if (steering.LineOfSightTimer >= steering.LineOfSightTimeRequired)
                 {
+                    _physics.SetLinearVelocity(uid, Vector2.Zero, body: body);
                     steering.Status = SteeringStatus.InRange;
                     ResetStuck(steering, ourCoordinates);
-                    return true;
+                    return false;
                 }
             }
             else
@@ -132,23 +158,24 @@ public sealed partial class NPCSteeringSystem
         }
 
         // We've arrived, nothing else matters.
-        if (xform.Coordinates.TryDistance(EntityManager, destinationCoordinates, out var targetDistance) &&
+        var hasTargetDistance = xform.Coordinates.TryDistance(
+            EntityManager,
+            destinationCoordinates,
+            out var targetDistance);
+        if (steering.ZLevelRoute == null &&
+            sameTargetFloor &&
+            hasTargetDistance &&
             inLos &&
             targetDistance <= steering.Range)
         {
+            _physics.SetLinearVelocity(uid, Vector2.Zero, body: body);
             steering.Status = SteeringStatus.InRange;
             ResetStuck(steering, ourCoordinates);
-            return true;
+            return false;
         }
 
         // Grab the target position, either the next path node or our end goal..
         var targetCoordinates = GetTargetCoordinates(steering);
-
-        if (!targetCoordinates.IsValid(EntityManager))
-        {
-            steering.Status = SteeringStatus.NoPath;
-            return false;
-        }
 
         var needsPath = false;
 
@@ -164,6 +191,11 @@ public sealed partial class NPCSteeringSystem
                 needsPath = true;
                 ResetStuck(steering, ourCoordinates);
             }
+            else
+            {
+                SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.InvalidCoordinates);
+                return false;
+            }
         }
 
         // Check if mapids match.
@@ -172,16 +204,21 @@ public sealed partial class NPCSteeringSystem
 
         if (targetMap.MapId != ourMap.MapId)
         {
-            steering.Status = SteeringStatus.NoPath;
+            SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.MapMismatch);
             return false;
         }
 
         var direction = targetMap.Position - ourMap.Position;
+        BrakeForZLevelEndpoint(uid, steering, body, direction);
 
         // Need to be pretty close if it's just a node to make sure LOS for door bashes or the likes.
         bool arrived;
 
-        if (targetCoordinates.Equals(steering.Coordinates))
+        if (IsAtZLevelLegDestination(steering, ourCoordinates, targetCoordinates, direction))
+        {
+            arrived = true;
+        }
+        else if (targetCoordinates.Equals(steering.Coordinates))
         {
             // What's our tolerance for arrival.
             // If it's a pathfinding node it might be different to the destination.
@@ -231,7 +268,7 @@ public sealed partial class NPCSteeringSystem
                     case SteeringObstacleStatus.Failed:
                         steering.DoAfterId = null;
                         // TODO: Blacklist the poly for next query
-                        steering.Status = SteeringStatus.NoPath;
+                        SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.ObstacleFailed);
                         return false;
                     case SteeringObstacleStatus.Continuing:
                         CheckPath(uid, steering, xform, needsPath, targetDistance);
@@ -255,7 +292,7 @@ public sealed partial class NPCSteeringSystem
                 if (!targetCoordinates.IsValid(EntityManager))
                 {
                     SetDirection(uid, mover, steering, Vector2.Zero);
-                    steering.Status = SteeringStatus.NoPath;
+                    SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.InvalidCoordinates);
                     return false;
                 }
 
@@ -265,7 +302,7 @@ public sealed partial class NPCSteeringSystem
                 if (ourMap.MapId != targetMap.MapId)
                 {
                     SetDirection(uid, mover, steering, Vector2.Zero);
-                    steering.Status = SteeringStatus.NoPath;
+                    SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.MapMismatch);
                     return false;
                 }
 
@@ -275,7 +312,42 @@ public sealed partial class NPCSteeringSystem
             }
             else
             {
-                needsPath = true;
+                switch (HandleZLevelRouteArrival(uid, steering, xform))
+                {
+                    case ZLevelRouteArrival.Advanced:
+                        forceSteer = true;
+                        ResetStuck(steering, ourCoordinates);
+                        return false;
+                    case ZLevelRouteArrival.Hold:
+                        _physics.SetLinearVelocity(uid, Vector2.Zero, body: body);
+                        forceSteer = true;
+                        ResetStuck(steering, ourCoordinates);
+                        return false;
+                    case ZLevelRouteArrival.Completed:
+                        if (GetWorldZ(uid, xform) == steering.TargetWorldZ &&
+                            ourCoordinates.TryDistance(EntityManager, steering.Coordinates, out var finalDistance) &&
+                            finalDistance <= steering.Range)
+                        {
+                            _physics.SetLinearVelocity(uid, Vector2.Zero, body: body);
+                            steering.Status = SteeringStatus.InRange;
+                            ResetStuck(steering, ourCoordinates);
+                            return false;
+                        }
+
+                        needsPath = true;
+                        break;
+                    case ZLevelRouteArrival.Repath:
+                        CheckPath(uid, steering, xform, true, float.PositiveInfinity);
+                        return false;
+                    case ZLevelRouteArrival.Failed:
+                        SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.RoutePreparationFailed);
+                        return false;
+                    case ZLevelRouteArrival.None:
+                        needsPath = true;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
             }
         }
         // Stuck detection
@@ -300,7 +372,7 @@ public sealed partial class NPCSteeringSystem
 
                 if (stuckTime.TotalSeconds > maxStuckTime * 3)
                 {
-                    steering.Status = SteeringStatus.NoPath;
+                    SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.Stuck);
                     return false;
                 }
             }
@@ -311,14 +383,35 @@ public sealed partial class NPCSteeringSystem
         }
 
         // If not in LOS and no path then get a new one fam.
-        if ((!inLos && steering.ArriveOnLineOfSight && steering.CurrentPath.Count == 0) ||
-            (!steering.ArriveOnLineOfSight && steering.CurrentPath.Count == 0))
+        if (steering.ZLevelRoute == null &&
+            ((!inLos && steering.ArriveOnLineOfSight && steering.CurrentPath.Count == 0) ||
+             (!steering.ArriveOnLineOfSight && steering.CurrentPath.Count == 0)))
         {
             needsPath = true;
         }
 
         // TODO: Probably need partial planning support i.e. patch from the last node to where the target moved to.
-        CheckPath(uid, steering, xform, needsPath, targetDistance);
+        if (needsPath && steering.ZLevelRoute != null)
+        {
+            ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.LocalPathInvalid);
+        }
+
+        CheckPath(
+            uid,
+            steering,
+            xform,
+            needsPath,
+            hasTargetDistance ? targetDistance : float.PositiveInfinity);
+
+        // A local route leg may drain its final polygon exactly at the authored
+        // connector center. Stop for this tick and let the route state machine
+        // advance it instead of treating a zero direction as a failed path.
+        if (steering.ZLevelRoute != null &&
+            steering.CurrentPath.Count == 0 &&
+            direction.Length() <= ZLevelLegArrivalRange)
+        {
+            return false;
+        }
 
         // If we don't have a path yet then do nothing; this is to avoid stutter-stepping if it turns out there's no path
         // available but we assume there was.
@@ -327,7 +420,7 @@ public sealed partial class NPCSteeringSystem
 
         if (moveSpeed == 0f || direction == Vector2.Zero)
         {
-            steering.Status = SteeringStatus.NoPath;
+            SetNoPath(uid, steering, NPCZLevelExecutionFailureReason.ZeroMovement);
             return false;
         }
 
@@ -366,8 +459,15 @@ public sealed partial class NPCSteeringSystem
             steering.CurrentPath.Clear();
             steering.PathfindToken?.Cancel();
             steering.PathfindToken = null;
+            ClearZLevelRoute(uid, steering);
             return;
         }
+
+        // Hierarchical routes own their local leg queue. Their invalidation is
+        // handled before seeking so the flat-path target movement heuristic
+        // cannot compare an intermediate connector with the final destination.
+        if (steering.ZLevelRoute != null)
+            return;
 
         if (!needsPath && steering.CurrentPath.Count > 0)
         {
@@ -470,7 +570,7 @@ public sealed partial class NPCSteeringSystem
             return GetCoordinates(nextTarget);
         }
 
-        return steering.Coordinates;
+        return GetZLevelLegDestination(steering);
     }
 
     /// <summary>

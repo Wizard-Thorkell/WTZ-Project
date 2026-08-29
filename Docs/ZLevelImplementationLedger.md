@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.4 AI traversal execution and dynamic connectors`.
+- Active package: `P5.4b dynamic connectors and P5 phase hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.3b complete; P5.4 active) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.4a complete; P5.4b active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -68,7 +68,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5.2 | Floor-specific local polygon navigation | Complete |
 | P5.3a | Detached graph snapshots, typed routes, revisions, and budgets | Complete |
 | P5.3b | Hierarchical route search and typed route composition | Complete |
-| P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Active |
+| P5.4a | Static AI route execution and traversal lifecycle | Complete |
+| P5.4b | Dynamic elevators, multi-NPC scale, and phase hardening | Active |
 
 ## Phase P0 Packages
 
@@ -4792,6 +4793,121 @@ allocation is inside Robust physics enumeration.
   delayed traversal actions, validates/replans each leg, and models dynamic
   elevator state before closing the P5 phase gate.
 
+## Completed Package: P5.4a Static AI Route Execution
+
+### Scope
+
+- Add a typed hierarchical route state machine to `NPCSteeringSystem` while
+  retaining the native local `PathPoly` queue for movement inside each floor.
+- Migrate `MoveToOperator` planning and runtime steering requests to
+  `GetZLevelPath` only when actor and target world floors differ.
+- Execute authored traversal legs through the normal server-owned delayed
+  traversal action, then validate the destination and continue the next leg.
+- Replan or fail deterministically after connector, local navigation, target,
+  map, floor, or async endpoint changes, and expose execution metrics.
+- Harden connector deletion so every pending user is cancelled.
+
+### Acceptance Criteria
+
+- An NPC can autonomously plan, walk to stairs, wait for the normal two-second
+  `DoAfter`, change floor, continue its local path, and stop inside final range.
+- HTN planning can carry a typed route into execution without changing legacy
+  same-floor route behavior or encoding traversal as a fake polygon.
+- Route execution validates exact graph/local legs after revisions and cancels
+  an owned pending traversal before replanning or shutting down.
+- Actor and target endpoints are stable across asynchronous local A* work;
+  stale results cannot install after meaningful movement or map/floor changes.
+- Moving a whole grid preserves frame-relative plans, while moving only the
+  target triggers one observable replacement route.
+- Z 0 and non-Z steering retain their existing target/range contract.
+
+### Verification Evidence
+
+- The final focused `ZLevelPathfindingTest` matrix passes 18/18 with no skips.
+  It covers planning/composition plus HTN installation, runtime execution,
+  delayed traversal, arrival braking, actor/target endpoint snapshots, stale
+  rejection, graph and target-floor replans, cancellation, and moving frames.
+- Connector deletion with two simultaneous users cancels both `DoAfter`s and
+  neither user changes floor after the original delay.
+- The complete Content `FullyQualifiedName~ZLevel` integration matrix passes
+  263/263, and the Content Z-level unit/analyzer matrix passes 9/9.
+- The generated 3-, 6-, and 10-floor baselines pass 3/3. Every measured phase
+  allocates 6,336 bytes, has 100% boundary/gravity cache hits, and records zero
+  PVS budget exhaustion or fail-open candidates. Local measured times are
+  7.8504, 13.9121, and 21.6865 ms.
+- A full incremental `SpaceStation14.slnx` build completes with zero errors and
+  27 established dependency/obsolescence warnings; none points to this package.
+
+### Decisions
+
+- Keep one typed route on the steering component and load one local leg at a
+  time into the existing queue. Door, obstacle, collision, and movement policy
+  therefore remain owned by mature local steering.
+- Use the public idempotent traversal API rather than teleporting NPCs. The
+  progress bar, delay, adjacency, destination support, and boundary checks stay
+  identical for NPCs and players.
+- Snapshot endpoint XY into a grid/map frame before the first `await`, then
+  revalidate both actor and target at installation. Frame motion remains valid;
+  entity motion beyond `RepathRange` is stale.
+- Validate exact route legs only when graph revisions change or a new leg is
+  loaded. Unrelated global revision changes do not force a replacement route.
+- Cancel route-owned traversal actions on target replacement, replan, failure,
+  component shutdown, or connector deletion. Preserve cancellation retention in
+  `DoAfterComponent` for replication while treating its state as inactive.
+- Stop final physics velocity before reporting `InRange`; returning from that
+  tick without another steering blend prevents post-arrival oscillation.
+- Keep dynamic elevators out of this package. They need explicit availability,
+  power, wait cost, destination, and invalidation semantics in P5.4b.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to NPC route execution, traversal
+      lifecycle hardening, diagnostics, focused tests, and P5 documentation.
+- [x] Invariant review: Z 0, local/world floors, moving frames, map identity,
+      asynchronous staleness, exact connectors, server authority, and normal
+      boundary/destination policy were reviewed.
+- [x] Automated verification: 18/18 focused, 263/263 Content integration, 9/9
+      Content unit/analyzer, 3/3 baselines, and the full solution build pass
+      without skips or errors.
+- [x] Performance evidence: hierarchical execution counters are exposed;
+      planner budgets remain asserted; warmed stress allocation/cache/budget
+      results stay unchanged. Concurrent NPC load is assigned to P5.4b.
+- [x] Documentation: execution ownership, endpoint snapshots, replan taxonomy,
+      cancellation, metrics, tests, limits, and next work are recorded here and
+      in `Docs/ZLevelPathfinding.md`.
+- [x] Dependency check: no WTZ Engine change is required; the paired engine
+      remains at `3aaca280f628876939afcc10a9be920b3898902a` with a clean tree.
+- [x] Git check: generated baselines remain ignored; final parent/engine status,
+      staged scope, and `git diff --check` are verified immediately before commit.
+- [x] Mini review: no blocking static-route correctness issue remains; dynamic
+      connector semantics and scale work are explicitly retained in P5.4b.
+- [x] Commit: the isolated `Execute hierarchical Z-level NPC routes` parent
+      commit is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: WTZ NPCs now consume the same typed route produced by the bounded
+  hierarchical planner and use ordinary player traversal behavior at each edge.
+- Finding: route publication and execution are authoritative across target,
+  actor, frame, floor, graph, and local-navigation changes, with distinct
+  diagnostics instead of silent cross-floor fallback.
+- Finding: final braking and owned-DoAfter cancellation close two lifecycle
+  failures that only appeared during full movement simulation.
+- Finding: deleting one connector now cancels all simultaneous pending users,
+  fixing a multiplayer issue discovered during package review.
+- Residual risk: elevators are still represented only by the static connector
+  contract; runtime cabin state, power, wait cost, and destination selection are
+  not yet gameplay-capable.
+- Residual risk: graph revisions remain global and floor chunks retain their
+  high-water allocation. Concurrent NPC and long-round evidence is needed before
+  choosing map-scoped revisions, pooling, or eviction.
+- Residual risk: hostile/follow behaviors share `MoveToOperator` and runtime
+  steering, but representative multi-floor content scenarios still belong to
+  the consolidated P5.4b gate.
+- Next package: P5.4b defines dynamic elevator state and route costs, executes
+  changing connector availability, then closes P5 with concurrent and prolonged
+  navigation tests.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4837,3 +4953,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.2 | `Separate pathfinding navigation by Z level` | 3 focused, 247 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P5.3a | `Define hierarchical Z-level route contracts` | 1 focused, 248 Content integration, 9 Content unit/analyzer, 3 baseline, full build, cache/allocation/diff review | Complete |
 | 2026-08-29 | P5.3b | `Compose hierarchical Z-level paths` | 8 focused, 253 Content integration, 9 Content unit/analyzer, 3 baseline, full build, budget/timing/diff review | Complete |
+| 2026-08-29 | P5.4a | `Execute hierarchical Z-level NPC routes` | 18 focused, 263 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/timing/diff review | Complete |

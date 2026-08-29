@@ -34,6 +34,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     private readonly Dictionary<EntityUid, PendingTraversal> _pendingTraversals = new();
     private readonly HashSet<(EntityUid User, EntityUid Traversal)> _suppressedAutoTraversals = new();
     private readonly List<EntityUid> _traversalBuffer = new();
+    private readonly List<EntityUid> _pendingTraversalUserBuffer = new();
 
     public override void Initialize()
     {
@@ -179,23 +180,55 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     {
         _suppressedAutoTraversals.RemoveWhere(entry => entry.Traversal == ent.Owner);
 
-        EntityUid? userToCancel = null;
-        DoAfterId? doAfterToCancel = null;
+        _pendingTraversalUserBuffer.Clear();
         foreach (var (user, pending) in _pendingTraversals)
         {
-            if (pending.Traversal != ent.Owner)
-                continue;
-
-            userToCancel = user;
-            doAfterToCancel = pending.DoAfter;
-            break;
+            if (pending.Traversal == ent.Owner)
+                _pendingTraversalUserBuffer.Add(user);
         }
 
-        if (userToCancel == null)
-            return;
+        foreach (var user in _pendingTraversalUserBuffer)
+            TryCancelTraversal(user, ent.Owner);
+    }
 
-        _pendingTraversals.Remove(userToCancel.Value);
-        _doAfter.Cancel(doAfterToCancel);
+    /// <summary>
+    /// Starts an authored traversal for a user already standing on its tile.
+    /// Repeated calls for the same pending traversal are idempotent so steering
+    /// systems can safely hold position while its DoAfter runs.
+    /// </summary>
+    public bool TryStartTraversal(EntityUid traversal, EntityUid user, bool popupOnFailure = false)
+    {
+        if (_pendingTraversals.TryGetValue(user, out var pending))
+            return pending.Traversal == traversal;
+
+        return TryComp<ZLevelTraversalComponent>(traversal, out var component) &&
+               TryStartTraversal((traversal, component), user, popupOnFailure);
+    }
+
+    /// <summary>
+    /// Returns whether the user is waiting for an authored vertical traversal.
+    /// </summary>
+    public bool IsTraversalPending(EntityUid user, EntityUid? traversal = null)
+    {
+        return _pendingTraversals.TryGetValue(user, out var pending) &&
+               (traversal == null || pending.Traversal == traversal);
+    }
+
+    /// <summary>
+    /// Cancels a pending authored traversal owned by the user. Supplying the
+    /// connector prevents a stale route from cancelling an unrelated action.
+    /// </summary>
+    public bool TryCancelTraversal(EntityUid user, EntityUid? traversal = null)
+    {
+        if (!_pendingTraversals.TryGetValue(user, out var pending) ||
+            traversal != null && pending.Traversal != traversal)
+        {
+            return false;
+        }
+
+        _pendingTraversals.Remove(user);
+        _doAfter.Cancel(pending.DoAfter);
+        return true;
     }
 
     private bool TryStartTraversal(Entity<ZLevelTraversalComponent> ent, EntityUid user, bool popupOnFailure = true)

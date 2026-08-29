@@ -4,6 +4,7 @@
 using Content.Server.Administration;
 using Content.Server.Explosion.EntitySystems;
 using Content.Server.NPC.Pathfinding;
+using Content.Server.NPC.Systems;
 using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Administration;
@@ -32,6 +33,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
             _entityManager.System<ZLevelTraversalGraphSystem>().ResetMetrics();
             _entityManager.System<PathfindingSystem>().ResetZLevelMetrics();
+            _entityManager.System<NPCSteeringSystem>().ResetZLevelMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
             return;
         }
@@ -232,6 +234,14 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{pathRouteMetrics.TraversalEdgeBudgetExhaustions}, stale topology/environment/both/local=" +
             $"{pathRouteMetrics.TopologyChanges}/{pathRouteMetrics.EnvironmentChanges}/" +
             $"{pathRouteMetrics.CombinedChanges}/{pathRouteMetrics.LocalNavigationChanges}");
+        var steeringMetrics = _entityManager.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+        shell.WriteLine(
+            $"  hierarchical steering: installed/completed=" +
+            $"{steeringMetrics.RoutesInstalled}/{steeringMetrics.RoutesCompleted}, " +
+            $"traversals started/completed=" +
+            $"{steeringMetrics.TraversalsStarted}/{steeringMetrics.TraversalsCompleted}, " +
+            $"replans/failures/stale-results=" +
+            $"{steeringMetrics.Replans}/{steeringMetrics.ExecutionFailures}/{steeringMetrics.StaleResults}");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

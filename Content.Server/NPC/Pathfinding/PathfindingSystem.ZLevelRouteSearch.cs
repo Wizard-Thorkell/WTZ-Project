@@ -67,6 +67,47 @@ public sealed partial class PathfindingSystem
     }
 
     /// <summary>
+    /// Plans a typed route for an entity between explicit authoritative
+    /// endpoints while deriving collision data from the moving entity.
+    /// </summary>
+    public Task<ZLevelPathRouteResult> GetZLevelPath(
+        EntityUid entity,
+        ZLevelPathEndpoint start,
+        ZLevelPathEndpoint end,
+        float range,
+        CancellationToken cancelToken,
+        PathFlags flags = PathFlags.None,
+        ZLevelPathSearchBudget? budget = null)
+    {
+        var started = Stopwatch.GetTimestamp();
+        if (!TryComp(entity, out TransformComponent? transform) ||
+            transform.MapID != start.MapId)
+        {
+            return Task.FromResult(FinishZLevelPathRoute(
+                ZLevelPathRouteStatus.InvalidRequest,
+                null,
+                default,
+                started));
+        }
+
+        var layer = 0;
+        var mask = 0;
+        if (TryComp<FixturesComponent>(entity, out var fixtures))
+            (layer, mask) = _physics.GetHardCollision(entity, fixtures);
+
+        return FindZLevelPath(
+            start,
+            end,
+            range,
+            layer,
+            mask,
+            cancelToken,
+            flags,
+            budget ?? CreateDefaultZLevelPathBudget(),
+            started);
+    }
+
+    /// <summary>
     /// Plans a typed route between explicit authoritative world-floor endpoints.
     /// </summary>
     public Task<ZLevelPathRouteResult> GetZLevelPath(
@@ -164,8 +205,8 @@ public sealed partial class PathfindingSystem
             range < 0f ||
             start.MapId == MapId.Nullspace ||
             start.MapId != end.MapId ||
-            !IsCurrentEndpoint(start) ||
-            !IsCurrentEndpoint(end))
+            !TrySnapshotEndpoint(start, out var stableStart) ||
+            !TrySnapshotEndpoint(end, out var stableEnd))
         {
             return FinishZLevelPathRoute(
                 ZLevelPathRouteStatus.InvalidRequest,
@@ -173,6 +214,9 @@ public sealed partial class PathfindingSystem
                 default,
                 started);
         }
+
+        start = stableStart;
+        end = stableEnd;
 
         if (cancelToken.IsCancellationRequested)
         {
@@ -744,10 +788,29 @@ public sealed partial class PathfindingSystem
             out route);
     }
 
-    private bool IsCurrentEndpoint(ZLevelPathEndpoint endpoint)
+    private bool TrySnapshotEndpoint(
+        ZLevelPathEndpoint endpoint,
+        out ZLevelPathEndpoint snapshot)
     {
-        return _xformQuery.TryComp(endpoint.Coordinates.EntityId, out var transform) &&
-               transform.MapID == endpoint.MapId;
+        snapshot = default;
+        if (!_xformQuery.TryComp(endpoint.Coordinates.EntityId, out var transform) ||
+            transform.MapID != endpoint.MapId)
+        {
+            return false;
+        }
+
+        var mapCoordinates = _transform.ToMapCoordinates(endpoint.Coordinates);
+        var frame = _transform.GetGrid(endpoint.Coordinates) ??
+                    _transform.GetMap(endpoint.Coordinates);
+        if (mapCoordinates.MapId != endpoint.MapId || frame == null)
+            return false;
+
+        var coordinates = _transform.ToCoordinates(frame.Value, mapCoordinates);
+        if (!coordinates.IsValid(EntityManager))
+            return false;
+
+        snapshot = new ZLevelPathEndpoint(endpoint.MapId, coordinates, endpoint.WorldZ);
+        return true;
     }
 
     private ZLevelPathRouteResult FinishSearch(

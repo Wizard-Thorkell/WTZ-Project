@@ -219,21 +219,50 @@ timings are exposed through `zlevelmetrics` and reset with the existing
 pathfinding metrics.
 
 The existing `GetPath` overloads remain same-floor and still reject cross-floor
-requests. P5.4 will migrate selected AI consumers to the typed API and execute
-traversal legs through normal delayed connector behavior.
+requests. P5.4a migrates the controlled `MoveToOperator` and runtime steering
+consumers to the typed API described below.
+
+## P5.4a Static AI Route Execution
+
+`NPCSteeringSystem` now owns a typed hierarchical route state machine alongside
+its existing local `PathPoly` queue. A local leg is loaded into that mature
+queue, while a traversal leg stops at its exact authored source and calls
+`ZLevelTraversalSystem.TryStartTraversal`. NPCs therefore use the same
+server-authoritative two-second `DoAfter`, progress indicator, connected-stair
+rules, destination checks, and boundary policy as players.
+
+Both HTN planning through `MoveToOperator` and runtime steering can request a
+cross-floor route. Entity endpoints are converted synchronously to stable grid
+or map coordinates before the first asynchronous local path request. Route
+installation rechecks the actor position, target position, map, world floors,
+connector identity, and local polygons, so movement during an `await` cannot
+publish stale work. A whole moving grid remains valid because all snapshots and
+comparisons retain its coordinate frame.
+
+Active routes remember the graph revisions under which they were last
+validated. Topology or environment changes trigger exact route validation;
+only a changed leg causes a replan. Target map/floor changes, meaningful local
+target motion, unexpected actor floors, unavailable traversals, and invalid
+local paths have distinct diagnostic reasons. Clearing or replacing a route
+cancels any traversal `DoAfter` it owns, including a target-floor change while
+the NPC is waiting on stairs.
+
+Arrival handling brakes velocity before completing a local target so normal
+steering cannot carry an NPC back out of range on the following tick.
+`zlevelmetrics` exposes installed/completed routes, started/completed
+traversals, replans, execution failures, and discarded stale path results.
+Deleting a connector now cancels every pending user rather than only the first.
 
 ## Remaining P5 Packages
 
-### P5.4 AI Execution And Dynamic Connectors
+### P5.4b Dynamic Connectors And Phase Hardening
 
-- Teach steering to stop on a connector, perform its normal delayed traversal,
-  verify the destination, and continue the next local leg.
-- Replan when a connector, support tile, boundary, target floor, or grid frame
-  invalidates the active route.
 - Add dynamic elevator edges with state, power, wait cost, and destination
   selection rather than treating elevators as static stairs.
 - Validate hostile/follow behavior through multiple floors and close the P5
-  phase gate with scale, budget, and long-running tests.
+  phase gate with concurrent NPC scale, budget, and long-running tests.
+- Decide from observed load whether global graph revisions, retained floor
+  chunks, and per-route validation need map-scoped revisions or bounded eviction.
 
 ## P5.1 Verification
 
@@ -303,3 +332,25 @@ exhaustion or fail-open candidates, and 6,336 measured bytes each. Local measure
 times are 6.9764, 13.5241, and 23.7440 ms; timing remains comparison evidence, not
 a release threshold. A full incremental `SpaceStation14.slnx` build completes
 with zero errors and 27 established warnings.
+
+## P5.4a Verification
+
+The focused pathfinding/steering fixture passes 18/18 with no skips. It covers
+HTN plan/install, autonomous runtime planning, the normal delayed traversal,
+final arrival braking, target and actor endpoint snapshots, stale installation
+rejection, topology and target-floor replans, pending traversal cancellation,
+all-user cancellation on connector deletion, and moving-grid versus local-target
+motion.
+
+The complete Content Z-level integration matrix passes 263/263 and the Content
+unit/analyzer matrix passes 9/9. The generated 3-, 6-, and 10-floor stress
+baselines pass 3/3 with 100% warmed boundary/gravity cache hits, zero PVS budget
+exhaustion or fail-open candidates, and 6,336 measured bytes each. Local times
+are 7.8504, 13.9121, and 21.6865 ms; they remain comparison evidence rather than
+release thresholds. A full incremental `SpaceStation14.slnx` build completes
+with zero errors and 27 established warnings.
+
+P5.4a deliberately enables only static authored stairs, ladders, and shafts.
+Dynamic elevator availability, wait cost, destination selection, power
+transitions, and multi-NPC scale belong to P5.4b; flight remains a separate P7
+capability.

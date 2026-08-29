@@ -89,6 +89,47 @@ public sealed partial class NPCSteeringComponent : Component
     [ViewVariables] public Queue<PathPoly> CurrentPath = new();
 
     /// <summary>
+    /// Hierarchical route currently being executed. Local legs are copied into
+    /// <see cref="CurrentPath"/> one at a time while traversal legs use their
+    /// authored connector and delay.
+    /// </summary>
+    [ViewVariables] public ZLevelPathRoute? ZLevelRoute;
+
+    [ViewVariables] public int ZLevelLegIndex;
+
+    [ViewVariables] public int LoadedZLevelLegIndex = -1;
+
+    /// <summary>
+    /// Final target position in its grid or map frame when the current route
+    /// was installed. A moving grid therefore does not look like target motion.
+    /// </summary>
+    [ViewVariables] public EntityCoordinates ZLevelPlannedTargetCoordinates = EntityCoordinates.Invalid;
+
+    /// <summary>
+    /// Traversal whose active do-after has been adopted by this route.
+    /// </summary>
+    [ViewVariables] public EntityUid? ZLevelPendingTraversal;
+
+    [ViewVariables] public long ZLevelValidatedTopologyRevision = -1;
+
+    [ViewVariables] public long ZLevelValidatedEnvironmentRevision = -1;
+
+    [ViewVariables] public NPCZLevelReplanReason LastZLevelReplanReason;
+
+    [ViewVariables] public NPCZLevelExecutionFailureReason LastZLevelExecutionFailureReason;
+
+    /// <summary>
+    /// Authoritative world floor of the final movement target.
+    /// </summary>
+    [ViewVariables] public int TargetWorldZ;
+
+    /// <summary>
+    /// Direct entity target whose world floor should be followed while it moves.
+    /// Grid-relative coordinate targets deliberately leave this unset.
+    /// </summary>
+    [ViewVariables] public EntityUid? ZLevelTrackedTarget;
+
+    /// <summary>
     /// End target that we're trying to move to.
     /// </summary>
     [ViewVariables(VVAccess.ReadWrite)] public EntityCoordinates Coordinates;
@@ -137,4 +178,29 @@ public enum SteeringStatus : byte
     /// Are we currently in range of our target.
     /// </summary>
     InRange,
+}
+
+public enum NPCZLevelReplanReason : byte
+{
+    None,
+    TargetFloorChanged,
+    TargetMapChanged,
+    TargetMoved,
+    RouteInvalid,
+    UnexpectedFloor,
+    LocalPathInvalid,
+    TraversalUnavailable,
+}
+
+public enum NPCZLevelExecutionFailureReason : byte
+{
+    None,
+    TargetDeleted,
+    CannotMove,
+    RoutePreparationFailed,
+    InvalidCoordinates,
+    MapMismatch,
+    ObstacleFailed,
+    Stuck,
+    ZeroMovement,
 }
