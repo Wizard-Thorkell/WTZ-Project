@@ -116,6 +116,18 @@ public sealed partial class CCVars
         CVarDef.Create("zlevel.sound_route_max_medium_samples", 4_096, CVar.SERVERONLY);
 
     /// <summary>
+    /// Maximum cross-floor audio/listener route checks performed for one session refresh.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundPlaybackMaxRouteChecksPerRefresh =
+        CVarDef.Create("zlevel.sound_playback_max_route_checks_per_refresh", 128, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum cross-floor audio presentations authorized for one session refresh.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundPlaybackMaxPresentationsPerRefresh =
+        CVarDef.Create("zlevel.sound_playback_max_presentations_per_refresh", 128, CVar.SERVERONLY);
+
+    /// <summary>
     /// Maximum native point-light tree entries inspected by vertical lighting per client frame.
     /// </summary>
     public static readonly CVarDef<int> ZLevelLightingMaxEmitterCandidatesPerFrame =

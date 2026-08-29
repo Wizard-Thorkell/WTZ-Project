@@ -36,12 +36,14 @@ public sealed class ZLevelPvsSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedZLevelVisibilitySystem _visibility = default!;
+    [Dependency] private readonly ZLevelSoundPlaybackSystem _soundPlayback = default!;
 
-    private readonly List<ViewerContext> _viewers = new();
+    private readonly List<ZLevelPvsViewerContext> _viewers = new();
     private readonly HashSet<EntityUid> _viewerCandidates = new();
     private readonly HashSet<EntityUid> _candidates = new();
     private readonly HashSet<EntityUid> _visible = new();
     private readonly HashSet<EntityUid> _culled = new();
+    private readonly HashSet<EntityUid> _soundCulled = new();
 
     private EntityQuery<EyeComponent> _eyeQuery;
     private EntityQuery<MetaDataComponent> _metaQuery;
@@ -89,9 +91,6 @@ public sealed class ZLevelPvsSystem : EntitySystem
     {
         base.Update(frameTime);
 
-        if (!_pvsEnabled)
-            return;
-
         _refreshAccumulator += frameTime;
         if (_refreshAccumulator < RefreshInterval)
             return;
@@ -111,7 +110,11 @@ public sealed class ZLevelPvsSystem : EntitySystem
         if (!_pvsEnabled || session.Status != SessionStatus.InGame)
         {
             _pvs.ClearSessionCulling(session);
-            return;
+            if (session.Status != SessionStatus.InGame)
+            {
+                _soundPlayback.ClearSession(session, session.Status != SessionStatus.Disconnected);
+                return;
+            }
         }
 
         var started = Stopwatch.GetTimestamp();
@@ -122,6 +125,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
         if (_viewers.Count == 0)
         {
             _pvs.ClearSessionCulling(session);
+            _soundPlayback.ClearSession(session);
             RecordRefresh(started, 0, false);
             return;
         }
@@ -146,6 +150,9 @@ public sealed class ZLevelPvsSystem : EntitySystem
                 }
 
                 _candidates.Add(candidate);
+                if (!_pvsEnabled)
+                    continue;
+
                 if (budgetExhausted || _visible.Contains(candidate))
                     continue;
 
@@ -164,17 +171,27 @@ public sealed class ZLevelPvsSystem : EntitySystem
             }
         }
 
+        _soundPlayback.RefreshSession(session, _viewers, _candidates, _visible, _soundCulled);
+
+        if (!_pvsEnabled)
+        {
+            _pvs.ClearSessionCulling(session);
+            return;
+        }
+
         if (budgetExhausted)
         {
             // A partial exclusion set could hide an entity visible from a viewer
-            // we did not evaluate. Preserve correctness by failing open for this refresh.
-            _pvs.ClearSessionCulling(session);
+            // we did not evaluate. Fail open for visuals while preserving the
+            // independently evaluated, fail-closed audio exclusions.
+            _pvs.ReplaceSessionCulling(session, _soundCulled);
             RecordRefresh(started, visibilityChecks, true);
             return;
         }
 
         _culled.UnionWith(_candidates);
         _culled.ExceptWith(_visible);
+        _culled.UnionWith(_soundCulled);
         _pvs.ReplaceSessionCulling(session, _culled);
         RecordRefresh(started, visibilityChecks, false);
     }
@@ -183,7 +200,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
     /// Lower-floor lights and occluders can affect an opening away from their own tile.
     /// Keep these bounded render inputs in PVS and let client projection clip the result.
     /// </summary>
-    private bool IsVerticalRenderDependencyVisible(EntityUid candidate, in ViewerContext viewer)
+    private bool IsVerticalRenderDependencyVisible(EntityUid candidate, in ZLevelPvsViewerContext viewer)
     {
         var isEnabledLight = _pointLightQuery.TryComp(candidate, out var light) && light.Enabled;
         var isEnabledOccluder = _occluderQuery.TryComp(candidate, out var occluder) && occluder.Enabled;
@@ -224,7 +241,21 @@ public sealed class ZLevelPvsSystem : EntitySystem
         var eye = _eyeQuery.CompOrNull(viewer);
         var worldPosition = _transform.GetWorldPosition(transform) + (eye?.Offset ?? Vector2.Zero);
         var zLevel = _transform.GetWorldZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
-        _viewers.Add(new ViewerContext(transform.MapID, worldPosition, zLevel, eye?.PvsScale ?? 1f));
+        var gridUid = transform.GridUid;
+        var localPosition = gridUid is { } grid
+            ? _transform.ToCoordinates(grid, new MapCoordinates(worldPosition, transform.MapID)).Position
+            : worldPosition;
+        var localZ = _transform.GetZLevel((viewer, transform, CompOrNull<ZLevelPositionComponent>(viewer)));
+        _viewers.Add(new ZLevelPvsViewerContext(
+            viewer,
+            transform.MapID,
+            gridUid,
+            worldPosition,
+            localPosition,
+            localZ,
+            zLevel,
+            eye?.PvsScale ?? 1f,
+            _viewers.Count == 0));
     }
 
     private void OnPvsEnabled(bool enabled)
@@ -257,10 +288,18 @@ public sealed class ZLevelPvsSystem : EntitySystem
             budgetExhausted,
             Stopwatch.GetTimestamp() - started);
     }
+}
 
-    private readonly record struct ViewerContext(
-        MapId MapId,
-        Vector2 WorldPosition,
-        int ZLevel,
-        float PvsScale);
+public readonly record struct ZLevelPvsViewerContext(
+    EntityUid Viewer,
+    MapId MapId,
+    EntityUid? GridUid,
+    Vector2 WorldPosition,
+    Vector2 LocalPosition,
+    int LocalZ,
+    int WorldZ,
+    float PvsScale,
+    bool Primary)
+{
+    public int ZLevel => WorldZ;
 }

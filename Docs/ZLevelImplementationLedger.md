@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/sound-routing`.
-- Active package: `P4.3 listener authorization, apparent direction, diagnostics, and hardening`.
+- Active branch: `zlevel/sound-playback`.
+- Active package: `P4.3c client presentation, diagnostics, and hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -44,7 +44,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
-| P4 | Vertical sound propagation through cached portals | In progress (P4.1-P4.2 complete) |
+| P4 | Vertical sound propagation through cached portals | In progress (P4.1-P4.3b complete) |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
@@ -56,7 +56,9 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P4.1 | Shared vertical sound portal contract, bounded cache, and metrics | Complete |
 | P4.2 | Bounded multi-portal routes, transmission, and attenuation | Complete |
-| P4.3 | Listener authorization, apparent direction, diagnostics, and hardening | Pending |
+| P4.3a | Positional audio post-processing hook | Complete |
+| P4.3b | Bounded server authorization and per-session snapshots | Complete |
+| P4.3c | Client presentation, diagnostics, and hardening | Pending |
 
 ## Phase P0 Packages
 
@@ -4112,6 +4114,120 @@ allocation is inside Robust physics enumeration.
 - Next package: P4.3b adds bounded server authorization and per-session acoustic
   presentation snapshots integrated with Z-level PVS.
 
+## Completed Package: P4.3b Bounded Server Sound Authorization
+
+### Scope
+
+- Add a server-authoritative playback coordinator that evaluates existing
+  positional `AudioComponent` entities against every exact session viewer.
+- Preserve native same-floor/global playback while requiring a pressure-aware,
+  same-grid P4.2 route for every cross-floor presentation.
+- Publish changed-only replacement snapshots containing the listener-side
+  portal, geometric route distance, and transmission needed by P4.3c.
+- Integrate denied cross-floor audio with PVS without changing the established
+  visual fail-open policy, and centralize Robust's existing recipient filter so
+  Content authorization cannot disagree with replication.
+
+### Acceptance Criteria
+
+- One logical emission keeps one audio entity and one playback timeline; no
+  per-floor or per-listener audio entity is spawned.
+- Candidate and viewer iteration is deterministic. Exact viewers, native
+  included/excluded recipient filters, pressure, range, grid, and route budgets
+  are all server-authoritative.
+- Same-floor audio remains native even in vacuum. Cross-floor audio fails closed
+  for vacuum, sealed boundaries, incompatible grids, exhausted budgets, and
+  missing exact viewers.
+- Successful authorization makes only the required transform parent chain
+  visible. Denied audio remains culled even when visual PVS work fails open.
+- Snapshot replacement, unchanged-snapshot suppression, empty clearing, and
+  session disconnect cleanup cannot retain stale authorization.
+- The warmed P0 stress baseline gains no allocation or cache-miss regression.
+
+### Evidence
+
+- Focused `ZLevelSoundPlaybackTest` passes 3/3 with real server atmosphere,
+  looping positional audio, server/client replication, parent-chain PVS, route
+  revocation, same-floor fallback, both aggregate budget clamps, and visual-PVS
+  exhaustion.
+- The combined P4.1-P4.3b `FullyQualifiedName~ZLevelSound` matrix passes 11/11
+  with no failures or skips; the complete Content Z-level integration filter
+  passes 240/240 and the Content unit/analyzer filter passes 5/5.
+- Robust's focused recipient-filter test passes 1/1. The complete shared unit
+  suite passes 447/447 and shared integration suite passes 1,026/1,026 without
+  skips.
+- The 3-, 6-, and 10-floor baselines pass 3/3 at the unchanged 6,336 measured
+  bytes, zero warmed boundary/gravity misses, zero PVS budget exhaustions, and
+  6.748, 13.118, and 20.628 ms respectively.
+- A clean `SpaceStation14.slnx` build succeeds with zero errors and 700
+  established warnings.
+
+### Decisions
+
+- Authorize the existing PVS audio entity instead of spawning relay entities.
+  Playback identity, seek position, lifetime, and native same-floor behavior
+  therefore remain owned by Robust.
+- Send complete changed-only snapshots rather than incremental grants. This
+  makes revocation and out-of-order entity arrival simple for P4.3c and bounds
+  retained state to the latest refresh.
+- Record the final listener-side portal, total geometric distance, and route
+  transmission. The client receives presentation data, not authority to solve
+  current atmosphere or topology itself.
+- Keep aggregate route and presentation budgets independent of each P4.2 route
+  budget. Exhaustion rejects remaining cross-floor work while retaining only
+  the exact audio/viewer pairs whose routes already succeeded in that refresh.
+- Preserve audio culling when visual PVS exhausts its budget. When engine PVS is
+  disabled, P4.3c must still mute any cross-floor stream lacking exact
+  authorization because server culling is intentionally unavailable there.
+- Centralize recipient filtering in WTZ Engine as a behavior-preserving helper;
+  the original replication event now calls the same API as Content authorization.
+
+### Completion Gate
+
+- [x] Scope check: the parent diff is limited to sound authorization, PVS
+      integration, contracts/CVars, focused integration coverage, docs, and the
+      paired engine dependency.
+- [x] Invariant review: Z 0/same-floor compatibility, world/local frames,
+      moving grids, exact viewers, server authority, pressure, parent chains,
+      single-emission identity, and Sound boundary channels were reviewed.
+- [x] Automated verification: 3/3 focused playback, 11/11 combined sound,
+      240/240 Content integration, 5/5 Content unit/analyzer, 447/447 and
+      1,026/1,026 engine shared suites, 3/3 baselines, and a zero-error clean
+      solution build pass.
+- [x] Performance evidence: deterministic aggregate budgets have hard clamps;
+      warmed stress baselines retain 6,336 bytes and zero relevant cache misses.
+- [x] Documentation: ownership, payload, budgets, lifecycle, intermediate
+      client limitation, test evidence, and P4.3c obligations are recorded here
+      and in `Docs/ZLevelSound.md`.
+- [x] Dependency check: WTZ Engine branch `zlevel/sound-playback` is committed
+      and pushed at `87e2732606b5df3f1c035d0089d053cdf333eb77`.
+- [x] Git check: engine and parent diffs pass `git diff --check`; generated
+      output remains ignored and no unrelated change is included.
+- [x] Mini review: no server-side blocker remains; client worker-thread state,
+      safety mute, direction, attenuation, and diagnostics are isolated to P4.3c.
+- [x] Commit: saved as paired engine `Centralize audio recipient filtering` and
+      parent `Authorize routed vertical sound per session` commits on the WTZ
+      sound-playback branches.
+
+### Mini Review
+
+- Finding: P4.3b now answers the security question independently of client
+  presentation: exactly which audio/viewer pair may cross a vertical boundary.
+- Finding: the single native audio entity remains authoritative and is exposed
+  only after a bounded route succeeds; successful visual fallback cannot expose
+  denied cross-floor audio while Z-level PVS is active.
+- Finding: replacement snapshots are stable and suppress duplicate network
+  events, while vacuum, movement to the same floor, or disconnect clears stale
+  grants.
+- Residual risk: an authorized P4.3b stream still uses native XY presentation
+  until P4.3c consumes the portal/distance/transmission snapshot.
+- Residual risk: the engine callback runs on audio worker threads, and engine-PVS
+  disablement removes server culling. P4.3c must atomically publish immutable
+  state and fail closed without an exact authorization.
+- Next package: P4.3c adds client-side apparent portal direction, route
+  attenuation, safety muting, metrics/debug diagnostics, and end-to-end
+  lifecycle/threading coverage.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4151,3 +4267,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P4.1 | `Cache bounded vertical sound portals` | 4 focused, 233 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
 | 2026-08-28 | P4.2 | `Route vertical sound through bounded portals` | 4 route, 8 sound, 237 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
 | 2026-08-28 | P4.3a | `Expose positional audio post-processing` / `Track positional audio post-processing support` | 1 focused engine, 138 engine client integration, 37 engine client unit, client build, diff review | Complete |
+| 2026-08-29 | P4.3b | `Centralize audio recipient filtering` / `Authorize routed vertical sound per session` | 3 playback, 11 sound, 240 Content integration, 5 Content unit/analyzer, 447/1,026 engine shared, 3 baseline, clean build, allocation/diff review | Complete |
