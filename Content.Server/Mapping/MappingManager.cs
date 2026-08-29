@@ -3,7 +3,6 @@ using Content.Server.Administration.Managers;
 using Content.Shared.Administration;
 using Content.Shared.Mapping;
 using Robust.Server.Player;
-using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.Network;
 using Robust.Shared.Serialization;
 using Robust.Shared.Utility;
@@ -52,8 +51,14 @@ public sealed class MappingManager : IPostInjectInit
                 return;
             }
 
-            var sys = _systems.GetEntitySystem<MapLoaderSystem>();
-            var data = sys.SerializeEntitiesRecursive([mapUid]).Node;
+            var snapshots = _systems.GetEntitySystem<MappingSnapshotSystem>();
+            if (!snapshots.TryCreateMapSnapshot(mapUid, out var data, out var report, out var error))
+                throw new InvalidOperationException(error);
+
+            _sawmill.Info(
+                $"Created mapping snapshot for {mapUid}; excluded {report.ExcludedRoots} transient roots " +
+                $"(players={report.PlayerRoots}, minds={report.MindRoots}, explicit={report.ExplicitTransientRoots}) " +
+                $"and {report.TransientComponents} transient components.");
             var document = new YamlDocument(data.ToYaml());
             var stream = new YamlStream { document };
             var writer = new StringWriter();

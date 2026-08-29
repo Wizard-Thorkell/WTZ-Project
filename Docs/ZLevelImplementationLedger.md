@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/pathfinding`.
-- Active package: `P6.1 initialized mapping snapshot contract and transient-state filtering`.
+- Active branch: `zlevel/save-load`.
+- Active package: `P6.2 atomic save/validate/replace and internal-reference fidelity`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.1 active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2 active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -76,8 +76,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P6.1 | Initialized mapping snapshot contract and transient-state filtering | Active |
-| P6.2 | Atomic save/validate/replace and internal-reference fidelity | Pending |
+| P6.1 | Initialized mapping snapshot contract and transient-state filtering | Complete |
+| P6.2 | Atomic save/validate/replace and internal-reference fidelity | Active |
 | P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Phase P0 Packages
@@ -5148,6 +5148,128 @@ allocation is inside Robust physics enumeration.
   mapping snapshot boundary, and excludes players, minds, sessions, and other
   transient round state before any atomic replacement workflow is added.
 
+## Completed Package: P6.1 Initialized Mapping Snapshots
+
+### Scope
+
+- Add operation-local entity and component filters to WTZ Engine map
+  serialization without changing ordinary save behavior.
+- Create a read-only mapping snapshot of a map after map initialization while
+  excluding players, active minds, explicitly marked runtime roots, their
+  descendants, and runtime follower relationships.
+- Validate only authored entities that the snapshot will retain, then route the
+  mapper's manual save request through the detached snapshot representation.
+- Prove that native Z-level tiles, format metadata, anchored infrastructure, and
+  map-init lifecycle survive an in-memory load without replacing or mutating the
+  source map.
+
+### Acceptance Criteria
+
+- A snapshot can serialize an initialized native Z-level map without the
+  pre-init warning path or a serialization-time mutation of live entities.
+- Players, active mind bodies, mind entities, explicit transient roots, and all
+  descendants of excluded roots cannot be serialized or auto-included by a
+  surviving reference.
+- A filtered component inherited from an entity prototype stays absent after
+  load, while an ordinary save immediately after the filtered operation remains
+  unchanged and raises normal lifecycle events.
+- Z-level validation ignores filtered transient roots, including their invalid
+  runtime floor values, but still rejects retained infrastructure outside the
+  declared map range.
+- The loaded snapshot has no nullspace additions or invalid-UID diagnostics and
+  preserves the map's configured floors, native tiles, anchored entity Z, and
+  `MapInitialized` lifecycle.
+
+### Verification Evidence
+
+- Focused WTZ Engine filtering passes 1/1. It covers subtree exclusion,
+  filtered-reference non-inclusion, prototype-component removal, lifecycle-event
+  suppression, and a following ordinary save with no option leakage.
+- The complete WTZ Engine `EntitySerialization` matrix passes 19/19.
+- Focused initialized-map snapshot coverage passes 1/1, and the combined map
+  format, mapping, and snapshot matrix passes 8/8.
+- The complete Content Z-level integration matrix passes 275/275 and the Content
+  unit/analyzer matrix passes 9/9, all without failures or skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
+  100% warmed boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 6.7769, 12.9018, and 21.7117
+  ms respectively.
+- A complete `SpaceStation14.slnx` build succeeds with zero errors. Its 708
+  warnings are the checkout's established dependency, vulnerability, analyzer,
+  and upstream obsolescence warnings; none identifies this package.
+
+### Decisions
+
+- Keep serializer filters in `SerializationOptions`, making them deterministic,
+  operation-local policy supplied by the caller rather than global serializer
+  state. Rejected references become invalid and cannot trigger auto-inclusion.
+- Record filtered prototype components in `missingComponents`; omitting only
+  their serialized data would otherwise restore them from the prototype on load.
+- Use an explicit `SuppressMapSerializationEvents` flag whose zero/default value
+  preserves legacy events. The WTZ snapshot suppresses them because current
+  follower and device-network handlers can mutate live gameplay state.
+- Make `MappingSnapshotTransientComponent` an unsaved marker on the root of a
+  runtime-only subtree. Actor, active `MindContainer`, and `Mind` roots are
+  recognized automatically, and ancestor traversal applies the same decision to
+  their children and references.
+- Keep validation and serialization on one inclusion policy. Tile layers remain
+  map-owned and are always validated; only entity validation is filtered.
+- Treat this as a detached representation, not a live-round save. Players,
+  sessions, minds, active follower state, and other explicitly marked runtime
+  state are intentionally outside the mapper-authored file contract.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to operation-local engine filtering,
+      initialized mapping snapshots, transient markers, Z-aware validation,
+      mapper integration, focused tests, and P6 documentation.
+- [x] Invariant review: Z 0 compatibility, native tiles, local entity Z, map
+      lifecycle, anchored infrastructure, server-side filtering, and live-source
+      immutability were exercised; moving-frame persistence retains its existing
+      map-format path and receives broader fidelity coverage in P6.2.
+- [x] Automated verification: 1/1 focused engine, 19/19 engine serialization,
+      1/1 focused snapshot, 8/8 mapping, 275/275 Content integration, 9/9 Content
+      unit/analyzer, 3/3 baselines, and a zero-error full build pass.
+- [x] Performance evidence: snapshot creation is an explicit mapper command, not
+      a tick/frame path; gameplay stress allocation remains 6,336 bytes with
+      fully warm boundary/gravity caches at all three fixture depths.
+- [x] Documentation: the contract, filters, invariants, tests, limitations, and
+      next package are recorded here and in `Docs/ZLevelMapSaveLoad.md`.
+- [x] Dependency check: WTZ Engine revision
+      `f2ae5853f6ebbebe158951d90686d2d67e243537` is pushed on
+      `zlevel/save-load`; the parent commit carries that exact submodule pointer.
+- [x] Git check: `git diff --check` passes with only expected Windows line-ending
+      notices; generated baselines remain ignored and both diffs contain only
+      declared P6.1 files.
+- [x] Mini review: the snapshot boundary and default-compatible engine API have
+      no blocking focused or broad regression; atomic output and collection
+      reference normalization remain explicitly assigned to P6.2.
+- [x] Commit: the isolated engine and parent commits are prepared for the pushed
+      `zlevel/save-load` branches.
+
+### Mini Review
+
+- Finding: snapshot creation no longer needs destructive save hooks; the test
+  proves active follower state and every excluded live entity remain untouched.
+- Finding: entity exclusion is subtree-aware and shared with Z validation, so
+  transient child state cannot either leak into output or falsely reject a map.
+- Finding: ordinary serializer calls keep events, components, referenced
+  nullspace entities, and descendants, proving all new controls are local to one
+  operation and default-compatible.
+- Finding: map metadata, native floor layers, anchored upper-floor infrastructure,
+  and post-init lifecycle survive the first detached load with no nullspace leak.
+- Residual risk: `DeviceListComponent` and similar persistent collections can
+  still contain deleted, filtered, or cross-map references that must be
+  normalized in the detached representation without modifying live components.
+- Residual risk: the client mapping writer still writes directly to the selected
+  stream, initialized-map autosave remains disabled, and one load is not the
+  required double round-trip structural proof.
+- Residual risk: initialized-map Z-level editing operations remain intentionally
+  blocked while save validation and replacement are not yet atomic.
+- Next package: P6.2 validates the completed detached representation, normalizes
+  internal references, and introduces temporary-file plus atomic-replace output
+  before initialized mapping workflows are broadened.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -5196,3 +5318,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.4a | `Execute hierarchical Z-level NPC routes` | 18 focused, 263 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/timing/diff review | Complete |
 | 2026-08-29 | P5.4b1 | `Model dynamic Z-level traversal state` | 5 dynamic, 36 movement/pathfinding, 269 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/allocation/diff review | Complete |
 | 2026-08-29 | P5.4b2 | `Harden hierarchical Z-level pathfinding` | 11 focused, 40 movement/pathfinding, 274 Content integration, 9 Content unit/analyzer, 3 baseline, full build, 8-NPC/512-mutation/cache/diff review | Complete |
+| 2026-08-29 | P6.1 | `Allow read-only filtered entity snapshots` / `Filter initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 8 mapping, 275 Content integration, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |

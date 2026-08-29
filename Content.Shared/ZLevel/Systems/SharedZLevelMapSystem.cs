@@ -86,7 +86,14 @@ public sealed class SharedZLevelMapSystem : EntitySystem
         RaiseLocalEvent(mapUid, ref ev, true);
     }
 
-    public bool TryValidate(EntityUid mapUid, out string error)
+    /// <summary>
+    /// Validates the authored Z-level state that would be included by a serialization operation.
+    /// </summary>
+    /// <param name="includeEntity">
+    /// Optional operation-local predicate used when the caller intentionally excludes runtime entities.
+    /// Tile layers are always validated because they are map-owned state.
+    /// </param>
+    public bool TryValidate(EntityUid mapUid, out string error, Func<EntityUid, bool>? includeEntity = null)
     {
         error = string.Empty;
         if (!TryComp<MapComponent>(mapUid, out var mapComponent))
@@ -105,6 +112,7 @@ public sealed class SharedZLevelMapSystem : EntitySystem
             .Where(entry => TryComp(entry.Uid, out TransformComponent? transform) &&
                             transform.MapUid == mapUid &&
                             !HasComp<ActorComponent>(entry.Uid) &&
+                            (includeEntity == null || includeEntity(entry.Uid)) &&
                             MetaData(entry.Uid).EntityPrototype?.MapSavable != false)
             .Select(entry => (entry.Uid, Level: _transform.GetZLevel((
                 entry.Uid,
