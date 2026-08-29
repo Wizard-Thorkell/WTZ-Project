@@ -1,10 +1,11 @@
 # WTZ Vertical Sound
 
 This document defines the vertical sound foundation delivered by roadmap
-packages P4.1 and P4.2. P4.1 owns bounded portal discovery and caching. P4.2
-adds authoritative route selection, transmission, pressure, and vacuum policy.
-Listener authorization, apparent direction, diagnostics, and actual cross-floor
-playback remain P4.3.
+packages P4.1 through P4.3a. P4.1 owns bounded portal discovery and caching.
+P4.2 adds authoritative route selection, transmission, pressure, and vacuum
+policy. P4.3a adds the narrow WTZ Engine extension needed to adjust an existing
+positional stream after native processing. Listener authorization, apparent
+direction, diagnostics, and actual cross-floor playback remain P4.3b/P4.3c.
 
 ## Ownership
 
@@ -181,12 +182,18 @@ overlay and administrative diagnostics beside listener and playback metrics.
 
 ## Current Audio Boundary
 
-P4.2 does not make sound newly audible across floors. Robust still creates one
+P4.3a does not make sound newly audible across floors. Robust still creates one
 `AudioComponent` for a PVS sound and preserves its playback identity and time.
 The existing Z-level PVS policy can hide that entity from other floors, and the
 client still spatializes ordinary audio in XY only.
 
-P4.3 must preserve one logical emission while adding server authorization for
+WTZ Engine now exposes `AudioSystem.StreamProcessed` after its default
+positional path, including native early-mute paths. The callback runs in the
+parallel audio update, accepts one subscriber, and can adjust the already
+initialized source without replacing startup, map checks, distance checks, or
+entity tracking. With no subscriber, native behavior is unchanged.
+
+P4.3b/P4.3c must preserve one logical emission while adding server authorization for
 sessions reached by a successful route, an apparent client source at the
 selected portal path, directional presentation without duplicate playback
 entities, diagnostics, and lifecycle cleanup.
@@ -220,8 +227,8 @@ queries on the test machine.
 
 ## Deliberate Limits
 
-- No sound is newly audible across floors until P4.3 integrates listeners, PVS,
-  apparent direction, stream presentation, and emission lifecycle.
+- No sound is newly audible across floors until P4.3b/P4.3c integrate listeners,
+  PVS, apparent direction, stream presentation, and emission lifecycle.
 - Vertical routes currently require one shared grid frame. Cross-grid sound is
   explicitly rejected until a physical docking/portal contract exists.
 - Per-floor segments use Euclidean distance; P4.2 does not invent room-scale

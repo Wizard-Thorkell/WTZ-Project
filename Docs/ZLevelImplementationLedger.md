@@ -4039,6 +4039,79 @@ allocation is inside Robust physics enumeration.
   authorization, apparent direction, PVS-safe lifecycle, debug/admin metrics,
   and end-to-end sealed/vacuum/moving-grid tests.
 
+## Completed Package: P4.3a Positional Audio Post-Processing Hook
+
+### Scope
+
+- Add one client-side WTZ Engine callback after native positional stream
+  processing without replacing Robust audio startup, tracking, map, range, or
+  occlusion behavior.
+- Invoke the callback after native early-mute paths so authorized vertical audio
+  can be restored by later Content policy while unauthorized audio stays muted.
+- Cover the real parallel `FrameUpdate` path with a headless integration test.
+
+### Acceptance Criteria
+
+- With no subscriber, the original positional audio path and all return
+  conditions remain behaviorally unchanged.
+- One subscriber receives the initialized `AudioComponent` after default
+  processing, including a stream muted because its map differs from the eye.
+- The extension does not create, replace, restart, or duplicate an audio source.
+
+### Evidence
+
+- Focused `AudioStreamPostProcessingTest` passes 1/1 and proves callback order
+  after a default early mute using the real parallel client audio update.
+- The complete Robust client integration suite passes 138/138 with no skips;
+  the complete Robust client unit suite passes 37/37.
+- `dotnet build Robust.Client/Robust.Client.csproj --no-restore -m:1` succeeds
+  with zero errors and 76 established warnings.
+- The parent `Content.Client` project builds against the pinned engine commit
+  with zero errors and 452 established warnings.
+
+### Decisions
+
+- Expose a post-processing callback rather than copying Robust's private stream
+  algorithm into Content. Native behavior remains the single implementation.
+- Keep the callback client-only and mutation-oriented: P4.3b owns authoritative
+  per-session routes, while P4.3c will only apply received presentation data.
+- Retain the existing single-subscriber rule and parallel execution contract of
+  `ProcessStreamOverride`; subscribers must use thread-safe immutable state.
+
+### Completion Gate
+
+- [x] Scope check: one engine audio method was split without logic changes, one
+      public callback was added, and one focused engine test was introduced.
+- [x] Invariant review: startup, source identity, native map/range behavior,
+      callback ordering, early mute, and the no-subscriber path were reviewed.
+- [x] Automated verification: 1/1 focused, 138/138 client integration, 37/37
+      client unit, and a zero-error Robust.Client build pass without skips.
+- [x] Documentation: ownership, parallel/single-subscriber contract, current
+      boundary, evidence, and residual work are recorded here and in
+      `Docs/ZLevelSound.md`.
+- [x] Dependency check: WTZ Engine branch `zlevel/sound-playback` is committed
+      and pushed at `3794b33b6c0e9fa5bca7feeaba5edfcd11f0ddfb`.
+- [x] Git check: engine and parent diffs pass `git diff --check`; generated test
+      output remains ignored and the dependency pointer is the only engine link.
+- [x] Mini review: no blocking finding remains; no Content system subscribes to
+      the callback before server authorization and client policy are ready.
+- [x] Commit: prepared as paired engine `Expose positional audio
+      post-processing` and parent dependency/ledger commits.
+
+### Mini Review
+
+- Finding: the hook runs after default processing and can therefore adjust a
+  muted stream without reimplementing native lifecycle or creating another one.
+- Finding: existing audio remains byte-for-byte on the native path when there is
+  no subscriber, and the full client suites retain their prior behavior.
+- Residual risk: the callback executes on audio worker threads; P4.3c must swap
+  immutable presentation snapshots and avoid entity-manager mutation there.
+- Residual risk: cross-floor audio is still intentionally silent. Authorization,
+  PVS parent-chain handling, snapshot lifecycle, direction, and attenuation are
+  P4.3b/P4.3c.
+- Next package: P4.3b adds bounded server authorization and per-session acoustic
+  presentation snapshots integrated with Z-level PVS.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4077,3 +4150,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3 gate | `Close the P3 lighting and FOV phase gate` | 229 Content, 37/137 engine client, 4 serialization, 13 map/replication, 3 baseline, 19 real GL, architecture review | Complete |
 | 2026-08-28 | P4.1 | `Cache bounded vertical sound portals` | 4 focused, 233 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
 | 2026-08-28 | P4.2 | `Route vertical sound through bounded portals` | 4 route, 8 sound, 237 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
+| 2026-08-28 | P4.3a | `Expose positional audio post-processing` / `Track positional audio post-processing support` | 1 focused engine, 138 engine client integration, 37 engine client unit, client build, diff review | Complete |
