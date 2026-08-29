@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using Content.Shared.Follower.Components;
 using Content.Shared.Mapping;
 using Content.Shared.Mind;
@@ -102,12 +103,23 @@ public sealed class MappingSnapshotSystem : EntitySystem
                 return false;
             }
 
-            snapshot = result.Node;
+            if (!TryNormalizeAndValidateSnapshot(
+                    result.Node,
+                    out snapshot,
+                    out var normalizedReferences,
+                    out var validatedEntities,
+                    out error))
+            {
+                return false;
+            }
+
             report = new MappingSnapshotReport(
                 playerRoots,
                 mindRoots,
                 explicitTransientRoots,
-                excludedComponents.Count);
+                excludedComponents.Count,
+                normalizedReferences,
+                validatedEntities);
             return true;
         }
         catch (Exception exception)
@@ -116,6 +128,145 @@ public sealed class MappingSnapshotSystem : EntitySystem
             error = exception.Message;
             return false;
         }
+    }
+
+    private bool TryNormalizeAndValidateSnapshot(
+        MappingDataNode rawSnapshot,
+        [NotNullWhen(true)] out MappingDataNode? snapshot,
+        out int normalizedReferences,
+        out int validatedEntities,
+        out string error)
+    {
+        snapshot = null;
+        normalizedReferences = 0;
+        validatedEntities = 0;
+        error = string.Empty;
+
+        LoadResult? normalization = null;
+        try
+        {
+            if (!TryLoadDetachedSnapshot(rawSnapshot, "raw mapping snapshot", out normalization))
+            {
+                error = "The raw mapping snapshot could not be loaded for detached normalization.";
+                return false;
+            }
+
+            if (!TryValidateLoadedSnapshot(normalization, requireValidReferences: false, out var mapUid, out error))
+                return false;
+
+            normalizedReferences = normalization.InvalidEntityReferences.Count;
+            var options = CreateDetachedSerializationOptions(mapUid);
+            var normalized = _mapLoader.SerializeEntitiesRecursive([mapUid], options);
+            if (normalized.Category != FileCategory.Map)
+            {
+                error = $"Detached normalization produced unexpected category {normalized.Category}.";
+                return false;
+            }
+
+            snapshot = normalized.Node;
+        }
+        finally
+        {
+            if (normalization != null)
+                _mapLoader.Delete(normalization);
+        }
+
+        LoadResult? validation = null;
+        try
+        {
+            if (!TryLoadDetachedSnapshot(snapshot, "normalized mapping snapshot", out validation))
+            {
+                error = "The normalized mapping snapshot could not be loaded for final validation.";
+                snapshot = null;
+                return false;
+            }
+
+            if (!TryValidateLoadedSnapshot(validation, requireValidReferences: true, out _, out error))
+            {
+                snapshot = null;
+                return false;
+            }
+
+            validatedEntities = validation.Entities.Count;
+            return true;
+        }
+        finally
+        {
+            if (validation != null)
+                _mapLoader.Delete(validation);
+        }
+    }
+
+    private bool TryLoadDetachedSnapshot(
+        MappingDataNode snapshot,
+        string source,
+        [NotNullWhen(true)] out LoadResult? result)
+    {
+        var options = MapLoadOptions.Default;
+        options.ExpectedCategory = FileCategory.Map;
+        options.DeserializationOptions.PauseMaps = true;
+        options.DeserializationOptions.LogInvalidEntities = false;
+        // EntityDeserializer consumes component mappings while reading them.
+        // Keep the snapshot reusable for validation, transfer, and later loads.
+        return _mapLoader.TryLoadGeneric(snapshot.Copy(), source, out result, options);
+    }
+
+    private bool TryValidateLoadedSnapshot(
+        LoadResult result,
+        bool requireValidReferences,
+        out EntityUid mapUid,
+        out string error)
+    {
+        mapUid = EntityUid.Invalid;
+        error = string.Empty;
+
+        if (result.Category != FileCategory.Map)
+        {
+            error = $"Snapshot load produced unexpected category {result.Category}.";
+            return false;
+        }
+
+        if (result.Maps.Count != 1)
+        {
+            error = $"A mapping snapshot must contain exactly one map; found {result.Maps.Count}.";
+            return false;
+        }
+
+        if (result.Orphans.Count != 0 || result.NullspaceEntities.Count != 0)
+        {
+            error = "A mapping snapshot may not contain orphaned or nullspace entities " +
+                    $"(orphans={result.Orphans.Count}, nullspace={result.NullspaceEntities.Count}).";
+            return false;
+        }
+
+        if (requireValidReferences && result.InvalidEntityReferences.Count != 0)
+        {
+            var invalid = result.InvalidEntityReferences[0];
+            error = $"The normalized mapping snapshot contains {result.InvalidEntityReferences.Count} invalid " +
+                    $"entity reference(s); first source YAML UID={invalid.SourceYamlUid?.ToString() ?? "unknown"}, " +
+                    $"component={invalid.Component ?? "unknown"}, value='{invalid.SerializedValue}'.";
+            return false;
+        }
+
+        mapUid = result.Maps.Single().Owner;
+        if (_zLevelMaps.TryValidate(mapUid, out var zLevelError))
+            return true;
+
+        error = $"Loaded mapping snapshot has invalid Z-level state: {zLevelError}";
+        return false;
+    }
+
+    private SerializationOptions CreateDetachedSerializationOptions(EntityUid mapUid)
+    {
+        return SerializationOptions.Default with
+        {
+            Category = FileCategory.Map,
+            ExpectPreInit = false,
+            MissingEntityBehaviour = MissingEntityBehaviour.Ignore,
+            EntityFilter = entity => IsPersistentSnapshotEntity(entity.Owner, mapUid),
+            ComponentFilter = (_, component) =>
+                component is not FollowerComponent && component is not FollowedComponent,
+        };
     }
 
     private bool IsPersistentSnapshotEntity(EntityUid uid, EntityUid mapUid)
@@ -138,7 +289,7 @@ public sealed class MappingSnapshotSystem : EntitySystem
                 return reason;
             }
 
-            if (!TryComp<TransformComponent>(uid, out var transform))
+            if (!TryComp(uid, out TransformComponent? transform))
                 break;
 
             uid = transform.ParentUid;
@@ -177,7 +328,9 @@ public readonly record struct MappingSnapshotReport(
     int PlayerRoots,
     int MindRoots,
     int ExplicitTransientRoots,
-    int TransientComponents)
+    int TransientComponents,
+    int NormalizedReferences,
+    int ValidatedEntities)
 {
     public int ExcludedRoots => PlayerRoots + MindRoots + ExplicitTransientRoots;
 }

@@ -10,7 +10,9 @@ sessions, and transient round state do not.
 | Package | Capability | Status |
 | --- | --- | --- |
 | P6.1 | Read-only initialized-map snapshot and transient filtering | Complete |
-| P6.2 | Representation validation, reference fidelity, and atomic output | Active |
+| P6.2a | Structured reference diagnostics and detached normalization | Complete |
+| P6.2b | Correlated request/response and validation before transfer | Active |
+| P6.2c | UTF-8 temporary output and atomic destination replacement | Pending |
 | P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Snapshot Flow
@@ -22,14 +24,26 @@ map:
 1. Confirm that the requested root is a map.
 2. Validate native tile layers and every persistent entity against the declared
    `ZLevelMapComponent` range.
-3. Serialize the initialized map into a detached `MappingDataNode` with map-init
-   state enabled and operation-local filters.
-4. Return an exclusion report to the mapper server, which logs the number of
-   player, mind, explicit transient, and transient-component removals.
-5. Format and send the YAML to the authorized mapping client.
+3. Serialize the initialized map into a raw `MappingDataNode` with map-init
+   state enabled, operation-local filters, and live save hooks suppressed.
+4. Load a deep copy into a paused disposable map. Unresolved references are
+   collected as structured diagnostics without emitting expected error logs.
+5. Serialize that disposable map with ordinary before/after save hooks enabled,
+   allowing legacy collection cleanup to mutate only the disposable copy.
+6. Load another deep copy and require exactly one map, no orphan/nullspace
+   entities, no unresolved entity references, and valid authored Z-level state.
+7. Delete both temporary loads in `finally` blocks and return the untouched,
+   reusable normalized node.
+8. Return a report containing transient exclusions, normalized-reference count,
+   and final validated-entity count before formatting the YAML.
 
 The source map remains live and unchanged. Loading the returned node creates a
 new initialized map; it does not replace the source map.
+
+`MappingDataNode` must be copied for every validation load. Robust's entity
+deserializer consumes component mappings while reading them, so validating the
+same node instance directly would corrupt the representation later transferred
+to the mapper.
 
 ## Persistent Boundary
 
@@ -73,6 +87,17 @@ Filters can be evaluated more than once and must be deterministic. They cannot
 override a prototype whose map-save behavior is disabled, and callers remain
 responsible for preserving structural components such as transforms.
 
+WTZ Engine also records every unresolved serialized `EntityUid`/`NetEntity` in
+`LoadResult.InvalidEntityReferences`, including source YAML UID, component name,
+and serialized value. `DeserializationOptions.LogInvalidEntities = false` now
+suppresses both explicit-invalid and unknown-YAML-UID logs while retaining these
+diagnostics for programmatic validation.
+
+Invalid references are not silently accepted. Existing save hooks may normalize
+collections such as `DeviceListComponent` on the disposable map. Any scalar or
+collection reference that remains invalid after that pass rejects the snapshot
+and identifies its first source component in the returned error.
+
 ## Z-Level Invariants
 
 Tile layers are map-owned and are always validated. The optional entity
@@ -93,16 +118,17 @@ The P6.1 integration fixture proves the following properties:
 
 ## Current Limitations
 
-P6.1 does not claim atomic file persistence or live-round restoration.
+P6.2a does not claim atomic file persistence or live-round restoration.
 
-- The mapping client still writes YAML directly to its selected stream. P6.2
-  will write a temporary file, validate it, flush it, and replace the destination
-  only after success.
-- Persistent collections such as device lists can contain deleted, filtered, or
-  cross-map entity references. P6.2 will normalize and validate these references
-  in the detached representation without mutating live components.
+- The mapping request has no correlation identifier, timeout, or guaranteed
+  server response. P6.2b will permit one explicit pending operation, correlate
+  every response, and finish validation before opening a destination dialog.
+- The mapping client still writes YAML directly to its selected stream. P6.2c
+  will encode UTF-8 to a same-directory temporary file, flush it, and replace the
+  destination only after a successful write.
 - Mapping autosave and Z-level create/copy/delete operations still reject
-  initialized maps. They stay restricted until atomic validation is available.
+  initialized maps. They stay restricted until the complete atomic workflow is
+  available.
 - A single in-memory load proves the P6.1 contract but not idempotence. P6.3
   requires two save/load cycles and structural comparisons of maps, grids,
   entities, pipes, cables, boundaries, frames, and references.
@@ -111,8 +137,13 @@ P6.1 does not claim atomic file persistence or live-round restoration.
 
 ## Verification
 
-P6.1 closes with 19 WTZ Engine entity-serialization tests, 8 mapping/format
-tests, 275 Content Z-level integration tests, 9 Content unit/analyzer tests, and
-3 generated stress baselines passing. The full solution builds with zero errors.
-The measured 3-, 6-, and 10-floor baselines retain 6,336 bytes per measured run,
-100% warm boundary/gravity cache hits, and zero PVS budget exhaustion.
+P6.2a closes with 19/19 WTZ Engine entity-serialization tests, the focused
+snapshot test, 7/7 Z-level map-format/snapshot tests, 2/2 traditional mapping
+regressions, and 9/9 Content unit/analyzer tests passing. The broad 275-case
+Z-level run passed 274 and reported one harness skip; that cache case passed in
+the 259-case namespace run and again in a focused rerun. The full solution builds
+with zero errors and its established 708-warning baseline.
+
+The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
+100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+fail-open candidates. Measured local times are 7.0326, 12.9732, and 21.7031 ms.

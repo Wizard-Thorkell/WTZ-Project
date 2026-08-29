@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.2 atomic save/validate/replace and internal-reference fidelity`.
+- Active package: `P6.2b correlated mapping-save protocol and pre-transfer validation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2 active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2b active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -77,7 +77,9 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P6.1 | Initialized mapping snapshot contract and transient-state filtering | Complete |
-| P6.2 | Atomic save/validate/replace and internal-reference fidelity | Active |
+| P6.2a | Structured reference diagnostics and detached normalization | Complete |
+| P6.2b | Correlated save protocol and validation before transfer | Active |
+| P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Pending |
 | P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Phase P0 Packages
@@ -5270,6 +5272,122 @@ allocation is inside Robust physics enumeration.
   internal references, and introduces temporary-file plus atomic-replace output
   before initialized mapping workflows are broadened.
 
+## Completed Package: P6.2a Detached Snapshot Normalization
+
+### Scope
+
+- Add structured unresolved-entity-reference diagnostics to WTZ Engine load
+  results while making the existing log-suppression option consistent.
+- Load the read-only snapshot into a paused disposable map, run ordinary save
+  hooks there, and delete it without exposing mutations to the live source map.
+- Load a deep copy of the normalized representation again and require one map,
+  no orphans/nullspace entities, no unresolved references, and valid Z state.
+- Report normalized-reference and validated-entity counts to the mapping server.
+
+### Acceptance Criteria
+
+- Filtered, deleted, and cross-map references are observable without parsing
+  logs or allowing them to auto-include an excluded entity.
+- A legacy collection hook can remove invalid members on a disposable map while
+  preserving valid same-map links and leaving the live collection unchanged.
+- An invalid reference with no explicit normalization policy rejects the final
+  snapshot and identifies its source component.
+- Validation cannot consume or corrupt the `MappingDataNode` returned for later
+  transfer and loading.
+- Every temporary map is deleted on success, validation failure, or exception.
+
+### Verification Evidence
+
+- Focused WTZ Engine filter/diagnostic coverage passes 1/1, and the complete
+  engine `EntitySerialization` matrix passes 19/19.
+- The initialized-map snapshot fixture passes 1/1. It retains a same-map device
+  link in both directions, normalizes filtered-player and cross-map targets,
+  leaves the three-member live list unchanged, and rejects an unhandled
+  `ActionOnInteract` reference without mutating its source component or leaking
+  either disposable map load.
+- The combined Z-level map-format/snapshot matrix passes 7/7, and traditional
+  mapping/editor regressions pass 2/2.
+- The namespace-scoped Content Z-level matrix passes 259/259. The broad filter
+  passes 274 cases and reports one harness skip; the skipped lighting-cache case
+  passes both in the namespace run and in a dedicated 1/1 rerun, covering all
+  275 cases. Content unit/analyzer tests pass 9/9.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 7.0326, 12.9732, and 21.7031
+  ms respectively.
+- The complete solution builds with zero errors. Existing dependency,
+  vulnerability, analyzer, and upstream-obsolescence warnings total the same
+  established 708-warning baseline and remain unrelated to this package.
+
+### Decisions
+
+- Keep diagnostics in `LoadResult.InvalidEntityReferences` as structured
+  engine data: source YAML UID, component, and serialized value. Logging remains
+  an independent caller policy.
+- Normalize only on a loaded disposable map. Current Content save hooks were
+  written to mutate components, so invoking them on the live initialized map
+  would violate the mapper snapshot contract.
+- Give every validation load `MappingDataNode.Copy()`. `EntityDeserializer`
+  removes component mappings while reading, making one node instance consumable
+  rather than safely reusable.
+- Permit unresolved references during the first detached load so explicit
+  collection policies can clean them, then require zero unresolved references
+  during the final load. Unknown scalar intent fails closed.
+- Preserve the P6.1 entity/component filters during normalization and keep both
+  temporary maps paused. The normalized result remains an authored map, not a
+  live-round snapshot.
+
+### Completion Gate
+
+- [x] Scope check: the engine diff is limited to load diagnostics and its
+      serialization test; the parent diff is limited to snapshot normalization,
+      mapper reporting, focused coverage, and P6 documentation.
+- [x] Invariant review: native tiles, map lifecycle, anchored upper-floor
+      infrastructure, Z 0 compatibility, same-map references, filtered roots,
+      and cross-map references are covered. Moving-frame format paths remain
+      unchanged and pass the broader Z-level matrix.
+- [x] Automated verification: 1/1 focused engine, 19/19 engine serialization,
+      1/1 snapshot, 7/7 map-format/snapshot, 2/2 mapping regressions, 259/259
+      namespace Z-level, all 275 broad cases covered, 9/9 unit/analyzer, 3/3
+      baselines, and a zero-error solution build pass.
+- [x] Performance evidence: this work remains outside tick/frame paths; the
+      warmed gameplay baseline retains 6,336 bytes, fully warm caches, and zero
+      budget exhaustion at all fixture depths.
+- [x] Documentation: normalization stages, structured diagnostics, mutable-node
+      handling, tests, limitations, and the next package are recorded here and
+      in `Docs/ZLevelMapSaveLoad.md`.
+- [x] Dependency check: WTZ Engine revision
+      `a90b854ce9` is pushed on `zlevel/save-load`; the parent commit carries
+      that exact submodule pointer.
+- [x] Git check: both diffs pass `git diff --check` with only expected Windows
+      line-ending notices; generated baselines remain ignored and no unrelated
+      file is included.
+- [x] Mini review: detached mutation, final fail-closed validation, reusable
+      representation, and source immutability have focused and broad coverage.
+- [x] Commit: the engine commit is pushed and the isolated parent commit is
+      prepared for the pushed `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: the source map now participates only in the first read-only
+  serialization. All mutation-compatible cleanup occurs on a paused disposable
+  map and both temporary loads are deleted in `finally` blocks.
+- Finding: valid internal links survive with their reverse relationship, while
+  filtered-player and cross-map list entries normalize without rewriting live
+  state. Unhandled invalid references reject the file with component context.
+- Finding: deep-copying before deserialization is required for correctness, not
+  defensive ceremony; the focused test reproduced corruption when the same
+  mapping node was validated and later loaded.
+- Residual risk: the client/server messages still lack request correlation,
+  timeout, and guaranteed errors, so concurrent or stale responses remain a
+  protocol concern assigned to P6.2b.
+- Residual risk: the selected destination is still truncated before transfer
+  completion and uses ASCII encoding. UTF-8 temporary output, flush, and atomic
+  replacement remain P6.2c.
+- Next package: P6.2b correlates every manual save request and response, permits
+  only one pending operation, validates before opening the file dialog, and
+  guarantees an explicit server result for every authorized request.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -5319,3 +5437,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.4b1 | `Model dynamic Z-level traversal state` | 5 dynamic, 36 movement/pathfinding, 269 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/allocation/diff review | Complete |
 | 2026-08-29 | P5.4b2 | `Harden hierarchical Z-level pathfinding` | 11 focused, 40 movement/pathfinding, 274 Content integration, 9 Content unit/analyzer, 3 baseline, full build, 8-NPC/512-mutation/cache/diff review | Complete |
 | 2026-08-29 | P6.1 | `Allow read-only filtered entity snapshots` / `Filter initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 8 mapping, 275 Content integration, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |
+| 2026-08-29 | P6.2a | `Report invalid entity references during map loads` / `Normalize initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 7 format/snapshot, 2 mapping, all 275 Content cases covered, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |

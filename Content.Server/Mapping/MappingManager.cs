@@ -58,7 +58,9 @@ public sealed class MappingManager : IPostInjectInit
             _sawmill.Info(
                 $"Created mapping snapshot for {mapUid}; excluded {report.ExcludedRoots} transient roots " +
                 $"(players={report.PlayerRoots}, minds={report.MindRoots}, explicit={report.ExplicitTransientRoots}) " +
-                $"and {report.TransientComponents} transient components.");
+                $"and {report.TransientComponents} transient components; normalized " +
+                $"{report.NormalizedReferences} invalid references and validated " +
+                $"{report.ValidatedEntities} serialized entities.");
             var document = new YamlDocument(data.ToYaml());
             var stream = new YamlStream { document };
             var writer = new StringWriter();
