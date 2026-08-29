@@ -16,6 +16,7 @@ sessions, and transient round state do not.
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
 | P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
 | P6.3b2 | Validated initialized mapping autosave lifecycle | Complete |
+| P6 gate | End-to-end persistence and scope review | Complete |
 
 ## Snapshot Flow
 
@@ -247,10 +248,30 @@ and cross-grid references belong to the map snapshot, so serializing one grid
 would provide a misleading and incomplete persistence guarantee. Pre-init
 map/grid autosave retains Robust's legacy direct serializer.
 
+## Supported Entry Points
+
+The supported initialized mapper paths are the mapping UI's manual save and
+server autosave registered on the complete map root. Both call
+`MappingSnapshotSystem`, and both therefore share transient filtering, detached
+normalization, fail-closed validation, and canonical YAML formatting before a
+destination becomes visible.
+
+Three existing administrative paths deliberately do not claim this contract:
+
+- Robust `savemap <id> <path> true` is a forced/debug direct serialization path.
+- Content `persistencesave` belongs to live persistence rather than authored
+  mapping snapshots.
+- Content `resave` is bulk file-maintenance over resources loaded from disk.
+
+Do not use those commands as substitutes for saving an initialized WTZ mapping
+session. Supporting resumable live rounds would require a separate format and
+restoration lifecycle; routing it through a mapper filter would silently discard
+state that live persistence is expected to retain.
+
 ## Current Limitations
 
-P6.3b2 completes initialized mapper autosave. It does not claim live-round
-restoration or make every persistence path transactional.
+P6 is complete for initialized mapper-authored persistence. It does not claim
+live-round restoration or make every persistence path transactional.
 
 - Initialized grid-only autosave remains unsupported; use the owning map root so
   all grids and map-owned Z-level state share one validated snapshot.
@@ -269,14 +290,21 @@ restoration or make every persistence path transactional.
   other simulation caches are intentionally outside the authored-map contract.
   A future live-round save format would need explicit restoration semantics for
   them rather than an option on `MappingSnapshotSystem`.
-- A process or machine crash can leave the hidden same-directory temporary file
-  behind. The previous destination remains intact, but automatic stale-temp
-  scavenging and explicit directory-metadata fsync are not part of P6.2c.
+- A process or machine crash can leave the dot-prefixed same-directory
+  temporary file behind. The previous destination remains intact, but automatic
+  stale-temp scavenging and explicit directory-metadata fsync are not part of
+  P6.2c.
 - Atomic replacement relies on the destination filesystem's same-volume rename
   semantics. Network and unusual filesystems may provide weaker durability than
   local filesystems even after the temporary file's physical flush.
 
 ## Verification
+
+The P6 phase gate reruns the two WTZ Engine primitives at 1/1 filtering and 5/5
+atomic-writer cases. The complete Content persistence chain passes 11/11 and
+relevant Content unit/analyzer coverage passes 17/17, all without failures or
+skips. The preceding implementation gate provides passing evidence for all 279
+Content Z-level integration cases and a zero-error full solution build.
 
 P6.3b2's initialized autosave fixture passes 1/1. It covers registration,
 initialized grid refusal, validation failure without output, strict UTF-8,
@@ -291,8 +319,9 @@ lighting-cache and concurrent-NPC cases passed immediately in isolated reruns on
 the same binary. The full solution builds with zero errors and 105 established
 dependency, vulnerability, content-obsolescence, and analyzer warnings.
 
-The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
+The confirming generated 3-, 6-, and 10-floor gate baseline passes 3/3 with
+6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 6.8437, 13.9465, and 21.5024 ms.
-P6.3b2 adds no steady-state Z-level work; snapshot and disk work runs only when a
-configured mapping autosave interval becomes due.
+fail-open candidates. Measured local times are 6.7141, 13.5253, and 29.4362 ms.
+P6 adds no steady-state Z-level work; snapshot and disk work runs only for an
+explicit save or when a configured mapping autosave interval becomes due.

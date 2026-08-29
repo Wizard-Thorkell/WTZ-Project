@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6 phase completion gate`.
+- Active package: `P7.1a vertical surface contract and sky-column cache`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,8 +46,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (phase gate active) |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
+| P6 | Safe initialized-map save/load and automated round trips | Complete |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.1a active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -83,7 +83,20 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
 | P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
 | P6.3b2 | Validated initialized mapping autosave lifecycle | Complete |
-| P6 gate | End-to-end persistence and scope review | Active |
+| P6 gate | End-to-end persistence and scope review | Complete |
+
+## Phase P7 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P7.1a | Shared vertical-surface/sky-column contract, bounded cache, and metrics | Active |
+| P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Pending |
+| P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Pending |
+| P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Pending |
+| P7.3 | Z-aware sky exposure and weather presentation/gameplay | Pending |
+| P7.4a | Flight movement, gravity, and collision contract | Pending |
+| P7.4b | Flight trace, projectile, AI, content, and mapping integration | Pending |
+| P7 gate | End-to-end vertical-content and scope review | Pending |
 
 ## Phase P0 Packages
 
@@ -5620,7 +5633,8 @@ allocation is inside Robust physics enumeration.
   replacement; UTF-8 policy is explicit and has exact-byte coverage.
 - Finding: the existing P6.2b client error path composes cleanly with engine
   failures, so no second mapping-specific filesystem state machine is needed.
-- Residual risk: a process or machine crash can orphan the hidden temporary file.
+- Residual risk: a process or machine crash can orphan the dot-prefixed
+  temporary file.
   The destination remains intact, but stale-temp scavenging is not implemented.
 - Residual risk: the temporary file data is physically flushed, but directory
   metadata is not explicitly fsynced and unusual/network filesystems may offer
@@ -5965,10 +5979,120 @@ allocation is inside Robust physics enumeration.
   repeats end-to-end persistence evidence, freezes the live-round boundary, and
   decides whether P7 can begin without another persistence implementation.
 
+## Completed Phase Gate: P6 Initialized Map Persistence
+
+### Scope
+
+- Review P6.1 through P6.3b2 as one persistence pipeline instead of accepting
+  isolated package results as proof that the phase composes correctly.
+- Inventory every Content and engine map-save entry point and freeze the exact
+  boundary between mapper-authored snapshots, legacy file maintenance, and
+  future live-round persistence.
+- Repeat the engine primitives, full Content persistence chain, relevant unit
+  matrix, and warmed stress baselines on the published P6 revisions.
+- Decide whether P7 content can rely on initialized mapping, mutation,
+  validated save/autosave, and repeated load without another P6 implementation.
+
+### Acceptance Criteria
+
+- Manual mapping save and initialized map-root autosave share one normalized,
+  validated, canonical YAML representation.
+- Entity/component filtering, structured invalid-reference diagnostics,
+  correlated network completion, strict UTF-8, and atomic output retain their
+  default-compatible engine boundaries.
+- Initialized create/copy/delete and two complete snapshot/load cycles preserve
+  authored native tiles, multiple grids, frames, infrastructure, boundaries,
+  decals, references, and persistent atmosphere while excluding round state.
+- All direct serializer commands outside the mapper workflow are identified and
+  cannot be mistaken for the validated WTZ snapshot contract.
+- Focused end-to-end evidence passes on clean parent and engine worktrees, and
+  no P6 residual risk blocks authored P7 content from being mapped and reloaded.
+
+### Verification Evidence
+
+- WTZ Engine filtering/diagnostic integration passes 1/1 and atomic file writer
+  coverage passes 5/5 on revision `7cbd778024`.
+- The Content map-format, initialized snapshot, correlated protocol, initialized
+  mutation, and initialized autosave matrix passes 11/11 without failures or
+  skips. Relevant Content unit/analyzer coverage passes 17/17.
+- The immediately preceding P6.3b2 broad gate provides passing evidence for all
+  279 Content Z-level integration cases and a zero-error full solution build;
+  this documentation-only phase gate changes no compiled source.
+- Two gate baseline runs pass 3/3. The confirming run measures 6,336 bytes at
+  3, 6, and 10 floors, 100% boundary/gravity cache hits, zero PVS budget
+  exhaustions/fail-open candidates, and local times of 6.7141, 13.5253, and
+  29.4362 ms respectively.
+
+### Decisions
+
+- Close P6 without adding another serializer. The implemented pipeline already
+  satisfies the mapper-authored goal, and widening it would conflate map files
+  with live-round restoration.
+- Treat mapping UI save and initialized map-root autosave as the supported safe
+  WTZ paths. Both enter `MappingSnapshotSystem` before bytes become visible.
+- Keep Robust `savemap ... true`, Content `persistencesave`, and Content
+  `resave` outside this guarantee. They are force/debug, live-persistence, and
+  bulk file-maintenance paths respectively; none is an alias for a validated
+  initialized mapper snapshot.
+- Require future P7 authored components and content to join the P6 semantic
+  round-trip fixtures whenever they own persistent vertical state.
+- Keep live-round restoration as a future, separately versioned format with
+  explicit players, minds, sessions, simulation queues, and recovery semantics.
+
+### Completion Gate
+
+- [x] Scope check: this gate changes only P6/P7 planning documentation and does
+      not alter a serializer, gameplay system, prototype, or engine revision.
+- [x] Invariant review: Z 0/non-zero tiles, local/world frames, moving grids,
+      map-root ownership, boundaries, atmosphere, initialized lifecycle,
+      transients, references, and multi-grid ranges were reviewed together.
+- [x] Automated verification: 1/1 engine filtering, 5/5 engine atomic writer,
+      11/11 Content persistence integration, 17/17 relevant Content unit, and
+      inherited passing evidence for all 279 broad cases complete without a
+      blocker.
+- [x] Performance evidence: two 3/3 baseline runs pass; the confirming run is
+      allocation-stable at 6,336 bytes with fully warm caches and zero exhausted
+      PVS budget at every fixture depth.
+- [x] Documentation: supported entry points, excluded command paths,
+      live-round boundary, residual risks, evidence, and P7 dependencies are
+      recorded here and in `Docs/ZLevelMapSaveLoad.md`.
+- [x] Dependency check: no engine change is required; the parent continues to
+      pin the clean, published WTZ Engine revision `7cbd778024`.
+- [x] Git check: parent and engine began clean and synchronized with their
+      remotes; only the declared documentation is included in this gate.
+- [x] Mini review: no blocking persistence, lifecycle, reference, encoding,
+      atomicity, or scope finding remains; known limits stay explicit.
+- [x] Commit: this gate is saved as isolated `Close Z-level persistence phase`
+      commit and pushed to the parent `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: P6 now forms one auditable pipeline from authenticated request or
+  scheduled map root through detached validation to durable mapper output and
+  repeated initialized reload.
+- Finding: the architectural audit found no supported mapping path that bypasses
+  the canonical snapshot. Legacy direct commands remain intentionally named and
+  documented as separate contracts.
+- Finding: P7 can add persistent roofs, shafts, elevators, weather metadata, and
+  flight content against a stable initialized-map lifecycle and round-trip
+  oracle.
+- Residual risk: snapshot creation is synchronous and very large mapping maps
+  can pause at save time; it remains off the steady-state gameplay path.
+- Residual risk: arbitrary exceptions after initialized floor mutation starts
+  do not have a general rollback journal, although known destructive failure
+  modes are preflighted and covered.
+- Residual risk: local filesystem rename semantics, stale dot-prefixed files
+  after machine failure, and legacy direct serializers retain their documented
+  limits.
+- Next package: P7.1a inventories Robust roof/weather primitives and defines one
+  Z-aware vertical-surface and sky-column query contract with bounded caching,
+  invalidation, metrics, mapping semantics, and focused Z 0/moving-grid tests.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P6 gate | `Close Z-level persistence phase` | 1 engine filter, 5 engine atomic, 11 persistence, 17 unit, 3 baseline, architecture/diff review | Complete |
 | 2026-08-29 | P6.3b2 | `Autosave initialized mapping snapshots` | 1 autosave, 4 persistence, 11 mapping, 4 writer, 17 unit, 279 cases covered, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3b1 | `Enable initialized Z-level floor mutations` | 1 connected, 10 mapping, 278 broad, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3a | `Prove initialized Z-level map idempotence` | 3 focused/official, 11 mapping, 277 broad cases covered, 13 unit, 3 baseline, full build, diff review | Complete |
