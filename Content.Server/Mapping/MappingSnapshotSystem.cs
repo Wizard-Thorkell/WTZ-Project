@@ -84,7 +84,7 @@ public sealed class MappingSnapshotSystem : EntitySystem
 
         bool FilterComponent(EntityUid uid, IComponent component)
         {
-            if (component is not FollowerComponent && component is not FollowedComponent)
+            if (IsPersistentSnapshotComponent(component))
                 return true;
 
             excludedComponents.Add((uid, component.GetType()));
@@ -270,14 +270,26 @@ public sealed class MappingSnapshotSystem : EntitySystem
             ExpectPreInit = false,
             MissingEntityBehaviour = MissingEntityBehaviour.Ignore,
             EntityFilter = entity => IsPersistentSnapshotEntity(entity.Owner, mapUid),
-            ComponentFilter = (_, component) =>
-                component is not FollowerComponent && component is not FollowedComponent,
+            ComponentFilter = (_, component) => IsPersistentSnapshotComponent(component),
         };
     }
 
-    private bool IsPersistentSnapshotEntity(EntityUid uid, EntityUid mapUid)
+    /// <summary>
+    /// Returns whether an entity belongs to the mapper-authored persistence
+    /// boundary for the supplied map. Descendants of excluded roots are also
+    /// excluded.
+    /// </summary>
+    public bool IsPersistentSnapshotEntity(EntityUid uid, EntityUid mapUid)
     {
         return GetExclusionReason(uid, mapUid, out _) == MappingSnapshotExclusionReason.None;
+    }
+
+    /// <summary>
+    /// Returns whether a component belongs to mapper-authored state.
+    /// </summary>
+    public bool IsPersistentSnapshotComponent(IComponent component)
+    {
+        return component is not FollowerComponent && component is not FollowedComponent;
     }
 
     private MappingSnapshotExclusionReason GetExclusionReason(

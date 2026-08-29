@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.3b initialized mapping mutations and autosave lifecycle`.
+- Active package: `P6.3b2 initialized mapping autosave lifecycle`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3b active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3b2 active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -81,7 +81,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P6.2b | Correlated save protocol and validation before transfer | Complete |
 | P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Complete |
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
-| P6.3b | Initialized mapping mutations and autosave lifecycle | Active |
+| P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
+| P6.3b2 | Validated initialized mapping autosave lifecycle | Active |
 
 ## Phase P0 Packages
 
@@ -5738,10 +5739,124 @@ allocation is inside Robust physics enumeration.
   filtering, lifecycle correctness, atmosphere handling, failure containment,
   and validated atomic autosave.
 
+## Completed Package: P6.3b1 Initialized Floor Mutation
+
+### Scope
+
+- Enable authenticated create, copy, and delete floor requests on maps whose
+  entity lifecycle has already reached `MapInitialized`.
+- Reuse the mapper snapshot's persistent entity/component boundary instead of
+  defining a second notion of authored state for floor operations.
+- Preflight copied entity graphs, preserve references, anchoring, map-init
+  lifecycle, and local Z offsets, then replace the selected grid's target floor.
+- Replace target tiles, decals, and persistent atmosphere while discarding
+  hotspots, excited groups, adjacency cells, and processing queues.
+- Preserve players and explicit transient entities when their authored parent is
+  replaced, and relocate runtime roots before a deleted floor disappears.
+- Keep the map-wide range valid across multiple grids and handle Robust's
+  automatic empty-grid deletion without accessing a deleted grid.
+
+### Acceptance Criteria
+
+- The real client network request path can create, copy, and delete floors on an
+  initialized server map under Mapping authority.
+- Copied cable, pipe, and boundary roots reach `MapInitialized`, remain anchored,
+  and occupy only the requested target floor.
+- Target-only tiles, decals, authored roots, atmosphere, and hotspot state are
+  replaced; the source floor remains unchanged.
+- Player, direct actor, and explicit transient child roots survive copy/delete;
+  excluded children are detached before their authored parent is removed.
+- Deleting an edge floor contracts the global range only after no other grid on
+  the map still uses that local Z.
+- A final tile-only floor may remove its now-empty grid, but an operation that
+  would strand surviving entities or authored decals is rejected before mutation.
+- A post-mutation initialized mapper snapshot validates successfully.
+
+### Verification Evidence
+
+- The connected initialized lifecycle fixture passes 1/1 through actual client
+  network requests and covers range contraction refusal, create/delete, copy,
+  two grids, and final empty-grid removal.
+- The combined map-format, initialized-snapshot, save-protocol, and initialized
+  mutation matrix passes 10/10 without failures or skips.
+- The complete Content Z-level integration matrix passes 278/278 without
+  failures or skips.
+- Relevant Content unit/analyzer coverage passes 13/13 without skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 7.3808, 13.4672, and 20.9562
+  ms respectively.
+- `SpaceStation14.slnx` builds with zero errors and 24 established dependency,
+  vulnerability, and obsolescence warnings; none identifies P6.3b1.
+
+### Decisions
+
+- Expose the existing snapshot entity/component predicates as the single
+  mapper-authored boundary used by both persistence and initialized mutation.
+- Deserialize copied authored roots into the initialized map with YAML IDs kept
+  long enough to prove a complete root mapping before deleting target state.
+- Clone only real atmosphere mixtures. Target runtime atmosphere structures are
+  removed from all known sets and queues, remaining adjacency links are cleared,
+  and simulation rebuilds them normally.
+- Set copied target tiles before removing stale target-only coordinates so a
+  non-empty replacement cannot transiently trigger Robust's empty-grid deletion.
+- Treat floor editing as selected-grid mutation over a map-wide continuous range.
+  Edge deletion consults all other grids; deleting an interior floor clears its
+  selected-grid contents but cannot create a hole in the min/max representation.
+- Refuse direct initialized range contraction. Mappers must delete edge floors,
+  allowing the operation to perform entity, atmosphere, multi-grid, and runtime
+  safety checks first.
+
+### Completion Gate
+
+- [x] Scope check: the package contains initialized floor mutation, atmosphere
+      lifecycle cleanup, one connected integration fixture, and P6 documentation.
+- [x] Invariant review: Z 0/non-zero floors, map-local Z, initialized lifecycle,
+      multiple grids, anchoring, transient roots, actors, decals, atmosphere,
+      server authority, and automatic empty-grid deletion were reviewed.
+- [x] Automated verification: 1/1 connected lifecycle, 10/10 mapping matrix,
+      278/278 broad Content Z-level, 13/13 unit/analyzer, 3/3 baselines, and a
+      zero-error full solution build pass without skips.
+- [x] Performance evidence: all new scans and serialization occur only for an
+      explicit mapper command; the gameplay baseline remains at 6,336 measured
+      bytes with fully warm relevant caches and no exhausted PVS budget.
+- [x] Documentation: initialized mutation semantics, empty-grid policy,
+      atmosphere lifecycle, multi-grid range ownership, evidence, limitations,
+      and P6.3b2 ownership are recorded here and in both mapping documents.
+- [x] Dependency check: P6.3b1 requires no engine change; the parent continues
+      to pin published WTZ Engine commit `7cbd778024`.
+- [x] Git check: the package passes `git diff --check` apart from expected
+      Windows line-ending notices, and WTZ Engine remains clean.
+- [x] Mini review: the connected failure discovered for a final tile-only grid
+      is fixed and covered; no blocking mutation or lifecycle finding remains.
+- [x] Commit: this package is saved as the isolated `Enable initialized Z-level
+      floor mutations` commit and pushed to the parent `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: initialized mapping no longer needs a special pre-init map solely to
+  create, clone, or remove an authored floor.
+- Finding: floor copy now shares snapshot filtering, so runtime players and
+  transients cannot silently become authored clones.
+- Finding: target atmosphere replacement is explicit and removes stale runtime
+  references instead of leaving a mixture from the previous floor behind.
+- Finding: multi-grid range ownership and synchronous empty-grid deletion are
+  now handled deliberately rather than depending on mutation order.
+- Residual risk: entity graph cloning is fully preflighted, but arbitrary
+  exceptions after destructive mutation begins do not yet have a general
+  in-memory rollback journal. Deterministic tile/decal/atmosphere paths and the
+  final-grid dependency checks contain the known failure modes.
+- Residual risk: a continuous min/max range cannot represent a deleted interior
+  floor. The selected grid is emptied while that logical Z remains addressable.
+- Next package: P6.3b2 routes initialized autosave through the validated detached
+  snapshot, uses temporary same-directory output and atomic promotion, and tests
+  cancellation/failure cleanup without turning mapper files into live-round saves.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P6.3b1 | `Enable initialized Z-level floor mutations` | 1 connected, 10 mapping, 278 broad, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3a | `Prove initialized Z-level map idempotence` | 3 focused/official, 11 mapping, 277 broad cases covered, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-27 | P0.1 | `Add native Z-level performance observability` | 46 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.2 | `Add deterministic Z-level stress baselines` | 3 baseline cases, 49 integration, 2 unit, diff check | Complete |

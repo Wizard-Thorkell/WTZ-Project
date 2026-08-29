@@ -720,10 +720,9 @@ Exit criteria:
 
 Mapper workflow:
 
-1. Create or load a pre-map-initialized mapping map. Z-level floor operations
-   still refuse initialized maps until their separate P6.3b mutation and
-   lifecycle gate; initialized maps can already be saved as filtered authored
-   snapshots without mutating the source.
+1. Create or load a mapping map. Initialized maps support authenticated floor
+   create/copy/delete and filtered authored snapshots; initialized autosave is
+   tracked separately by P6.3b2.
 2. Press the Z-level initialize button once. This adds format version 1 with the
    active floor as the initial range and default floor.
 3. Select a Z value, then create an empty floor or copy an existing floor into

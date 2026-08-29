@@ -14,7 +14,8 @@ sessions, and transient round state do not.
 | P6.2b | Correlated request/response and validation before transfer | Complete |
 | P6.2c | UTF-8 temporary output and atomic destination replacement | Complete |
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
-| P6.3b | Initialized mapping mutations and autosave lifecycle | Active |
+| P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
+| P6.3b2 | Validated initialized mapping autosave lifecycle | Active |
 
 ## Snapshot Flow
 
@@ -187,16 +188,55 @@ upper-floor atmosphere. Temperature, volume, and all nine gas species remain
 identical across both cycles. Players and explicit transient roots disappear,
 and an active source hotspot is absent after each load.
 
+## Initialized Floor Mutation
+
+P6.3b1 permits the authenticated mapping UI to create, copy, and delete floors
+after the map reaches `MapInitialized`. These operations remain mapper edits,
+not live-round persistence:
+
+1. Create expands the map's continuous declared range and moves the mapper to
+   the requested local Z without manufacturing empty tile chunks.
+2. Copy validates the current authored map, selects roots using the same entity
+   and component predicates as `MappingSnapshotSystem`, and deserializes a clone
+   with YAML IDs retained for a complete-root preflight.
+3. Only after that preflight does copy replace target authored roots, tiles,
+   decals, and real tile atmosphere. Copied pipes, cables, and boundaries retain
+   references, anchoring, local Z, and initialized lifecycle.
+4. Explicit transient or player descendants are detached from an authored root
+   before it is removed. Direct runtime roots are never selected as authored
+   copy/delete roots.
+5. Atmosphere mixtures are cloned, but hotspots, excited groups, adjacency
+   cells, pressure sets, and processing queues are cleared and rebuilt by the
+   running simulation.
+6. Delete removes selected-grid authored state and relocates runtime roots to the
+   resulting default floor before clearing tiles. A final tile-only floor may
+   trigger Robust's normal empty-grid deletion.
+
+The Z-level range belongs to the map, while a floor operation targets one grid.
+Deleting an edge contracts the range only when no other grid still has tiles or
+direct entities on that local Z. Deleting an interior floor clears that grid's
+contents but leaves the continuous min/max range unchanged. Direct contraction
+through Configure is refused on initialized maps; edge floors must pass through
+Delete so these safety checks cannot be bypassed.
+
+An operation that would empty a grid while surviving runtime/other-floor
+entities or copied authored decals still depend on it is rejected before target
+mutation. Target tiles shared with the source replacement are written first, so
+a non-empty copy cannot transiently delete its grid.
+
 ## Current Limitations
 
-P6.3a completes safe manual mapper output and structural idempotence. It does
-not claim live-round restoration or yet enable every initialized-map editing
-workflow.
+P6.3b1 completes initialized floor create/copy/delete. It does not claim
+live-round restoration or yet enable every initialized-map persistence workflow.
 
-- Mapping autosave and Z-level create/copy/delete operations still reject
-  initialized maps. P6.3b owns their separate mutation, lifecycle, failure, and
-  autosave tests; file idempotence alone is not evidence that editing a live
-  object graph is transactional.
+- Mapping autosave still rejects initialized maps. P6.3b2 owns detached snapshot
+  validation, temporary output, atomic promotion, and failure cleanup for that
+  separate server-side workflow.
+- Copied entity graphs are preflighted before target replacement, but arbitrary
+  exceptions after mutation begins do not have a general in-memory rollback
+  journal. Known empty-grid and dependency failures are rejected up front.
+- A continuous minimum/maximum range cannot represent a missing interior floor;
+  deleting one clears the selected grid while retaining that logical Z.
 - Saving sessions, chat, minds, objectives, players, or other round state is a
   separate live-round capability and is not part of mapper-authored map files.
 - Active hotspots, processing queues, runtime atmosphere adjacency cells, and
@@ -212,20 +252,19 @@ workflow.
 
 ## Verification
 
-P6.3a passes 3/3 focused initialized-snapshot and official-map cases. Its new
-fixture performs both complete snapshot/load cycles and compares the source,
-first load, and second load semantically. The combined map-format,
-initialized-snapshot, save-protocol, traditional mapping, and editor matrix
-passes 11/11. Relevant Content unit/analyzer coverage passes 13/13.
+P6.3b1's connected fixture passes 1/1 through real client network requests. It
+covers initialized Configure contraction refusal, create/delete, copy of
+anchored cable/pipe/boundary roots, replacement of tiles/decals/atmosphere,
+transient and actor survival, two-grid range ownership, and final empty-grid
+removal. The combined mapping/persistence matrix passes 10/10.
 
-The complete Content Z-level run reported 276 passes and one transient harness
-skip; the omitted lighting-cache lifecycle case was immediately rerun alone and
-passed. All 277 cases therefore have passing evidence and there is no unresolved
-skip or failure. The full solution builds with zero errors and 27 established
-incremental dependency, vulnerability, and obsolescence warnings.
+The complete Content Z-level integration matrix passes 278/278, and relevant
+Content unit/analyzer coverage passes 13/13, with no failures or skips. The full
+solution builds with zero errors and 24 established dependency, vulnerability,
+and obsolescence warnings.
 
 The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 7.0112, 13.3412, and 29.0055 ms.
-P6.3a adds no tick- or frame-time work; atmosphere serialization runs only for
-explicit mapper persistence operations.
+fail-open candidates. Measured local times are 7.3808, 13.4672, and 20.9562 ms.
+P6.3b1 adds no tick- or frame-time work; its scans and serialization run only for
+explicit mapping commands.
