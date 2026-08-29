@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/lighting-hardening`.
-- Active package: `P3 consolidated completion gate`.
+- Active package: `P4.1 vertical sound contract and portal cache`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -43,7 +43,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P0 | Baselines, stress fixtures, metrics, budgets, and observability | Complete |
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
-| P3 | Z-aware lighting and FOV with bounded caches and budgets | In progress |
+| P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Pending |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
@@ -2771,6 +2771,130 @@ P2.4 is split into independently gated subpackages:
   caches, projection, budgets, tile composition, shadows, PVS, map persistence,
   and visual evidence before starting P4 vertical sound.
 
+## Completed Phase Gate: P3 Z-Aware Lighting And FOV
+
+### Scope
+
+- Review the complete P3 delta from `03290c4a284` through `1d452ca7560` in WTZ
+  Project and from `17f6c8f8d7` through `b6051ff8c6` in WTZ Engine as one
+  rendering architecture rather than eight independently passing packages.
+- Confirm ownership, local/world Z conversion, moving-grid behavior, cache
+  invalidation, resource lifetime, server PVS inputs, persistence, deterministic
+  budget degradation, observability, and real-client output agree across package
+  boundaries.
+- Re-run the native renderer, serialization, map, and replication suites against
+  the exact paired revisions after the final P3.4c3 sandbox change.
+- Record phase-level limits that remain deliberate P7/P8 work instead of silently
+  extending P3 or blocking the independent P4 sound subsystem.
+
+### Phase Acceptance Criteria
+
+- One native viewport renders the active sparse grid layer selected by world Z;
+  no per-floor map, viewport, eye, or duplicate tile-mesh pipeline is introduced.
+- Visible lower tiles and projected point lights consume the same complete
+  `Visibility` aperture stack, while their planning, rendering, and mapping
+  preview retain independent frame budgets.
+- Cache keys include grid, chunk, and local layer; tile, explicit boundary, map
+  policy, and grid lifecycle changes invalidate only the relevant retained data.
+- Moving and rotated `ZLevelFrame` grids resolve local layers to world Z before
+  native light, occluder, tile, emitter, PVS, or capture decisions.
+- Every expensive stage has a finite client/server limit and deterministic
+  nearest-first behavior. Exhaustion either publishes only completed chunks/
+  emitters or preserves an accepted unshadowed light; it never exposes partial
+  geometry or an arbitrary blackout.
+- External shadow rendering restores both generic renderer state and the active
+  floor's semantic occlusion geometry before the native wall-bleed pass.
+- Server PVS hides ordinary entities by column but retains bounded enabled light
+  and occluder dependencies needed for off-column aperture effects.
+- Sparse layer bounds, component Z, chunks, light fixtures, boundaries, and map
+  configuration survive serialization, replication, and Content map loading.
+- The canonical fixture proves actual RGB floors, hard/soft shadows, mapping
+  preview, atlas use, budget headroom, and process cleanup through real OpenGL.
+
+### Consolidated Evidence
+
+- Content's complete `FullyQualifiedName~ZLevel` integration filter passes
+  229/229 with no failures or skips; analyzer tests pass 3/3 and the full solution
+  builds with zero errors.
+- WTZ Engine's complete client suites pass 37/37 unit and 137/137 integration
+  cases on `b6051ff8c6d7b04638be2dbbbd0020b159906771`.
+- Focused engine persistence passes 4/4 `ZLevelSerializationTest` cases and 13/13
+  `ZLevelMapTests`/`ZLevelChunkReplicationTest` cases.
+- Generated 3-, 6-, and 10-floor baselines pass with 6,216 measured bytes, 100%
+  warm boundary/gravity cache hits, zero evictions or budget exhaustion, and
+  measured times of 4.202, 12.106, and 14.638 ms.
+- Three consecutive graphical runs pass 19/19 checks. The final run captures 11
+  PNGs in 14.714 seconds with nonblank RGB floors, hard/soft differences above
+  0.0004, 289 atlas renders, 379 rows/groups, 11,683 projected tiles, and zero
+  shadow fallback or exhaustion.
+- Both repositories were clean and remotely verified at project
+  `1d452ca75600d400a654a326571fa65a2e87aaac` and engine
+  `b6051ff8c6d7b04638be2dbbbd0020b159906771` before this documentation-only gate.
+
+### Architecture Review
+
+- Finding: P3 preserves the roadmap's non-monolithic boundary. Robust owns native
+  layer meshes, world-Z renderer filtering, spatial trees, GPU targets, and the
+  generic shadow-atlas primitive; Content owns aperture policy, source ordering,
+  attenuation, preview, budgets, diagnostics, and fixture semantics.
+- Finding: sharing aperture chunks between tile/FOV and light composition avoids
+  contradictory open columns without coupling their work allowances or failure
+  policy.
+- Finding: three degradation levels remain coherent: whole projected emitters or
+  chunks roll back on incomplete geometry, optional shadows fall back to accepted
+  illumination, and server PVS fails open for an entire refresh if its authority
+  budget is exhausted.
+- Finding: retained resources have explicit owners and lifetimes: sparse native
+  meshes by grid/chunk/layer, aperture entries by Content cache, projection
+  buffers by systems, and atlases/shader instances by viewport overlay cache.
+- Finding: the real-client gate closes the headless-only gap without placing test
+  policy in Clyde. Image analysis, server-view synchronization, and fixture
+  thresholds remain Content tooling.
+
+### Completion Gate
+
+- [x] Scope check: reviewed all 42 project and 32 engine paths changed during P3;
+      this gate changes only the resumable ledger.
+- [x] Invariant review: Z 0, authored ranges, local/world frames, moving grids,
+      server authority, visibility boundaries, PVS, renderer restoration, cache
+      lifetime, and map persistence were checked across package boundaries.
+- [x] Automated verification: 3 analyzer, 229 Content integration, 37 engine
+      client unit, 137 engine client integration, 4 serialization, 13 map/
+      replication, 3 baseline, and 19 real-client checks pass on paired SHAs.
+- [x] Performance evidence: cache hit/allocation baselines, finite CVar clamps,
+      current/maximum/exhaustion counters, graphical atlas/preview work, and
+      process cleanup are recorded.
+- [x] Documentation: ownership, pipeline, budgets, fixture, commands, evidence,
+      deliberate limits, and P4 handoff are recorded in P3 docs and this gate.
+- [x] Dependency check: WTZ Project and WTZ Engine are paired, clean, pushed, and
+      remotely equal before the gate commit.
+- [x] Git check: both trees are clean; generated PNGs, reports, logs, and baseline
+      output remain ignored; the documentation diff passes `git diff --check`.
+- [x] Mini review: findings, residual risks, and P4.1 are recorded below.
+- [x] Commit: gate prepared as `Close the P3 lighting and FOV phase gate` on
+      `zlevel/lighting-hardening`; remote verification follows the commit.
+
+### Mini Review
+
+- No blocking correctness finding remains inside P3's declared lower-floor
+  lighting/FOV scope.
+- Residual risk: only one NVIDIA/OpenGL driver is in the graphical matrix.
+  Cross-vendor rendering and graphical CI remain P8 hardening targets.
+- Residual risk: native intersecting-grid/tree broad phases run before Content
+  budgets. Pathological overlapping moving grids and many simultaneous viewports
+  require P8 CPU/GPU profiling.
+- Residual risk: bounded PVS light/occluder retention is correct but may add
+  network work in dense multi-floor scenes; P8 must measure that server cost.
+- Residual risk: source-floor occluders provide lateral projected shadows while
+  intermediate floors provide aperture clipping only. Additional intermediate
+  lateral occlusion is an optional quality extension, not a correctness gap.
+- Residual risk: normal player-facing projection intentionally reveals lower
+  floors only; upward inspection remains mapping preview until a future gameplay
+  policy explicitly authorizes it.
+- Next package: P4.1 will define a specialized vertical-sound trace/portal
+  contract and bounded cache derived from `Sound` boundary openings, without
+  embedding audio attenuation or listener policy in `ZLevelTrace`.
+
 P2.2 is split into independently gated subpackages:
 
 | Package | Deliverable | Status |
@@ -3737,3 +3861,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.4c1 | `Expose external point-light shadow atlases` / `Track external Z-level shadow atlas support` | 7 engine unit, 1 engine integration, 37 complete engine client unit, 137 complete engine client integration, full engine build, diff check | Complete |
 | 2026-08-28 | P3.4c2 | `Render bounded lower-floor light shadows` | 13 package, 228 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4c3 | `Allow safe ImageSharp pixel reads` / `Harden Z-level lighting with real visual capture` | 3 analyzer, 1 PVS, 13 shadow, 229 Content Z-level, 3 baseline, full build, 3x 19 real GL checks, diff review | Complete |
+| 2026-08-28 | P3 gate | `Close the P3 lighting and FOV phase gate` | 229 Content, 37/137 engine client, 4 serialization, 13 map/replication, 3 baseline, 19 real GL, architecture review | Complete |
