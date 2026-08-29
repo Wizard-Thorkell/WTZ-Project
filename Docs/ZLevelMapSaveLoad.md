@@ -15,7 +15,7 @@ sessions, and transient round state do not.
 | P6.2c | UTF-8 temporary output and atomic destination replacement | Complete |
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
 | P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
-| P6.3b2 | Validated initialized mapping autosave lifecycle | Active |
+| P6.3b2 | Validated initialized mapping autosave lifecycle | Complete |
 
 ## Snapshot Flow
 
@@ -224,14 +224,40 @@ entities or copied authored decals still depend on it is rejected before target
 mutation. Target tiles shared with the source replacement are written first, so
 a non-empty copy cannot transiently delete its grid.
 
+## Initialized Mapping Autosave
+
+P6.3b2 routes initialized map autosave through the same canonical YAML snapshot
+used by manual host saves:
+
+1. The existing scheduler keeps an initialized map root registered instead of
+   dropping it when its next interval arrives.
+2. `MappingSnapshotSystem` validates authored Z-level state, excludes players,
+   minds, sessions, and explicit transients, normalizes references in a detached
+   load, validates that normalized load, and emits the canonical map YAML.
+3. The server encodes that YAML as strict UTF-8 without a BOM and opens a
+   dot-prefixed same-directory temporary with `CreateNew`.
+4. After write and flush, the temporary is renamed to a unique timestamped
+   destination. Existing names receive a numeric suffix and are never replaced.
+5. A failed write removes only a temporary successfully created by that
+   operation. Validation failure exposes no destination or temporary; a
+   scheduled map remains registered to retry after the next interval.
+
+Initialized grid-only autosave is refused. Tiles, Z-level range, atmosphere,
+and cross-grid references belong to the map snapshot, so serializing one grid
+would provide a misleading and incomplete persistence guarantee. Pre-init
+map/grid autosave retains Robust's legacy direct serializer.
+
 ## Current Limitations
 
-P6.3b1 completes initialized floor create/copy/delete. It does not claim
-live-round restoration or yet enable every initialized-map persistence workflow.
+P6.3b2 completes initialized mapper autosave. It does not claim live-round
+restoration or make every persistence path transactional.
 
-- Mapping autosave still rejects initialized maps. P6.3b2 owns detached snapshot
-  validation, temporary output, atomic promotion, and failure cleanup for that
-  separate server-side workflow.
+- Initialized grid-only autosave remains unsupported; use the owning map root so
+  all grids and map-owned Z-level state share one validated snapshot.
+- Pre-init map/grid autosave remains on the legacy direct serializer. The new
+  server atomic writer applies to validated initialized map snapshots.
+- Snapshot generation is synchronous on the entity-manager thread and can pause
+  a very large mapping session when an interval becomes due.
 - Copied entity graphs are preflighted before target replacement, but arbitrary
   exceptions after mutation begins do not have a general in-memory rollback
   journal. Known empty-grid and dependency failures are rejected up front.
@@ -252,19 +278,21 @@ live-round restoration or yet enable every initialized-map persistence workflow.
 
 ## Verification
 
-P6.3b1's connected fixture passes 1/1 through real client network requests. It
-covers initialized Configure contraction refusal, create/delete, copy of
-anchored cable/pipe/boundary roots, replacement of tiles/decals/atmosphere,
-transient and actor survival, two-grid range ownership, and final empty-grid
-removal. The combined mapping/persistence matrix passes 10/10.
+P6.3b2's initialized autosave fixture passes 1/1. It covers registration,
+initialized grid refusal, validation failure without output, strict UTF-8,
+atomic promotion, transient filtering, reload, and source immutability. Shared
+snapshot/protocol/autosave coverage passes 4/4, and the combined map-format,
+snapshot, protocol, mutation, and autosave matrix passes 11/11.
 
-The complete Content Z-level integration matrix passes 278/278, and relevant
-Content unit/analyzer coverage passes 13/13, with no failures or skips. The full
-solution builds with zero errors and 24 established dependency, vulnerability,
-and obsolescence warnings.
+Atomic writer tests pass 4/4 and relevant Content unit/analyzer coverage passes
+17/17. All 279 Content Z-level integration cases have passing evidence with no
+failures. Broad pooled runs transiently omitted one old case at a time; both the
+lighting-cache and concurrent-NPC cases passed immediately in isolated reruns on
+the same binary. The full solution builds with zero errors and 105 established
+dependency, vulnerability, content-obsolescence, and analyzer warnings.
 
 The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 7.3808, 13.4672, and 20.9562 ms.
-P6.3b1 adds no tick- or frame-time work; its scans and serialization run only for
-explicit mapping commands.
+fail-open candidates. Measured local times are 6.8437, 13.9465, and 21.5024 ms.
+P6.3b2 adds no steady-state Z-level work; snapshot and disk work runs only when a
+configured mapping autosave interval becomes due.

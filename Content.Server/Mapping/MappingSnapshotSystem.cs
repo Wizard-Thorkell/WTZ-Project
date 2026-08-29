@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using Content.Shared.Follower.Components;
 using Content.Shared.Mapping;
@@ -11,7 +12,10 @@ using Robust.Shared.EntitySerialization;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
+using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Markdown.Mapping;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace Content.Server.Mapping;
 
@@ -28,6 +32,37 @@ public sealed class MappingSnapshotSystem : EntitySystem
 {
     [Dependency] private readonly MapLoaderSystem _mapLoader = default!;
     [Dependency] private readonly SharedZLevelMapSystem _zLevelMaps = default!;
+
+    /// <summary>
+    /// Creates and formats a validated mapper-authored snapshot as canonical
+    /// map YAML. This is shared by network saves and server-side autosaves.
+    /// </summary>
+    public bool TryCreateMapSnapshotText(
+        EntityUid mapUid,
+        [NotNullWhen(true)] out string? yaml,
+        out MappingSnapshotReport report,
+        out string error)
+    {
+        yaml = null;
+        if (!TryCreateMapSnapshot(mapUid, out var snapshot, out report, out error))
+            return false;
+
+        try
+        {
+            var document = new YamlDocument(snapshot.ToYaml());
+            var stream = new YamlStream { document };
+            using var writer = new StringWriter();
+            stream.Save(new YamlMappingFix(new Emitter(writer)), false);
+            yaml = writer.ToString();
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Log.Error($"Failed to format mapping snapshot for {ToPrettyString(mapUid)}: {exception}");
+            error = exception.Message;
+            return false;
+        }
+    }
 
     public bool TryCreateMapSnapshot(
         EntityUid mapUid,

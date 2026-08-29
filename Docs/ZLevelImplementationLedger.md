@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.3b2 initialized mapping autosave lifecycle`.
+- Active package: `P6 phase completion gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3b2 active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (phase gate active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -82,7 +82,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Complete |
 | P6.3a | Automated double round trips and explicit live-round boundary | Complete |
 | P6.3b1 | Initialized floor create/copy/delete lifecycle | Complete |
-| P6.3b2 | Validated initialized mapping autosave lifecycle | Active |
+| P6.3b2 | Validated initialized mapping autosave lifecycle | Complete |
+| P6 gate | End-to-end persistence and scope review | Active |
 
 ## Phase P0 Packages
 
@@ -5852,10 +5853,123 @@ allocation is inside Robust physics enumeration.
   snapshot, uses temporary same-directory output and atomic promotion, and tests
   cancellation/failure cleanup without turning mapper files into live-round saves.
 
+## Completed Package: P6.3b2 Initialized Mapping Autosave
+
+### Scope
+
+- Share one canonical snapshot-to-YAML formatter between host-requested mapping
+  saves and server-side autosave.
+- Permit the existing autosave scheduler to retain initialized map roots and
+  serialize them through the validated mapper-authored snapshot boundary.
+- Write strict UTF-8 without a BOM to a same-directory `CreateNew` temporary,
+  flush it, and atomically promote it to a never-overwritten destination.
+- Preserve the pre-init map/grid legacy serializer path while refusing
+  initialized grid-only output, which cannot represent complete map-owned
+  Z-level state.
+- Cover validation failure, partial writes, collisions, foreign temporaries,
+  transient filtering, source immutability, and loading the resulting file.
+
+### Acceptance Criteria
+
+- An initialized map root can remain registered with the existing autosave
+  timer; an initialized grid without its map root is rejected explicitly.
+- Invalid authored Z-level state produces no visible destination or temporary
+  file, and a corrected map can be saved on a later attempt.
+- A successful autosave is strict UTF-8 without a BOM, has a unique timestamped
+  filename, contains one complete map snapshot, and loads successfully.
+- Players and explicit transient roots are absent from the loaded autosave while
+  authored tiles, entities, range, lifecycle, and Z-level state survive.
+- A partial temporary write is removed. Existing destinations and temporary
+  files not created by the operation are never replaced or deleted.
+- Manual host saves retain their canonical output contract, and pre-init
+  autosaves retain their legacy serializer path.
+
+### Verification Evidence
+
+- The real initialized autosave/load fixture passes 1/1. It covers timer
+  registration, initialized grid refusal, failed validation with an empty output
+  directory, strict UTF-8 output, transient filtering, reload, and source-map
+  immutability.
+- Snapshot, save-protocol, and autosave integration pass 4/4; the complete
+  mapping/save-load/mutation matrix passes 11/11 without failures or skips.
+- Atomic writer coverage passes 4/4 for promotion, partial failure cleanup,
+  existing destination/foreign temporary preservation, and timestamp collision
+  suffixing. Relevant Content unit/analyzer coverage passes 17/17.
+- The 279-case Content Z-level matrix has passing evidence for every case and no
+  failures. Broad parallel runs each completed 278 cases and transiently skipped
+  one old pooled fixture; both alternately omitted lighting and concurrent-NPC
+  cases passed immediately when run alone on the same binary.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 6.8437, 13.9465, and 21.5024
+  ms respectively.
+- `SpaceStation14.slnx` builds with zero errors and 105 established dependency,
+  vulnerability, content-obsolescence, and analyzer warnings; none identifies
+  P6.3b2.
+
+### Decisions
+
+- Keep detached normalization and validation in `MappingSnapshotSystem`, then
+  expose its canonical YAML text so manual save and autosave cannot drift.
+- Autosaves are append-only snapshots. Timestamp collisions receive a numeric
+  suffix; an existing destination is never an overwrite target.
+- The server writer owns a temporary only after `CreateNew` succeeds. This
+  prevents cleanup from deleting a colliding file created by another writer.
+- Keep persistence synchronous with the existing mapping autosave scheduler.
+  Snapshot generation is entity-manager work and cannot safely move to a worker
+  thread; disk exposure remains atomic and the operation runs only when due.
+- A failed scheduled save remains registered and retries at the next configured
+  interval, allowing a mapper to repair invalid authored state.
+- Initialized autosave means mapper-authored map persistence, not restoration of
+  players, minds, sessions, chat, objectives, or other live-round state.
+
+### Completion Gate
+
+- [x] Scope check: this package contains canonical YAML formatting, initialized
+      map autosave, atomic server output, focused tests, and P6 documentation.
+- [x] Invariant review: map-root ownership, Z 0/non-zero state, lifecycle,
+      transient exclusion, validation failure, UTF-8, collision, cleanup, retry,
+      and legacy pre-init behavior were reviewed.
+- [x] Automated verification: 1/1 initialized lifecycle, 4/4 shared persistence,
+      11/11 mapping matrix, 4/4 writer, 17/17 unit/analyzer, complete 279-case
+      passing evidence, 3/3 baselines, and a zero-error full build pass.
+- [x] Performance evidence: autosave adds no steady-state Z-level work and the
+      warmed gameplay baseline remains at 6,336 bytes with fully warm caches.
+- [x] Documentation: ownership, atomic protocol, retry policy, failure cleanup,
+      unsupported grid-only snapshots, and live-round boundary are recorded.
+- [x] Dependency check: P6.3b2 requires no engine change and continues to use
+      the published WTZ Engine pin already recorded by P6.3b1.
+- [x] Git check: declared files pass diff checks; generated autosaves/baselines
+      remain outside the worktree, and WTZ Engine remains clean.
+- [x] Mini review: the expected initialized-grid refusal now logs as a warning;
+      no blocking persistence, atomicity, lifecycle, or source-mutation finding
+      remains.
+- [x] Commit: this package is saved as isolated `Autosave initialized mapping
+      snapshots` commit and pushed to the parent `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: manual and automatic initialized saves now use exactly the same
+  normalized and validated mapper-authored representation.
+- Finding: a server interruption can leave at most a dot-prefixed temporary,
+  never a partially promoted autosave; ordinary write failures clean it.
+- Finding: scheduling remains lightweight between intervals and copies its due
+  entries before mutating registration state.
+- Residual risk: snapshot generation is synchronous and may pause a very large
+  mapping session while due. Moving entity serialization off-thread would be
+  unsafe without a separate immutable capture boundary.
+- Residual risk: legacy pre-init map/grid autosave still uses Robust's direct
+  serializer. Retrofitting that unrelated path with detached snapshots is not
+  part of initialized Z-level persistence.
+- Next package: the P6 phase gate reviews all save/load contracts together,
+  repeats end-to-end persistence evidence, freezes the live-round boundary, and
+  decides whether P7 can begin without another persistence implementation.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P6.3b2 | `Autosave initialized mapping snapshots` | 1 autosave, 4 persistence, 11 mapping, 4 writer, 17 unit, 279 cases covered, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3b1 | `Enable initialized Z-level floor mutations` | 1 connected, 10 mapping, 278 broad, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3a | `Prove initialized Z-level map idempotence` | 3 focused/official, 11 mapping, 277 broad cases covered, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-27 | P0.1 | `Add native Z-level performance observability` | 46 integration, 2 unit, diff check | Complete |

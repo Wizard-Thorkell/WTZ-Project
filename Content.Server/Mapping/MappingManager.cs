@@ -1,13 +1,9 @@
-using System.IO;
 using Content.Server.Administration.Managers;
 using Content.Shared.Administration;
 using Content.Shared.Mapping;
 using Robust.Server.Player;
 using Robust.Shared.Network;
-using Robust.Shared.Serialization;
 using Robust.Shared.Utility;
-using YamlDotNet.Core;
-using YamlDotNet.RepresentationModel;
 
 namespace Content.Server.Mapping;
 
@@ -64,7 +60,7 @@ public sealed class MappingManager : IPostInjectInit
             }
 
             var snapshots = _systems.GetEntitySystem<MappingSnapshotSystem>();
-            if (!snapshots.TryCreateMapSnapshot(mapUid, out var data, out var report, out var error))
+            if (!snapshots.TryCreateMapSnapshotText(mapUid, out var yaml, out var report, out var error))
             {
                 SendError(message, error);
                 return;
@@ -76,16 +72,11 @@ public sealed class MappingManager : IPostInjectInit
                 $"and {report.TransientComponents} transient components; normalized " +
                 $"{report.NormalizedReferences} invalid references and validated " +
                 $"{report.ValidatedEntities} serialized entities.");
-            var document = new YamlDocument(data.ToYaml());
-            var stream = new YamlStream { document };
-            var writer = new StringWriter();
-            stream.Save(new YamlMappingFix(new Emitter(writer)), false);
-
             var msg = new MappingMapDataMessage()
             {
                 Context = _zstd,
                 RequestId = message.RequestId,
-                Yml = writer.ToString()
+                Yml = yaml
             };
             _net.ServerSendMessage(msg, message.MsgChannel);
         }
