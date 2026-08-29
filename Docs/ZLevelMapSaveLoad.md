@@ -12,8 +12,8 @@ sessions, and transient round state do not.
 | P6.1 | Read-only initialized-map snapshot and transient filtering | Complete |
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
 | P6.2b | Correlated request/response and validation before transfer | Complete |
-| P6.2c | UTF-8 temporary output and atomic destination replacement | Active |
-| P6.3 | Automated double round trips and explicit live-round boundary | Pending |
+| P6.2c | UTF-8 temporary output and atomic destination replacement | Complete |
+| P6.3 | Automated double round trips and explicit live-round boundary | Active |
 
 ## Snapshot Flow
 
@@ -68,6 +68,30 @@ Every manual mapping save now uses one non-zero `uint` request identifier across
 The messages remain reliable-unordered. Ordering is no longer an implicit
 correctness requirement because every terminal response is correlated.
 
+## Atomic Destination Write
+
+After the matching validated response arrives, Content encodes the complete
+YAML as strict UTF-8 without a byte-order mark and calls the engine-owned
+`IFileDialogManager.SaveFileAtomic` API. The native destination path remains
+inside WTZ Engine:
+
+1. Cancellation returns `false` without creating or opening any file.
+2. A GUID-named temporary file is created in the selected destination's own
+   directory with `CreateNew`, write-only access, and no sharing.
+3. The complete byte buffer is written asynchronously, flushed asynchronously,
+   and then physically flushed with `FileStream.Flush(flushToDisk: true)`.
+4. Only after all writes and flushes succeed is the temporary path moved over
+   the destination with overwrite enabled. Because both paths share a
+   directory, this remains a same-volume rename rather than a copy/delete.
+5. Any write, flush, or replacement exception removes the temporary file and is
+   propagated to Content, where the existing typed result and localized popup
+   report a client-side failure.
+
+The legacy stream-returning `SaveFile` API remains unchanged for unrelated
+callers. Mapping uses the atomic byte API exclusively, so it never opens or
+truncates an existing map before the complete replacement is durable enough to
+be promoted.
+
 ## Persistent Boundary
 
 The map root, grids, native Z-level tiles, `ZLevelMapComponent`, authored decals,
@@ -121,6 +145,11 @@ collections such as `DeviceListComponent` on the disposable map. Any scalar or
 collection reference that remains invalid after that pass rejects the snapshot
 and identifies its first source component in the returned error.
 
+WTZ Engine additionally owns atomic native-dialog output through
+`IFileDialogManager.SaveFileAtomic`. The API accepts complete bytes rather than
+text so encoding remains an explicit Content policy and other consumers can use
+the same persistence primitive without implicit transcoding.
+
 ## Z-Level Invariants
 
 Tile layers are map-owned and are always validated. The optional entity
@@ -141,30 +170,35 @@ The P6.1 integration fixture proves the following properties:
 
 ## Current Limitations
 
-P6.2b does not claim atomic file persistence or live-round restoration.
+P6.2c completes safe manual mapper output. It does not claim live-round
+restoration or yet enable every initialized-map editing workflow.
 
-- The mapping client still writes YAML directly to its selected stream. P6.2c
-  will encode UTF-8 to a same-directory temporary file, flush it, and replace the
-  destination only after a successful write.
 - Mapping autosave and Z-level create/copy/delete operations still reject
-  initialized maps. They stay restricted until the complete atomic workflow is
-  available.
+  initialized maps. They stay restricted until P6.3 proves two complete
+  save/load cycles and structural idempotence.
 - A single in-memory load proves the P6.1 contract but not idempotence. P6.3
   requires two save/load cycles and structural comparisons of maps, grids,
   entities, pipes, cables, boundaries, frames, and references.
 - Saving sessions, chat, minds, objectives, players, or other round state is a
   separate live-round capability and is not part of mapper-authored map files.
+- A process or machine crash can leave the hidden same-directory temporary file
+  behind. The previous destination remains intact, but automatic stale-temp
+  scavenging and explicit directory-metadata fsync are not part of P6.2c.
+- Atomic replacement relies on the destination filesystem's same-volume rename
+  semantics. Network and unusual filesystems may provide weaker durability than
+  local filesystems even after the temporary file's physical flush.
 
 ## Verification
 
-P6.2b closes with 3/3 deterministic request-tracker tests, 1/1 real
-client/server protocol test, 10/10 combined mapping/format/snapshot/protocol
-tests, 276/276 Content Z-level integration tests, and 12/12 relevant Content
-unit/analyzer tests passing without skips. The integrated flow covers an
-unauthorized request, server-side invalid-Z rejection, a concurrent duplicate,
-and a valid response reaching the headless dialog. The full solution builds with
-zero errors and its established 708-warning baseline.
+P6.2c closes with 5/5 focused atomic-writer tests and the complete WTZ Engine
+client suite passing 42/42 without skips. Content passes 4/4 mapping unit tests,
+1/1 real client/server save-protocol test, 10/10 combined
+mapping/format/snapshot/protocol tests, 13/13 relevant unit/analyzer tests, and
+276/276 Z-level integration tests without skips. The atomic fixture covers new
+file creation, existing-file replacement, injected partial-write failure,
+temporary cleanup, exact Unicode bytes, and dialog cancellation. The full
+solution builds with zero errors and its established 708-warning baseline.
 
 The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 12.8096, 17.7008, and 25.2127 ms.
+fail-open candidates. Measured local times are 7.7195, 14.3521, and 21.9225 ms.

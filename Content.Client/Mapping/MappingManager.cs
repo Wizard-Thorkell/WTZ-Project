@@ -18,6 +18,10 @@ public sealed class MappingManager : IPostInjectInit
 
     internal static readonly TimeSpan SaveRequestTimeout = TimeSpan.FromSeconds(30);
 
+    private static readonly UTF8Encoding SnapshotEncoding = new(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
     private readonly MappingSaveRequestTracker _requests = new();
 
     public void PostInject()
@@ -76,15 +80,8 @@ public sealed class MappingManager : IPostInjectInit
                 return MappingSaveResult.ServerRejected;
             }
 
-            var path = await _file.SaveFile();
-            if (path is not { fileStream: var stream })
+            if (!await _file.SaveFileAtomic(EncodeSnapshot(response.Yml)))
                 return MappingSaveResult.Cancelled;
-
-            await using (stream)
-            {
-                await stream.WriteAsync(Encoding.ASCII.GetBytes(response.Yml));
-                await stream.FlushAsync();
-            }
 
             return MappingSaveResult.Saved;
         }
@@ -104,6 +101,11 @@ public sealed class MappingManager : IPostInjectInit
         _ui.DeferAction(() => _ui.Popup(
             error,
             _loc.GetString("mapping-save-error-title")));
+    }
+
+    internal static byte[] EncodeSnapshot(string yml)
+    {
+        return SnapshotEncoding.GetBytes(yml);
     }
 }
 

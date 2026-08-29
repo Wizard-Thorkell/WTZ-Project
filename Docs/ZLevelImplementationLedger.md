@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.2c UTF-8 temporary output and atomic destination replacement`.
+- Active package: `P6.3 automated double round trips and explicit live-round boundary`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2c active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3 active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -79,8 +79,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P6.1 | Initialized mapping snapshot contract and transient-state filtering | Complete |
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
 | P6.2b | Correlated save protocol and validation before transfer | Complete |
-| P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Active |
-| P6.3 | Automated double round trips and explicit live-round boundary | Pending |
+| P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Complete |
+| P6.3 | Automated double round trips and explicit live-round boundary | Active |
 
 ## Phase P0 Packages
 
@@ -5504,6 +5504,129 @@ allocation is inside Robust physics enumeration.
   temporary files, physical flush, failure cleanup, destination preservation,
   and Content integration after the validated response.
 
+## Completed Package: P6.2c Atomic Mapping Output
+
+### Scope
+
+- Add an engine-owned native-dialog API that accepts complete bytes and keeps
+  the selected operating-system path out of Content.
+- Write to a unique temporary file in the destination directory, physically
+  flush it, and promote it with a same-volume overwrite rename only after every
+  write succeeds.
+- Remove partial temporary output on write, flush, or replacement failure while
+  preserving the previous destination.
+- Replace Content's ASCII stream writer with strict UTF-8 encoding without a
+  byte-order mark and the new atomic engine operation.
+- Preserve the correlated request slot through dialog, encoding, atomic write,
+  cancellation, and exception cleanup.
+
+### Acceptance Criteria
+
+- Cancelling the native dialog creates no file and reports `Cancelled` through
+  the existing typed mapping result.
+- Creating a new destination and replacing an existing one produce exactly the
+  supplied bytes with no temporary file left behind.
+- An injected partial-write failure leaves an existing map byte-for-byte intact
+  and removes the incomplete temporary file.
+- Authored non-ASCII YAML survives strict UTF-8 encoding without a BOM or
+  replacement characters.
+- Existing `IFileDialogManager.SaveFile` consumers compile and behave unchanged;
+  atomic output is an additive engine API.
+
+### Verification Evidence
+
+- Five focused WTZ Engine tests pass 5/5. They cover new-file creation,
+  replacement, partial-write failure, destination preservation, temporary-file
+  cleanup, exact Unicode bytes, and dialog cancellation.
+- The complete WTZ Engine client unit suite passes 42/42 without failures or
+  skips, including all 37 preexisting cases and the five new atomic cases.
+- Content mapping unit tests pass 4/4: three correlated-request tracker cases
+  plus strict UTF-8/no-BOM encoding.
+- The real client/server mapping save protocol passes 1/1 and still reaches the
+  headless dialog as `Cancelled` after receiving validated YAML.
+- The combined map-format, initialized-snapshot, correlated-protocol,
+  traditional mapping, and editor matrix passes 10/10 without skips.
+- The first broad Content pass reported 275 passes plus one pool skip. That
+  omitted lighting-cache case passed alone, and a second complete pass closed
+  at 276/276 without failures or skips.
+- Relevant Content unit/analyzer coverage passes 13/13 without skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 7.7195, 14.3521, and 21.9225
+  ms respectively.
+- A clean `SpaceStation14.slnx` build passes with zero errors and the checkout's
+  established 708 dependency, vulnerability, analyzer, and obsolescence
+  warnings; no warning identifies this package.
+
+### Decisions
+
+- Keep path ownership inside WTZ Engine. Content supplies complete bytes and
+  receives only success/cancellation, so native paths do not become a new
+  cross-layer API or leak into game logic.
+- Keep the atomic API byte-oriented. Content explicitly selects strict UTF-8
+  without a BOM, while future binary consumers can reuse the primitive without
+  implicit text conversion.
+- Create the GUID-named temporary file with `CreateNew`, write-only access, no
+  sharing, asynchronous writes, `FlushAsync`, and a final
+  `Flush(flushToDisk: true)` before replacement.
+- Keep temporary and destination paths in the same directory and use overwrite
+  move only after flush. This prevents cross-volume copy/delete behavior and
+  relies on the filesystem's same-volume rename semantics.
+- Propagate filesystem exceptions to `MappingManager`; its P6.2b catch path
+  already reports `ClientError`, releases the pending slot in `finally`, and
+  presents the localized reason.
+- Leave the legacy stream-returning `SaveFile` API intact. Migrating unrelated
+  callers would expand risk without improving initialized-map persistence.
+
+### Completion Gate
+
+- [x] Scope check: the engine diff contains one additive file-dialog API,
+      atomic helper, and focused fixture; the parent diff contains only mapping
+      integration, one encoding test, the engine pointer, and P6 documentation.
+- [x] Invariant review: server-side snapshot validation still precedes transfer;
+      request correlation, Z 0, native tiles, moving frames, boundaries, and all
+      gameplay systems are unchanged and covered by the complete Z matrix.
+- [x] Automated verification: 5/5 atomic engine, 42/42 engine client, 4/4
+      mapping unit, 1/1 protocol, 10/10 mapping integration, 276/276 Content Z,
+      13/13 relevant unit/analyzer, 3/3 baselines, and a zero-error clean build
+      pass without unresolved skips.
+- [x] Performance evidence: the operation is mapper-triggered rather than
+      tick/frame work; gameplay retains 6,336 measured bytes, 100% relevant
+      warm cache hits, and zero PVS exhaustion at every stress depth.
+- [x] Documentation: encoding, temporary-file lifecycle, flush order,
+      replacement semantics, error behavior, tests, residual risks, and P6.3
+      follow-up are recorded here and in `Docs/ZLevelMapSaveLoad.md`.
+- [x] Dependency check: WTZ Engine commit `7cbd778024` is published on
+      `zlevel/save-load`, and the parent pins that exact revision.
+- [x] Git check: both diffs pass `git diff --check` with only expected Windows
+      line-ending notices; generated baselines remain ignored.
+- [x] Mini review: cancellation, creation, replacement, Unicode, partial write,
+      cleanup, protocol, pooled-test recovery, and cross-system regressions are
+      covered with no blocking finding.
+- [x] Commit: isolated engine and parent commits are prepared for their pushed
+      `zlevel/save-load` branches.
+
+### Mini Review
+
+- Finding: a selected existing map is no longer opened or truncated. It remains
+  untouched until a complete temporary copy has passed both logical and
+  physical flushes.
+- Finding: Content no longer loses authored non-ASCII text through ASCII
+  replacement; UTF-8 policy is explicit and has exact-byte coverage.
+- Finding: the existing P6.2b client error path composes cleanly with engine
+  failures, so no second mapping-specific filesystem state machine is needed.
+- Residual risk: a process or machine crash can orphan the hidden temporary file.
+  The destination remains intact, but stale-temp scavenging is not implemented.
+- Residual risk: the temporary file data is physically flushed, but directory
+  metadata is not explicitly fsynced and unusual/network filesystems may offer
+  weaker guarantees than local same-volume rename semantics.
+- Residual risk: initialized-map autosave and Z-level create/copy/delete remain
+  disabled until structural idempotence is proven rather than being enabled
+  solely because destination writes are now atomic.
+- Next package: P6.3 performs two automated snapshot/load cycles, compares maps,
+  grids, authored entities, pipes, cables, Z boundaries, frames, and references,
+  then documents and enforces the separate live-round persistence boundary.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -5555,3 +5678,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P6.1 | `Allow read-only filtered entity snapshots` / `Filter initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 8 mapping, 275 Content integration, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.2a | `Report invalid entity references during map loads` / `Normalize initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 7 format/snapshot, 2 mapping, all 275 Content cases covered, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.2b | `Correlate initialized mapping saves` | 3 tracker, 1 real protocol, 10 mapping, 276 Content integration, 12 unit/analyzer, 3 baseline, clean full build, diff review | Complete |
+| 2026-08-29 | P6.2c | `Add atomic file dialog writes` / `Persist mapping snapshots atomically` | 5 atomic, 42 engine client, 4 mapping unit, 1 protocol, 10 mapping integration, 276 Content integration, 13 unit/analyzer, 3 baseline, clean full build, diff review | Complete |
