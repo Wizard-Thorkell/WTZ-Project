@@ -217,10 +217,11 @@ public sealed class ZLevelSoundPlaybackSystem : EntitySystem
                 _audioPresentations.Add(new ZLevelSoundPresentation(
                     GetNetEntity(audioUid),
                     GetNetEntity(listener.Viewer),
+                    GetNetEntity(gridUid),
                     listener.MapId,
-                    listener.WorldPosition,
-                    listener.WorldZ,
-                    portal.WorldPosition,
+                    sourceLocalZ,
+                    listener.LocalZ,
+                    portal.LocalPosition,
                     result.Distance,
                     result.Transmission));
             }

@@ -25,6 +25,9 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         if (args.Length == 1 && args[0].Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             metricsSystem.ResetCounters();
+            _entityManager.System<SharedZLevelSoundPortalSystem>().ResetMetrics();
+            _entityManager.System<ZLevelSoundRouteSystem>().ResetMetrics();
+            _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
             return;
         }
@@ -40,6 +43,9 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
         var explosion = _entityManager.System<ExplosionSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
+        var soundPlayback = _entityManager.System<ZLevelSoundPlaybackSystem>();
+        var soundPortals = _entityManager.System<SharedZLevelSoundPortalSystem>();
+        var soundRoutes = _entityManager.System<ZLevelSoundRouteSystem>();
         var trace = _entityManager.System<SharedZLevelTraceSystem>();
         var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
 
@@ -132,6 +138,34 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"avg={metrics.AtmosOverlayAverageMilliseconds:0.000}ms, " +
             $"last={metrics.AtmosOverlayLastMilliseconds:0.000}ms, " +
             $"max={metrics.AtmosOverlayMaxMilliseconds:0.000}ms");
+        var portalMetrics = soundPortals.Snapshot();
+        shell.WriteLine(
+            $"  sound portals: queries={portalMetrics.PortalQueries}, " +
+            $"chunks={portalMetrics.CachedChunks}/{portalMetrics.CacheCapacity}, " +
+            $"open/explicit={portalMetrics.CachedOpenPortals}/{portalMetrics.CachedExplicitPortals}, " +
+            $"hit-rate={portalMetrics.CacheHitPercent:0.00}%, builds={portalMetrics.Builds}, " +
+            $"budget={portalMetrics.ChunkBudgetExhaustions}/" +
+            $"{portalMetrics.BuildBudgetExhaustions}/{portalMetrics.CandidateBudgetExhaustions}");
+        var routeMetrics = soundRoutes.Snapshot();
+        shell.WriteLine(
+            $"  sound routes: queries={routeMetrics.Queries}, success={routeMetrics.Successes} " +
+            $"(same={routeMetrics.SameLevelSuccesses}, vertical={routeMetrics.VerticalSuccesses}), " +
+            $"no-route/medium/range={routeMetrics.NoPortalRoutes}/" +
+            $"{routeMetrics.MediumBlockedRoutes}/{routeMetrics.OutOfRangeRoutes}, " +
+            $"edges/samples={routeMetrics.EdgesEvaluated}/{routeMetrics.MediumSamples}, " +
+            $"avg/last/max={routeMetrics.AverageRouteMilliseconds:0.000}/" +
+            $"{routeMetrics.LastRouteMilliseconds:0.000}/{routeMetrics.MaxRouteMilliseconds:0.000}ms");
+        var playbackMetrics = soundPlayback.Snapshot();
+        shell.WriteLine(
+            $"  sound playback: refreshes={playbackMetrics.Refreshes}, " +
+            $"candidates/routes/authorized={playbackMetrics.AudioCandidates}/" +
+            $"{playbackMetrics.RouteChecks}/{playbackMetrics.AuthorizedPresentations}, " +
+            $"active sessions/presentations={playbackMetrics.ActiveSessions}/" +
+            $"{playbackMetrics.ActivePresentations}, snapshots={playbackMetrics.SnapshotsSent}, " +
+            $"budget routes/presentations={playbackMetrics.RouteBudgetExhaustions}/" +
+            $"{playbackMetrics.PresentationBudgetExhaustions}, parent-fail={playbackMetrics.ParentDepthFailures}, " +
+            $"avg/last/max={playbackMetrics.AverageRefreshMilliseconds:0.000}/" +
+            $"{playbackMetrics.LastRefreshMilliseconds:0.000}/{playbackMetrics.MaxRefreshMilliseconds:0.000}ms");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

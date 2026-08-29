@@ -16,20 +16,22 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
     [Dependency] private readonly IEntityManager _entityManager = default!;
 
     public string Command => "zlevelrendermetrics";
-    public string Description => "Shows or resets local Z-level grid, lighting, and occlusion rendering metrics.";
+    public string Description => "Shows or resets local Z-level rendering and sound-presentation metrics.";
     public string Help => $"Usage: {Command} [reset]";
 
     public void Execute(IConsoleShell shell, string argStr, string[] args)
     {
         var cache = _entityManager.System<ZLevelLightingCacheSystem>();
         var projection = _entityManager.System<ZLevelLightingProjectionSystem>();
+        var sound = _entityManager.System<ZLevelSoundPresentationSystem>();
         var tileProjection = _entityManager.System<ZLevelTileProjectionSystem>();
         if (args.Length == 1 && args[0].Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             cache.ResetMetrics();
             projection.ResetMetrics();
+            sound.ResetMetrics();
             tileProjection.ResetMetrics();
-            shell.WriteLine("Reset local vertical-rendering counters.");
+            shell.WriteLine("Reset local vertical rendering and sound counters.");
             return;
         }
 
@@ -139,5 +141,18 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"{tiles.RenderVertices}/{tiles.RenderDrawCalls}, avg/last/max=" +
             $"{tiles.AverageRenderMilliseconds:0.000}/{tiles.LastRenderMilliseconds:0.000}/" +
             $"{tiles.MaxRenderMilliseconds:0.000}ms");
+
+        var soundMetrics = sound.Snapshot();
+        shell.WriteLine(
+            $"vertical sound snapshots: received/presentations/invalid=" +
+            $"{soundMetrics.SnapshotsReceived}/{soundMetrics.SnapshotPresentationsReceived}/" +
+            $"{soundMetrics.InvalidPresentations}, active={soundMetrics.ActivePresentations}");
+        shell.WriteLine(
+            $"vertical sound policy: frames={soundMetrics.Frames}, candidates/cross-floor=" +
+            $"{soundMetrics.AudioCandidates}/{soundMetrics.CrossFloorCandidates}, " +
+            $"current authorized/muted={soundMetrics.CurrentAuthorized}/{soundMetrics.CurrentMuted}, " +
+            $"processed authorized/muted={soundMetrics.ProcessedAuthorized}/{soundMetrics.ProcessedMuted}, " +
+            $"avg/last/max={soundMetrics.AverageBuildMilliseconds:0.000}/" +
+            $"{soundMetrics.LastBuildMilliseconds:0.000}/{soundMetrics.MaxBuildMilliseconds:0.000}ms");
     }
 }

@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/sound-playback`.
-- Active package: `P4.3c client presentation, diagnostics, and hardening`.
+- Active package: `P5.1 hierarchical navigation contract and baseline inventory`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -44,8 +44,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
-| P4 | Vertical sound propagation through cached portals | In progress (P4.1-P4.3b complete) |
-| P5 | Hierarchical pathfinding with vertical transition edges | Pending |
+| P4 | Vertical sound propagation through cached portals | Complete |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1 next) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -58,7 +58,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4.2 | Bounded multi-portal routes, transmission, and attenuation | Complete |
 | P4.3a | Positional audio post-processing hook | Complete |
 | P4.3b | Bounded server authorization and per-session snapshots | Complete |
-| P4.3c | Client presentation, diagnostics, and hardening | Pending |
+| P4.3c | Client presentation, diagnostics, and hardening | Complete |
 
 ## Phase P0 Packages
 
@@ -4228,6 +4228,126 @@ allocation is inside Robust physics enumeration.
   attenuation, safety muting, metrics/debug diagnostics, and end-to-end
   lifecycle/threading coverage.
 
+## Completed Package: P4.3c Client Vertical Sound Presentation
+
+### Scope
+
+- Consume P4.3b replacement snapshots on the client and validate every grant
+  against the exact current audio, viewer, grid, map, and local floors.
+- Present one existing Robust positional stream at its final listener-side
+  portal while applying complete-route attenuation, transmission, and portal
+  occlusion.
+- Safety-mute every replicated cross-floor stream without an exact valid grant,
+  including when engine PVS is disabled, while leaving same-floor and global
+  audio on the native path.
+- Keep the parallel audio callback free of ECS and physics queries through
+  atomically published, double-buffered policy snapshots.
+- Publish client/server sound diagnostics and close the P4 phase gate.
+
+### Acceptance Criteria
+
+- No relay or duplicate audio entity is created; source identity, playback
+  position, lifetime, and native startup remain owned by Robust.
+- Snapshot payloads use stable grid-local portal coordinates and local Z. A
+  translated or rotated moving grid reprojects direction without a new grant.
+- Invalid, stale, wrong-viewer, wrong-grid, wrong-floor, non-finite, out-of-range,
+  or non-positive-transmission presentations fail closed.
+- Authorized gain replaces portal-only distance attenuation with complete-route
+  attenuation, applies transmission, and handles every Robust attenuation mode.
+- The audio worker reads immutable policy only. Occlusion, transforms, entity
+  resolution, and snapshot validation execute on the client main thread.
+- Revocation and movement to the listener floor remove the managed policy and
+  restore Robust's native same-floor processing.
+
+### Evidence
+
+- `ZLevelSoundPlaybackTest` passes 5/5. The two P4.3c cases exercise actual
+  server atmosphere and routing, snapshot replication, exact client policy,
+  callback execution, moving-grid translation/rotation, engine-PVS-off safety
+  muting, and native same-floor return.
+- `ZLevelSoundPresentationTest` passes 4/4 for linear route replacement,
+  transmission-only playback, centered portals under unclamped inverse
+  attenuation, and invalid/fully attenuated fail-closed behavior.
+- The combined P4.1-P4.3c sound matrix passes 13/13. The complete Content
+  Z-level integration matrix passes 242/242 and the Content Z-level unit and
+  analyzer matrix passes 9/9, all without failures or skips.
+- Robust's focused callback test passes 1/1. Complete client unit/integration
+  suites pass 37/37 and 138/138; shared unit/integration suites pass 447/447
+  and 1,026/1,026.
+- The 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes, 100%
+  warmed boundary/gravity hits, zero PVS budget exhaustion, and measured times
+  of 10.951, 14.803, and 25.142 ms.
+- Clean WTZ Project and WTZ Engine solution builds succeed with zero errors and
+  700 and 185 established warnings respectively.
+
+### Decisions
+
+- Evolve the network payload from world XY/world Z to grid identity, local Z,
+  and portal-local XY. This removes snapshot churn and stale direction when a
+  structural frame moves.
+- Keep server authorization and client presentation separate. The client may
+  reject a grant but can never invent one.
+- Build policies before the native audio frame and atomically swap one complete
+  dictionary. Robust's synchronous parallel `ProcessNow` guarantees the old
+  buffer is no longer in use before it is recycled on a later frame.
+- Reuse native distance modeling by applying the ratio of route-distance gain
+  to portal-distance gain. The source can point toward the portal without
+  pretending the entire acoustic route is only that direct distance.
+- Keep explicit muted policies for unauthorized cross-floor streams. Missing
+  dictionary entries mean native behavior only for streams that are not
+  cross-floor in the current view.
+- Expose exact policy diagnostics for deterministic tests instead of reading
+  the headless client's shared `DummyAudioSource`, whose state is intentionally
+  not entity-local.
+
+### Completion Gate
+
+- [x] Scope check: the parent diff is limited to client sound presentation,
+      the local-coordinate payload, diagnostics, tests, documentation, and the
+      paired one-line engine access contract.
+- [x] Invariant review: Z 0/same-floor compatibility, local/world frames,
+      moving and rotated grids, exact viewers, server authority, Sound-channel
+      isolation, pressure, range, revocation, and PVS disablement were reviewed.
+- [x] Automated verification: 4/4 unit, 5/5 playback, 13/13 sound, 242/242
+      Content integration, 9/9 Content unit/analyzer, 1/1 focused engine,
+      37/138 engine client, 447/1,026 engine shared, and both clean builds pass.
+- [x] Performance evidence: the worker path performs only an atomic read and
+      dictionary lookup; policy buffers are reused, timing counters are exposed,
+      and warmed stress baselines retain 6,336 bytes and zero relevant misses.
+- [x] Documentation: protocol, ownership, formulas, threading, safety policy,
+      diagnostics, evidence, and deliberate limits are recorded here and in
+      `Docs/ZLevelSound.md`.
+- [x] Dependency check: WTZ Engine is committed and pushed at
+      `3aaca280f628876939afcc10a9be920b3898902a` on
+      `zlevel/sound-playback`.
+- [x] Git check: both repository diffs pass `git diff --check`; generated
+      artifacts remain ignored and the engine tree is clean at its pushed SHA.
+- [x] Mini review: no blocking correctness, authority, lifecycle, or threading
+      finding remains; scale and perceptual risks are assigned below.
+- [x] Commit: paired engine `Allow content audio source positioning` and parent
+      `Present routed vertical sound on clients` commits are prepared for the
+      WTZ sound-playback branches.
+
+### Mini Review
+
+- Finding: P4 now carries one logical positional emission through bounded
+  topology, pressure-aware server authorization, PVS, and deterministic client
+  direction/attenuation without restarting or duplicating playback.
+- Finding: authorization stays fail-closed even with engine PVS disabled, while
+  same-floor/global audio preserves native Robust behavior.
+- Finding: local payloads plus frame-by-frame reprojection close the stale-world
+  coordinate bug for moving and rotated grids without increasing network rate.
+- Residual risk: client policy construction scans replicated positional streams
+  once per frame. Dense multiplayer scale, dictionary high-water retention, and
+  long-running timing distribution belong to P8.
+- Residual risk: headless tests prove route policy and callback execution, not a
+  human stereo perception check on every audio backend. Manual round validation
+  remains part of P8 hardening.
+- Residual risk: cross-grid sound, room-scale wall routing, material/frequency
+  coefficients, and persistent acoustics remain deliberate future policies.
+- Next package: P5.1 inventories Robust navigation ownership and defines the
+  stable vertical transition graph contract before changing AI path selection.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4268,3 +4388,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P4.2 | `Route vertical sound through bounded portals` | 4 route, 8 sound, 237 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
 | 2026-08-28 | P4.3a | `Expose positional audio post-processing` / `Track positional audio post-processing support` | 1 focused engine, 138 engine client integration, 37 engine client unit, client build, diff review | Complete |
 | 2026-08-29 | P4.3b | `Centralize audio recipient filtering` / `Authorize routed vertical sound per session` | 3 playback, 11 sound, 240 Content integration, 5 Content unit/analyzer, 447/1,026 engine shared, 3 baseline, clean build, allocation/diff review | Complete |
+| 2026-08-29 | P4.3c | `Allow content audio source positioning` / `Present routed vertical sound on clients` | 4 unit, 5 playback, 13 sound, 242 Content integration, 9 Content unit/analyzer, 37/138 engine client, 447/1,026 engine shared, 3 baseline, clean builds, diff review | Complete |

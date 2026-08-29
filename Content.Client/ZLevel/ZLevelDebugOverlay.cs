@@ -42,6 +42,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
     private readonly ZLevelLightingCacheSystem _lightingCacheSystem;
     private readonly ZLevelLightingProjectionSystem _lightingProjectionSystem;
+    private readonly ZLevelSoundPresentationSystem _soundPresentationSystem;
     private readonly ZLevelTileProjectionSystem _tileProjectionSystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
     private readonly EntityQuery<ZLevelPositionComponent> _zLevelQuery;
@@ -66,6 +67,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
         _lightingCacheSystem = _entityManager.System<ZLevelLightingCacheSystem>();
         _lightingProjectionSystem = _entityManager.System<ZLevelLightingProjectionSystem>();
+        _soundPresentationSystem = _entityManager.System<ZLevelSoundPresentationSystem>();
         _tileProjectionSystem = _entityManager.System<ZLevelTileProjectionSystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
         _zLevelQuery = _entityManager.GetEntityQuery<ZLevelPositionComponent>();
@@ -243,6 +245,20 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"{tileProjection.NormalBudget.CurrentTileVisitsUsed} preview:" +
             $"{tileProjection.MappingBudget.CurrentChunksUsed}/" +
             $"{tileProjection.MappingBudget.CurrentTileVisitsUsed}",
+            metricsColor);
+
+        var sound = _soundPresentationSystem.Snapshot();
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 238f),
+            $"vertical sound snapshot active/invalid:{sound.ActivePresentations}/{sound.InvalidPresentations} " +
+            $"policy auth/mute:{sound.CurrentAuthorized}/{sound.CurrentMuted}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 252f),
+            $"vertical sound processed auth/mute:{sound.ProcessedAuthorized}/{sound.ProcessedMuted} " +
+            $"build avg/max:{sound.AverageBuildMilliseconds:0.000}/{sound.MaxBuildMilliseconds:0.000}ms",
             metricsColor);
     }
 

@@ -1,13 +1,13 @@
 # WTZ Vertical Sound
 
-This document defines the vertical sound foundation delivered by roadmap
-packages P4.1 through P4.3b. P4.1 owns bounded portal discovery and caching.
-P4.2 adds authoritative route selection, transmission, pressure, and vacuum
-policy. P4.3a adds the narrow WTZ Engine extension needed to adjust an existing
+This document defines the vertical sound system delivered by roadmap packages
+P4.1 through P4.3c. P4.1 owns bounded portal discovery and caching. P4.2 adds
+authoritative route selection, transmission, pressure, and vacuum policy.
+P4.3a adds the narrow WTZ Engine extension needed to adjust an existing
 positional stream after native processing. P4.3b adds bounded per-session
-listener authorization and replacement snapshots. Apparent direction,
-attenuation, safety muting, diagnostics, and actual client presentation remain
-P4.3c.
+listener authorization and replacement snapshots. P4.3c completes apparent
+portal direction, route attenuation, client safety muting, moving-grid
+reprojection, and operational diagnostics.
 
 ## Ownership
 
@@ -22,6 +22,9 @@ P4.3c.
   audio candidates with exact session viewers, authorizes successful routes,
   maintains replacement snapshots, and contributes denied cross-floor audio
   to session PVS culling.
+- `ZLevelSoundPresentationSystem` is client-presentational. It validates exact
+  audio/viewer/grid grants on the main thread, publishes immutable policies to
+  audio workers, and never makes an authorization decision.
 - Server audio remains responsible for emissions, session selection, PVS, and
   playback identity. Client audio remains responsible for stream processing
   and apparent source presentation.
@@ -190,8 +193,14 @@ are process-local.
 `ZLevelSoundPlaybackMetrics` exposes refreshes, audio candidates, route checks,
 authorized presentations, both aggregate budget exhaustions, parent-depth
 failures, replacement snapshots, active sessions/presentations, and
-total/average/last/maximum refresh time. P4.3c will publish the operational
-subset in the debug overlay and administrative diagnostics.
+total/average/last/maximum refresh time.
+
+`ZLevelSoundClientMetrics` exposes received and rejected snapshot entries,
+candidate and cross-floor scans, current authorized/muted policies, worker
+callbacks, and total/average/last/maximum policy-build time. Server sound
+portal, route, and playback metrics are included in `zlevelmetrics`; client
+presentation metrics are included in `zlevelrendermetrics` and the debug
+overlay. Both commands reset their owned sound counters with `reset`.
 
 ## Server Authorization Boundary
 
@@ -202,10 +211,12 @@ same-floor audio remain native. Cross-floor audio requires an exact viewer on
 the same grid, an in-range pressure-aware route, and the component's existing
 included/excluded-entity filter.
 
-Each authorization records the audio entity, exact viewer, listener map/XY/world
-Z, listener-side portal position, geometric route distance, and transmission.
-The server sends a complete replacement snapshot only when that set changes;
-an empty replacement clears stale client state. Disconnects also remove retained
+Each authorization records the audio entity, exact viewer, grid, map, source
+and listener local Z, listener-side portal position in grid-local coordinates,
+geometric route distance, and transmission. Local payload coordinates remain
+stable while a grid translates, rotates, or changes frame origin. The server
+sends a complete replacement snapshot only when that set changes; an empty
+replacement clears stale client state. Disconnects also remove retained
 session state. Transform parents are made visible only after authorization, so
 the single audio entity can replicate without recursively overriding unrelated
 PVS entities.
@@ -216,18 +227,46 @@ entities retain the established fail-open policy. Authorization still refreshes
 when engine PVS is disabled; P4.3c must independently safety-mute any cross-floor
 stream for which the client lacks an exact snapshot.
 
-WTZ Engine now exposes `AudioSystem.StreamProcessed` after its default
-positional path, including native early-mute paths. The callback runs in the
-parallel audio update, accepts one subscriber, and can adjust the already
-initialized source without replacing startup, map checks, distance checks, or
-entity tracking. With no subscriber, native behavior is unchanged. P4.3c will
-consume immutable client snapshots there, place an authorized stream toward its
-final listener-side portal, and apply route distance/transmission without
-creating duplicate playback entities.
+WTZ Engine exposes `AudioSystem.StreamProcessed` after its default positional
+path, including native early-mute paths. The callback runs in the parallel
+audio update, accepts one subscriber, and can adjust the already initialized
+source without replacing startup, map checks, distance checks, or entity
+tracking. `AudioComponent.Position`, like its existing gain and occlusion
+properties, permits this narrow Content post-processing access. With no
+subscriber, native behavior is unchanged.
 
-During the P4.3b-only checkpoint, an authorized stream may reach the client but
-still use native XY spatialization. That temporary presentation mismatch is
-explicitly contained to the feature branch and is the next package's scope.
+## Client Presentation And Safety
+
+The client retains the latest complete server snapshot by exact
+`(audio NetEntity, viewer NetEntity)` key. Every frame, on the simulation main
+thread, it scans positional audio in the active view and builds the next policy
+snapshot:
+
+- global, nullspace, different-map, and same-world-Z streams remain native;
+- every different-world-Z stream defaults to an explicit muted policy;
+- authorization requires the exact current viewer, audio, grid, map, source
+  local Z, listener local Z, finite route data, range, and positive
+  transmission to match the server grant;
+- an authorized portal is reprojected from grid-local coordinates every frame,
+  so translated and rotated grids do not require new network snapshots;
+- listener-side portal occlusion is calculated on the main thread.
+
+Two reusable policy dictionaries are double-buffered. The completed snapshot
+is atomically published after construction. `StreamProcessed` performs only one
+atomic snapshot read and one dictionary lookup; it makes no ECS, transform,
+physics, network, or allocation-producing query on the audio worker. Robust's
+parallel `ProcessNow` completes before the dictionary can be reused on a later
+frame.
+
+For an authorized stream, the callback places the existing source at the final
+listener-side portal, applies portal occlusion, and multiplies native source
+gain by route transmission and the ratio between total-route and portal-only
+distance attenuation. This preserves the apparent portal direction while the
+heard loudness follows the complete route. The implementation handles every
+Robust/OpenAL attenuation mode and clamps effective distance gains to the
+source's normal `[0, 1]` range. A denied or malformed cross-floor stream is set
+to zero gain. Removing the policy returns the stream to Robust's untouched
+same-floor path on its next native update.
 
 ## Verification
 
@@ -238,25 +277,32 @@ dotnet build Content.IntegrationTests/Content.IntegrationTests.csproj --no-resto
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --filter "FullyQualifiedName~ZLevelSoundPlayback"
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --filter "FullyQualifiedName~ZLevelSound"
 dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj --no-build --filter "FullyQualifiedName~ZLevel"
+dotnet test Content.Tests/Content.Tests.csproj --no-build --filter "FullyQualifiedName~ZLevel"
 ```
 
-The P4.3b playback matrix passes 3/3 and the combined P4.1-P4.3b sound matrix
-passes 11/11, with no failures or skips. Coverage includes lower-loss ranking,
-deterministic equal-cost ties, upward/downward ordering, moving frames,
-same-floor compatibility, sealed layers, vacuum, pressure attenuation, all
-five route-work budget failures, aggregate authorization budget clamps and
-fail-closed behavior, existing recipient filters, snapshot replacement and
-cleanup, parent-chain visibility, and visual-PVS budget independence.
+The P4.3c playback matrix passes 5/5, the client attenuation unit matrix passes
+4/4, and the combined P4.1-P4.3c sound matrix passes 13/13, with no failures or
+skips. Coverage includes lower-loss ranking, deterministic equal-cost ties,
+upward/downward ordering, moving frames, same-floor compatibility, sealed
+layers, vacuum, pressure attenuation, all five route-work budget failures,
+aggregate authorization budget clamps and fail-closed behavior, existing
+recipient filters, snapshot replacement and cleanup, parent-chain visibility,
+visual-PVS budget independence, exact client grant validation, worker callback
+execution, safety muting with engine PVS disabled, native same-floor return,
+attenuation edge cases, and local-portal reprojection on a translated and
+rotated grid.
 
-The complete Content Z-level integration filter passes 240/240; Content's
-structural and capture-analysis filter passes 5/5. The 3-, 6-, and 10-floor
-baselines pass 3/3 with 6,336 measured bytes, zero warmed boundary/gravity
-misses, zero PVS budget exhaustions, and measured times of 6.748, 13.118, and
-20.628 ms. A clean solution build succeeds with zero errors and 700 established
-warnings.
+The complete Content Z-level integration filter passes 242/242; Content's
+structural, capture-analysis, and presentation unit filter passes 9/9. The
+3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes, zero warmed
+boundary/gravity misses, zero PVS budget exhaustions, and measured times of
+10.951, 14.803, and 25.142 ms. A clean solution build succeeds with zero errors
+and 700 established warnings.
 
-The complete Robust shared unit suite passes 447/447 and shared integration
-suite passes 1,026/1,026. The focused engine recipient-filter test passes 1/1.
+The focused engine callback test passes 1/1. Complete Robust client unit and
+integration suites pass 37/37 and 138/138; shared unit and integration suites
+pass 447/447 and 1,026/1,026. A clean WTZ Engine solution build succeeds with
+zero errors and 185 established warnings.
 
 The focused route workload executed 2,026 successful queries, evaluated 28,364
 edges in 104.139 ms total, and allocated zero bytes across 1,000 repeated hot
@@ -264,9 +310,9 @@ queries on the test machine.
 
 ## Deliberate Limits
 
-- P4.3b authorizes and replicates one existing cross-floor stream, but P4.3c is
-  still required for fail-closed client safety muting, apparent portal direction,
-  route attenuation, and end-to-end presentation diagnostics.
+- Client policy construction scans currently replicated positional streams once
+  per frame. Server route and presentation work remains bounded, but dense
+  multiplayer scale and retained dictionary high-water behavior belong to P8.
 - Vertical routes currently require one shared grid frame. Cross-grid sound is
   explicitly rejected until a physical docking/portal contract exists.
 - Per-floor segments use Euclidean distance; P4.2 does not invent room-scale
@@ -274,4 +320,6 @@ queries on the test machine.
 - Default and explicit openings have class-level transmission. Material,
   frequency, door state, and content-specific coefficients are future policy.
 - Pressure is a current server snapshot, not a persistent acoustic simulation.
+- The server authorizes exact entity-backed viewers. A client eye without a
+  resolvable matching viewer fails closed for cross-floor sound.
 - Focused timings are local Debug measurements, not P8 multiplayer scale data.

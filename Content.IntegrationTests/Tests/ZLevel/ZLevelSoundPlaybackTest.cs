@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Numerics;
+using Content.Client.ZLevel;
 using Content.IntegrationTests.Tests.Atmos;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Atmos;
@@ -68,10 +69,11 @@ public sealed class ZLevelSoundPlaybackTest : AtmosTest
             {
                 Assert.That(presentation.Audio, Is.EqualTo(SEntMan.GetNetEntity(fixture.Audio)));
                 Assert.That(presentation.Viewer, Is.EqualTo(Player));
+                Assert.That(presentation.Grid, Is.EqualTo(SEntMan.GetNetEntity(MapData.Grid)));
                 Assert.That(presentation.MapId, Is.EqualTo(MapData.MapId));
-                Assert.That(presentation.ListenerWorldZ, Is.EqualTo(1));
-                Assert.That(presentation.ListenerPosition, Is.EqualTo(fixture.Viewer.WorldPosition));
-                Assert.That(Vector2.Distance(presentation.PortalPosition, fixture.PortalWorldPosition),
+                Assert.That(presentation.SourceLocalZ, Is.Zero);
+                Assert.That(presentation.ListenerLocalZ, Is.EqualTo(1));
+                Assert.That(Vector2.Distance(presentation.PortalLocalPosition, fixture.PortalLocalPosition),
                     Is.LessThan(0.001f));
                 Assert.That(presentation.Distance, Is.GreaterThan(0f));
                 Assert.That(presentation.Distance, Is.LessThanOrEqualTo(8f));
@@ -269,6 +271,169 @@ public sealed class ZLevelSoundPlaybackTest : AtmosTest
                 ZLevelPvsSystem.DefaultVisibilityCheckBudget));
     }
 
+    [Test]
+    public async Task AuthorizedRoutePresentsAtMovingListenerSidePortal()
+    {
+        NetEntity audioNet = default;
+        NetEntity gridNet = default;
+        Vector2 portalLocal = default;
+        Vector2 initialPortalWorld = default;
+
+        await Client.WaitPost(() =>
+            CEntMan.System<ZLevelSoundPresentationSystem>().ResetMetrics());
+        await Server.WaitAssertion(() =>
+        {
+            Server.CfgMan.SetCVar(CVars.NetPVS, true);
+            var fixture = CreatePlaybackFixture();
+            audioNet = SEntMan.GetNetEntity(fixture.Audio);
+            gridNet = SEntMan.GetNetEntity(MapData.Grid);
+            portalLocal = fixture.PortalLocalPosition;
+            var playback = SEntMan.System<ZLevelSoundPlaybackSystem>();
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+            Assert.That(playback.TryGetSessionPresentations(ServerSession, out var presentations), Is.True);
+            Assert.That(presentations, Has.Count.EqualTo(1));
+        });
+
+        await Pair.RunTicksSync(10);
+        await Server.WaitAssertion(() =>
+        {
+            var playback = SEntMan.System<ZLevelSoundPlaybackSystem>();
+            Assert.That(playback.TryGetSessionPresentations(ServerSession, out var presentations), Is.True);
+            Assert.That(presentations, Has.Count.EqualTo(1));
+        });
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(audioNet, out var audioUid), Is.True);
+            Assert.That(CEntMan.TryGetEntity(gridNet, out var gridUid), Is.True);
+            var transform = CEntMan.System<SharedTransformSystem>();
+            var expected = transform.ToMapCoordinates(
+                new EntityCoordinates(gridUid!.Value, portalLocal)).Position;
+            var presentation = CEntMan.System<ZLevelSoundPresentationSystem>();
+            var metrics = presentation.Snapshot();
+            Assert.That(
+                presentation.TryGetCurrentAuthorizedPolicy(
+                    audioUid!.Value,
+                    out var policyPosition,
+                    out var gainMultiplier),
+                Is.True);
+            initialPortalWorld = policyPosition;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(metrics.SnapshotsReceived, Is.GreaterThan(0));
+                Assert.That(metrics.SnapshotPresentationsReceived, Is.GreaterThan(0));
+                Assert.That(metrics.InvalidPresentations, Is.Zero);
+                Assert.That(metrics.ActivePresentations, Is.EqualTo(1));
+                Assert.That(metrics.CurrentAuthorized, Is.EqualTo(1));
+                Assert.That(metrics.CurrentMuted, Is.Zero);
+                Assert.That(metrics.ProcessedAuthorized, Is.GreaterThan(0));
+                Assert.That(metrics.ProcessedMuted, Is.Zero);
+                Assert.That(Vector2.Distance(policyPosition, expected), Is.LessThan(0.001f));
+                Assert.That(gainMultiplier, Is.GreaterThan(0f));
+                Assert.That(gainMultiplier, Is.LessThan(1f));
+            });
+        });
+
+        await Server.WaitPost(() =>
+        {
+            Transform.SetLocalPosition(MapData.Grid, new Vector2(7f, -4f));
+            Transform.SetLocalRotation(MapData.Grid, Angle.FromDegrees(31f));
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+        await Pair.RunTicksSync(10);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(audioNet, out var audioUid), Is.True);
+            Assert.That(CEntMan.TryGetEntity(gridNet, out var gridUid), Is.True);
+            var transform = CEntMan.System<SharedTransformSystem>();
+            var expected = transform.ToMapCoordinates(
+                new EntityCoordinates(gridUid!.Value, portalLocal)).Position;
+            var presentation = CEntMan.System<ZLevelSoundPresentationSystem>();
+            var metrics = presentation.Snapshot();
+            Assert.That(
+                presentation.TryGetCurrentAuthorizedPolicy(
+                    audioUid!.Value,
+                    out var policyPosition,
+                    out _),
+                Is.True);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(Vector2.Distance(policyPosition, expected), Is.LessThan(0.001f));
+                Assert.That(Vector2.Distance(policyPosition, initialPortalWorld), Is.GreaterThan(1f));
+                Assert.That(metrics.ActivePresentations, Is.EqualTo(1));
+                Assert.That(metrics.CurrentAuthorized, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
+    public async Task EnginePvsDisabledStillSafetyMutesUnauthorizedCrossFloorAudio()
+    {
+        NetEntity sourceNet = default;
+        NetEntity audioNet = default;
+
+        await Client.WaitPost(() =>
+            CEntMan.System<ZLevelSoundPresentationSystem>().ResetMetrics());
+        await Server.WaitAssertion(() =>
+        {
+            Server.CfgMan.SetCVar(CVars.NetPVS, false);
+            var fixture = CreatePlaybackFixture();
+            fixture.UpperMixture.Clear();
+            sourceNet = SEntMan.GetNetEntity(fixture.Source);
+            audioNet = SEntMan.GetNetEntity(fixture.Audio);
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+
+        await Pair.RunTicksSync(10);
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(audioNet, out var audioUid), Is.True,
+                "Disabling engine PVS must exercise client safety rather than server culling.");
+            var presentation = CEntMan.System<ZLevelSoundPresentationSystem>();
+            var metrics = presentation.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(metrics.ActivePresentations, Is.Zero);
+                Assert.That(metrics.CurrentAuthorized, Is.Zero);
+                Assert.That(metrics.CurrentMuted, Is.EqualTo(1));
+                Assert.That(metrics.ProcessedMuted, Is.GreaterThan(0));
+                Assert.That(presentation.HasCurrentPolicy(audioUid!.Value), Is.True);
+            });
+        });
+
+        await Server.WaitAssertion(() =>
+        {
+            Assert.That(SEntMan.TryGetEntity(sourceNet, out var source), Is.True);
+            Assert.That(
+                SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(source!.Value, 1),
+                Is.True);
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+        await Client.WaitPost(() =>
+            CEntMan.System<ZLevelSoundPresentationSystem>().ResetMetrics());
+        await Pair.RunTicksSync(10);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(audioNet, out var audioUid), Is.True);
+            var presentation = CEntMan.System<ZLevelSoundPresentationSystem>();
+            var metrics = presentation.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(metrics.Frames, Is.GreaterThan(0));
+                Assert.That(metrics.AudioCandidates, Is.GreaterThan(0));
+                Assert.That(presentation.HasCurrentPolicy(audioUid!.Value), Is.False);
+                Assert.That(metrics.CurrentAuthorized, Is.Zero);
+                Assert.That(metrics.CurrentMuted, Is.Zero,
+                    "Same-floor audio must return to Robust's native path.");
+            });
+        });
+
+        await Server.WaitPost(() => Server.CfgMan.SetCVar(CVars.NetPVS, true));
+    }
+
     private PlaybackFixture CreatePlaybackFixture()
     {
         var markers = SEntMan.AllEntities<TestMarkerComponent>();
@@ -306,6 +471,7 @@ public sealed class ZLevelSoundPlaybackTest : AtmosTest
         MakeAir(lowerMixture!);
         MakeAir(upperMixture!);
         SetBoundary(tile, 0, ZLevelBoundaryChannels.Sound | ZLevelBoundaryChannels.Atmosphere);
+        SAtmos.SetAtmosphereSimulation(RelevantAtmos, false);
 
         Transform.SetCoordinates(SPlayer, coordinates);
         Assert.That(zLevels.SetZLevelPosition(SPlayer, 1), Is.True);
@@ -330,13 +496,13 @@ public sealed class ZLevelSoundPlaybackTest : AtmosTest
             1,
             1f,
             true);
-        var portalWorldPosition = Transform.ToMapCoordinates(coordinates).Position;
+        var portalCoordinates = map.GridTileToLocal(MapData.Grid, grid, tile);
         return new PlaybackFixture(
             source,
             audio!.Value.Entity,
             upperMixture,
             viewer,
-            portalWorldPosition);
+            portalCoordinates.Position);
     }
 
     private void FillLayer(
@@ -391,5 +557,5 @@ public sealed class ZLevelSoundPlaybackTest : AtmosTest
         EntityUid Audio,
         GasMixture UpperMixture,
         ZLevelPvsViewerContext Viewer,
-        Vector2 PortalWorldPosition);
+        Vector2 PortalLocalPosition);
 }

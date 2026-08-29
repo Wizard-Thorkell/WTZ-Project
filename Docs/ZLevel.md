@@ -532,14 +532,17 @@ Major unfinished areas:
 - Atmos monitoring-console pipe visualization is still a 2D projection and can
   visually merge different-floor networks even though their simulation groups
   are isolated.
-- Upper-floor fire audio and burned decals are suppressed until sound/effects
-  gain a Z-aware spatial contract.
 - Active-floor tiles, point lights, and FOV occluders are selected natively by
   world Z. Lower-floor light and tiles now share bounded aperture projection
-  with vertical attenuation; frame budgets, fail-soft degradation, and
-  lower-floor source shadows remain P3.4 work. See `Docs/ZLevelLighting.md`.
+  with vertical attenuation, frame budgets, fail-soft degradation, lower-floor
+  source shadows, and real visual capture coverage. See
+  `Docs/ZLevelLighting.md`.
 - Pathfinding and AI do not understand multi-floor navigation.
-- Sound propagation is not Z-aware.
+- Positional sound now routes through bounded same-grid vertical portals with
+  pressure-aware server authorization, exact-viewer PVS, apparent portal
+  direction, route attenuation, and client fail-closed safety. Cross-grid and
+  room-scale material acoustics remain deliberate limits. See
+  `Docs/ZLevelSound.md`.
 - Hitscan, physical projectile lifecycle and flight, projectile actions, and
   authoritative explosion topology are Z-aware. Other area effects remain
   incomplete.

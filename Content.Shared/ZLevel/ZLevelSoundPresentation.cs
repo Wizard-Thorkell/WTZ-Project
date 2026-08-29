@@ -16,10 +16,11 @@ namespace Content.Shared.ZLevel;
 public readonly record struct ZLevelSoundPresentation(
     NetEntity Audio,
     NetEntity Viewer,
+    NetEntity Grid,
     MapId MapId,
-    Vector2 ListenerPosition,
-    int ListenerWorldZ,
-    Vector2 PortalPosition,
+    int SourceLocalZ,
+    int ListenerLocalZ,
+    Vector2 PortalLocalPosition,
     float Distance,
     float Transmission);
 
