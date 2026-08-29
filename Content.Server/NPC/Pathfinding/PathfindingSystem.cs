@@ -90,6 +90,7 @@ namespace Content.Server.NPC.Pathfinding
             _xformQuery = GetEntityQuery<TransformComponent>();
             _zPositionQuery = GetEntityQuery<ZLevelPositionComponent>();
 
+            InitializeZLevelRoutes();
             _playerManager.PlayerStatusChanged += OnPlayerChange;
             InitializeGrid();
             SubscribeNetworkEvent<RequestPathfindingDebugMessage>(OnBreadcrumbs);

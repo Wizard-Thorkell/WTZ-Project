@@ -1,6 +1,7 @@
 // DragonStation Z-Level prototype.
 // Copyright (c) pedel and OpenAI Codex.
 
+using System.Collections.Immutable;
 using System.Diagnostics;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
@@ -27,6 +28,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private readonly Queue<Vector2i> _connectedPending = new();
     private readonly HashSet<Vector2i> _connectedVisited = new();
     private readonly List<EntityUid> _entityBuffer = new();
+    private readonly List<ZLevelTraversalNavigationEdge> _edgeBuffer = new();
+    private readonly Dictionary<MapId, ZLevelTraversalGraphSnapshot> _snapshotCache = new();
 
     private long _topologyRevision;
     private long _environmentRevision;
@@ -41,6 +44,16 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private long _closedEdges;
     private long _unsupportedEdges;
     private long _invalidEdges;
+    private long _snapshotRequests;
+    private long _snapshotCacheHits;
+    private long _snapshotBuilds;
+    private long _snapshotEdges;
+    private long _snapshotTimestampTicks;
+    private long _lastSnapshotTimestampTicks;
+    private long _maxSnapshotTimestampTicks;
+    private long _snapshotAllocatedBytes;
+    private long _lastSnapshotAllocatedBytes;
+    private long _maxSnapshotAllocatedBytes;
     private long _queryTimestampTicks;
     private long _lastQueryTimestampTicks;
     private long _maxQueryTimestampTicks;
@@ -65,6 +78,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
         SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnBoundaryChanged);
         SubscribeLocalEvent<ZLevelFrameChangedEvent>(OnFrameChanged);
+        SubscribeLocalEvent<MapRemovedEvent>(OnMapRemoved);
     }
 
     /// <summary>
@@ -242,6 +256,64 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         }
     }
 
+    /// <summary>
+    /// Copies the currently usable traversal graph into a deterministic snapshot.
+    /// The returned data is safe to inspect without reading live ECS state.
+    /// </summary>
+    public ZLevelTraversalGraphSnapshot CreateSnapshot(MapId mapId)
+    {
+        _snapshotRequests++;
+        if (_snapshotCache.TryGetValue(mapId, out var cached) &&
+            cached.TopologyRevision == _topologyRevision &&
+            cached.EnvironmentRevision == _environmentRevision)
+        {
+            _snapshotCacheHits++;
+            return cached;
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+        GetEdges(mapId, _edgeBuffer);
+        _edgeBuffer.Sort(ZLevelTraversalNavigationEdgeComparer.Instance);
+        var edges = _edgeBuffer.ToImmutableArray();
+        var snapshot = new ZLevelTraversalGraphSnapshot(
+            mapId,
+            _topologyRevision,
+            _environmentRevision,
+            edges);
+        _snapshotCache[mapId] = snapshot;
+
+        var elapsed = Stopwatch.GetTimestamp() - started;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        _snapshotBuilds++;
+        _snapshotEdges += edges.Length;
+        _snapshotTimestampTicks += elapsed;
+        _lastSnapshotTimestampTicks = elapsed;
+        _maxSnapshotTimestampTicks = Math.Max(_maxSnapshotTimestampTicks, elapsed);
+        _snapshotAllocatedBytes += allocated;
+        _lastSnapshotAllocatedBytes = allocated;
+        _maxSnapshotAllocatedBytes = Math.Max(_maxSnapshotAllocatedBytes, allocated);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Compares a detached snapshot with the live graph without inspecting its edges.
+    /// </summary>
+    public ZLevelTraversalGraphSnapshotStatus ValidateSnapshot(in ZLevelTraversalGraphSnapshot snapshot)
+    {
+        var topologyChanged = snapshot.TopologyRevision != _topologyRevision;
+        var environmentChanged = snapshot.EnvironmentRevision != _environmentRevision;
+
+        if (topologyChanged && environmentChanged)
+            return ZLevelTraversalGraphSnapshotStatus.TopologyAndEnvironmentChanged;
+        if (topologyChanged)
+            return ZLevelTraversalGraphSnapshotStatus.TopologyChanged;
+        if (environmentChanged)
+            return ZLevelTraversalGraphSnapshotStatus.EnvironmentChanged;
+        return ZLevelTraversalGraphSnapshotStatus.Current;
+    }
+
     public ZLevelTraversalGraphMetricsSnapshot Snapshot()
     {
         return new ZLevelTraversalGraphMetricsSnapshot(
@@ -260,6 +332,17 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             _closedEdges,
             _unsupportedEdges,
             _invalidEdges,
+            _snapshotCache.Count,
+            _snapshotRequests,
+            _snapshotCacheHits,
+            _snapshotBuilds,
+            _snapshotEdges,
+            TimestampToMilliseconds(_snapshotTimestampTicks),
+            TimestampToMilliseconds(_lastSnapshotTimestampTicks),
+            TimestampToMilliseconds(_maxSnapshotTimestampTicks),
+            _snapshotAllocatedBytes,
+            _lastSnapshotAllocatedBytes,
+            _maxSnapshotAllocatedBytes,
             TimestampToMilliseconds(_queryTimestampTicks),
             TimestampToMilliseconds(_lastQueryTimestampTicks),
             TimestampToMilliseconds(_maxQueryTimestampTicks));
@@ -278,6 +361,16 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         _closedEdges = 0;
         _unsupportedEdges = 0;
         _invalidEdges = 0;
+        _snapshotRequests = 0;
+        _snapshotCacheHits = 0;
+        _snapshotBuilds = 0;
+        _snapshotEdges = 0;
+        _snapshotTimestampTicks = 0;
+        _lastSnapshotTimestampTicks = 0;
+        _maxSnapshotTimestampTicks = 0;
+        _snapshotAllocatedBytes = 0;
+        _lastSnapshotAllocatedBytes = 0;
+        _maxSnapshotAllocatedBytes = 0;
         _queryTimestampTicks = 0;
         _lastQueryTimestampTicks = 0;
         _maxQueryTimestampTicks = 0;
@@ -365,6 +458,11 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             _environmentRevision++;
             return;
         }
+    }
+
+    private void OnMapRemoved(MapRemovedEvent args)
+    {
+        _snapshotCache.Remove(args.MapId);
     }
 
     private void RefreshRegistration(EntityUid uid)
@@ -547,6 +645,40 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         ZLevelTraversalNodeKey Key,
         MapId MapId,
         ZLevelTraversalProfile Profile);
+
+    private sealed class ZLevelTraversalNavigationEdgeComparer : IComparer<ZLevelTraversalNavigationEdge>
+    {
+        public static readonly ZLevelTraversalNavigationEdgeComparer Instance = new();
+
+        public int Compare(ZLevelTraversalNavigationEdge left, ZLevelTraversalNavigationEdge right)
+        {
+            var comparison = left.Source.WorldZ.CompareTo(right.Source.WorldZ);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Source.GridUid.CompareTo(right.Source.GridUid);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Source.LocalZ.CompareTo(right.Source.LocalZ);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Source.Tile.X.CompareTo(right.Source.Tile.X);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Source.Tile.Y.CompareTo(right.Source.Tile.Y);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = left.Destination.WorldZ.CompareTo(right.Destination.WorldZ);
+            if (comparison != 0)
+                return comparison;
+
+            return left.Source.Traversal.CompareTo(right.Source.Traversal);
+        }
+    }
 }
 
 public readonly record struct ZLevelTraversalNodeKey(EntityUid GridUid, Vector2i Tile, int LocalZ);
@@ -585,6 +717,33 @@ public enum ZLevelTraversalEdgeStatus : byte
     MissingDestinationSupport,
 }
 
+/// <summary>
+/// A simulation-thread capture of valid traversal edges. Search workers may read
+/// this value without touching live entity or component collections.
+/// </summary>
+public readonly record struct ZLevelTraversalGraphSnapshot(
+    MapId MapId,
+    long TopologyRevision,
+    long EnvironmentRevision,
+    ImmutableArray<ZLevelTraversalNavigationEdge> Edges)
+{
+    public ZLevelTraversalGraphVersion Version =>
+        new(MapId, TopologyRevision, EnvironmentRevision);
+}
+
+public readonly record struct ZLevelTraversalGraphVersion(
+    MapId MapId,
+    long TopologyRevision,
+    long EnvironmentRevision);
+
+public enum ZLevelTraversalGraphSnapshotStatus : byte
+{
+    Current,
+    TopologyChanged,
+    EnvironmentChanged,
+    TopologyAndEnvironmentChanged,
+}
+
 public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     int Nodes,
     int Locations,
@@ -601,6 +760,17 @@ public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     long ClosedEdges,
     long UnsupportedEdges,
     long InvalidEdges,
+    int CachedSnapshots,
+    long SnapshotRequests,
+    long SnapshotCacheHits,
+    long SnapshotBuilds,
+    long SnapshotEdges,
+    double TotalSnapshotMilliseconds,
+    double LastSnapshotMilliseconds,
+    double MaxSnapshotMilliseconds,
+    long TotalSnapshotAllocatedBytes,
+    long LastSnapshotAllocatedBytes,
+    long MaxSnapshotAllocatedBytes,
     double TotalQueryMilliseconds,
     double LastQueryMilliseconds,
     double MaxQueryMilliseconds)
@@ -609,4 +779,13 @@ public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     public double AverageQueryMilliseconds => ConnectedQueries + EdgeQueries == 0
         ? 0d
         : TotalQueryMilliseconds / (ConnectedQueries + EdgeQueries);
+    public double AverageSnapshotMilliseconds => SnapshotBuilds == 0
+        ? 0d
+        : TotalSnapshotMilliseconds / SnapshotBuilds;
+    public double AverageSnapshotAllocatedBytes => SnapshotBuilds == 0
+        ? 0d
+        : TotalSnapshotAllocatedBytes / (double) SnapshotBuilds;
+    public double SnapshotHitPercent => SnapshotRequests == 0
+        ? 0d
+        : SnapshotCacheHits * 100d / SnapshotRequests;
 }

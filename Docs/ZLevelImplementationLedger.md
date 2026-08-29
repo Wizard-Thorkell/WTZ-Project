@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.3 hierarchical route search and typed composition`.
+- Active package: `P5.3b hierarchical route search and typed composition`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.2 complete; P5.3 active) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.3a complete; P5.3b active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -66,7 +66,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P5.1 | Navigation inventory and indexed authored traversal-edge contract | Complete |
 | P5.2 | Floor-specific local polygon navigation | Complete |
-| P5.3 | Hierarchical route search and typed route composition | Active |
+| P5.3a | Detached graph snapshots, typed routes, revisions, and budgets | Complete |
+| P5.3b | Hierarchical route search and typed route composition | Active |
 | P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Pending |
 
 ## Phase P0 Packages
@@ -4586,6 +4587,101 @@ allocation is inside Robust physics enumeration.
   composes local and transition legs, and rejects stale revisions
   deterministically.
 
+## Completed Package: P5.3a Detached Graph And Typed Route Contracts
+
+### Scope
+
+- Publish deterministic immutable traversal snapshots that hierarchical search
+  can read without touching live ECS collections.
+- Cache detached snapshots by map and graph revision, evict them on map removal,
+  and expose request/hit/build/allocation metrics.
+- Define explicit endpoint, local-leg, traversal-leg, route, result, diagnostic,
+  revision, and caller-owned budget contracts.
+- Add configurable state-expansion, local-path, and traversal-edge limits without
+  changing current NPC behavior before real route composition exists.
+
+### Acceptance Criteria
+
+- Snapshot ordering does not depend on entity enumeration order, and a captured
+  edge array cannot observe later graph mutations.
+- Search input can be reused without ECS access or per-request edge-copy
+  allocation, while topology and environment staleness remain distinguishable.
+- A typed route cannot contain disconnected endpoints, cross-map legs, invalid
+  local-floor transitions, non-finite costs, or traversal revisions from a
+  different snapshot.
+- Budget exhaustion, cancellation, no-path, topology, and environment outcomes
+  have separate result statuses for P5.3b/P5.4 consumers.
+
+### Verification Evidence
+
+- The focused snapshot/route integration scenario passes 1/1. It covers
+  semantic edge ordering, detached storage, topology-only, environment-only and
+  combined staleness, route invariants, configured budgets, and metrics.
+- After 32 warmups, 256 cached snapshot requests reuse the same immutable edge
+  array with no more than 256 bytes of total current-thread allocation. Cold
+  two/three-edge captures stay below the 16,384-byte regression ceiling.
+- The final complete Content Z-level integration matrix passes 248/248, and the
+  Content unit/analyzer matrix passes 9/9.
+- The final 3, 6, and 10-floor artifacts pass 3/3 with 100% warmed boundary and
+  gravity cache hits, zero PVS budget exhaustion, and 6,216 measured bytes each.
+  Local measured times are 4.1361, 8.2035, and 13.1701 ms.
+- A full `SpaceStation14.slnx` build completes with zero errors and 237 existing
+  warnings emitted by this incremental build; none points to a P5.3a file.
+
+### Decisions
+
+- Keep the live connector index simulation-thread-owned and give asynchronous
+  route work only immutable value snapshots.
+- Sort edges by source world floor, grid, local floor, tile, destination floor,
+  and traversal UID so equal graph state yields equal search order.
+- Cache one snapshot per map/revision because copying an immutable edge array for
+  every NPC request would defeat the worker-safety design with avoidable GC work.
+- Retain separate topology and environment revisions. P5.3b can therefore report
+  why a pending route became stale instead of collapsing both into `NoPath`.
+- Represent vertical actions as authored traversal legs and local movement as
+  native polygon legs. No fake polygon neighbor or empty-space walkability is
+  introduced.
+- Use global graph revisions conservatively for now. Map-scoped revisions are an
+  optimization only if P5.4/P8 metrics show cross-map invalidation churn.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to detached traversal input, typed route
+      contracts, budgets/metrics, focused tests, and pathfinding documentation.
+- [x] Invariant review: Z 0, local/world floors, moving frames, map lifetime,
+      directed edges, support/boundaries, server ownership, and stale revisions
+      were reviewed.
+- [x] Automated verification: 1/1 focused, 248/248 Content integration, 9/9
+      Content unit/analyzer, 3/3 baselines, and the full solution build pass.
+- [x] Performance evidence: 256 warmed requests stay within 256 bytes, cold small
+      snapshots within 16,384 bytes, and cache/build timing plus allocation are
+      exposed through `zlevelmetrics`.
+- [x] Documentation: contracts, CVars, ordering, cache ownership, tests,
+      measurements, limitations, and next work are recorded in both P5 docs.
+- [x] Dependency check: no WTZ Engine change is required; the paired engine tree
+      remains at `3aaca280f628876939afcc10a9be920b3898902a`.
+- [x] Git check: generated baseline artifacts remain ignored; parent/engine
+      status and `git diff --check` are verified immediately before commit.
+- [x] Mini review: no blocking issue remains in the detached contract; residual
+      planning/execution work is assigned below.
+- [x] Commit: the isolated `Define hierarchical Z-level route contracts` commit
+      is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: hierarchical work can now operate on deterministic, allocation-free
+  warmed snapshots without racing component/index mutations.
+- Finding: local and vertical route semantics are explicit and independently
+  validatable; budget and stale-state failures cannot masquerade as no-path.
+- Residual risk: the contracts are not yet consumed by gameplay. Cross-floor
+  native A* still deliberately returns `NoPath` until P5.3b composes real legs.
+- Residual risk: graph revisions are global, so activity on one map may rebuild a
+  different map's snapshot. Metrics now make that cost observable.
+- Residual risk: local `PathPoly` instances can become invalid after capture;
+  P5.3b/P5.4 must validate the first affected leg and replan before execution.
+- Next package: P5.3b runs bounded hierarchical search over these snapshots,
+  awaits native same-floor A*, composes the typed route, and rejects stale work.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4629,3 +4725,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P4.3c | `Allow content audio source positioning` / `Present routed vertical sound on clients` | 4 unit, 5 playback, 13 sound, 242 Content integration, 9 Content unit/analyzer, 37/138 engine client, 447/1,026 engine shared, 3 baseline, clean builds, diff review | Complete |
 | 2026-08-29 | P5.1 | `Index authored Z-level traversal edges` | 3 focused, 16 movement, 244 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P5.2 | `Separate pathfinding navigation by Z level` | 3 focused, 247 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
+| 2026-08-29 | P5.3a | `Define hierarchical Z-level route contracts` | 1 focused, 248 Content integration, 9 Content unit/analyzer, 3 baseline, full build, cache/allocation/diff review | Complete |

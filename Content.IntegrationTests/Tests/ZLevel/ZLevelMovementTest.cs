@@ -2,9 +2,12 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 #nullable enable
+using System.Collections.Immutable;
 using System.Collections.Generic;
+using System.Linq;
 using Content.IntegrationTests.Tests.Helpers;
 using Content.IntegrationTests.Tests.Movement;
+using Content.Server.NPC.Pathfinding;
 using Content.Server.Power.Components;
 using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
@@ -899,6 +902,147 @@ public sealed class ZLevelMovementTest : MovementTest
             {
                 Assert.That(edge.Source.WorldZ, Is.EqualTo(6));
                 Assert.That(edge.Destination.WorldZ, Is.EqualTo(7));
+            });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelTraversalSnapshotsAndRouteContractsAreDetachedAndDeterministic()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var origin = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetCoordinates(PlayerCoords));
+
+            EntityUid SpawnStairs(int x)
+            {
+                var tile = origin + new Vector2i(x, 0);
+                map.SetZLevelTile(
+                    MapData.Grid,
+                    grid,
+                    new ZLevelTileIndices(tile.X, tile.Y, 1),
+                    new Tile(1));
+                var stairs = SEntMan.SpawnEntity(
+                    "ZLevelStairsUp",
+                    map.GridTileToLocal(MapData.Grid, grid, tile));
+                graph.RefreshTraversal(stairs);
+                return stairs;
+            }
+
+            graph.ResetMetrics();
+            SpawnStairs(3);
+            SpawnStairs(1);
+            var first = graph.CreateSnapshot(MapData.MapId);
+            Assert.Multiple(() =>
+            {
+                Assert.That(first.Edges, Has.Length.EqualTo(2));
+                Assert.That(first.Edges[0].Source.Tile.X, Is.LessThan(first.Edges[1].Source.Tile.X));
+                Assert.That(graph.ValidateSnapshot(first), Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+            });
+
+            SpawnStairs(2);
+            var second = graph.CreateSnapshot(MapData.MapId);
+            Assert.Multiple(() =>
+            {
+                Assert.That(first.Edges, Has.Length.EqualTo(2),
+                    "A graph snapshot must not observe later registrations.");
+                Assert.That(second.Edges.Select(edge => edge.Source.Tile.X),
+                    Is.Ordered.Ascending);
+                Assert.That(graph.ValidateSnapshot(first),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.TopologyChanged));
+                Assert.That(graph.ValidateSnapshot(second),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+            });
+
+            for (var i = 0; i < 32; i++)
+                graph.CreateSnapshot(MapData.MapId);
+
+            var snapshotMisses = 0;
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 256; i++)
+            {
+                var cached = graph.CreateSnapshot(MapData.MapId);
+                if (!cached.Edges.Equals(second.Edges))
+                    snapshotMisses++;
+            }
+            var snapshotAllocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.Multiple(() =>
+            {
+                Assert.That(snapshotMisses, Is.Zero);
+                Assert.That(snapshotAllocated, Is.LessThanOrEqualTo(256),
+                    "Warmed graph snapshot requests should reuse detached edge storage.");
+            });
+
+            var edge = second.Edges[0];
+            var sourceCoordinates = map.GridTileToLocal(MapData.Grid, grid, edge.Source.Tile);
+            var destinationCoordinates = map.GridTileToLocal(MapData.Grid, grid, edge.Destination.Tile);
+            var source = new ZLevelPathEndpoint(MapData.MapId, sourceCoordinates, edge.Source.WorldZ);
+            var destination = new ZLevelPathEndpoint(
+                MapData.MapId,
+                destinationCoordinates,
+                edge.Destination.WorldZ);
+            Assert.That(
+                ZLevelPathLeg.TryCreateTraversal(source, destination, edge, out var traversalLeg),
+                Is.True);
+            Assert.That(
+                ZLevelPathRoute.TryCreate(
+                    source,
+                    destination,
+                    second.Version,
+                    ImmutableArray.Create(traversalLeg),
+                    out var route),
+                Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(route, Is.Not.Null);
+                Assert.That(route!.Legs, Has.Length.EqualTo(1));
+                Assert.That(route.Legs[0].Kind, Is.EqualTo(ZLevelPathLegKind.Traversal));
+                Assert.That(route.TotalCost, Is.EqualTo(edge.Cost));
+            });
+
+            var disconnected = source with { WorldZ = source.WorldZ + 8 };
+            Assert.That(
+                ZLevelPathRoute.TryCreate(
+                    disconnected,
+                    destination,
+                    second.Version,
+                    ImmutableArray.Create(traversalLeg),
+                    out _),
+                Is.False,
+                "A route cannot skip from a different endpoint into its first leg.");
+
+            var budget = SEntMan.System<PathfindingSystem>().CreateDefaultZLevelPathBudget();
+            Assert.Multiple(() =>
+            {
+                Assert.That(budget.RemainingStateExpansions, Is.GreaterThan(0));
+                Assert.That(budget.RemainingLocalPaths, Is.GreaterThan(0));
+                Assert.That(budget.RemainingTraversalEdges, Is.GreaterThan(0));
+            });
+
+            SEntMan.System<SharedTransformSystem>().SetZLevelFrameOrigin(MapData.Grid, 5);
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.ValidateSnapshot(second),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.EnvironmentChanged));
+                Assert.That(graph.ValidateSnapshot(first),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.TopologyAndEnvironmentChanged));
+            });
+
+            var metrics = graph.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(metrics.SnapshotRequests, Is.EqualTo(290));
+                Assert.That(metrics.SnapshotCacheHits, Is.EqualTo(288));
+                Assert.That(metrics.SnapshotBuilds, Is.EqualTo(2));
+                Assert.That(metrics.SnapshotEdges, Is.EqualTo(5));
+                Assert.That(metrics.MaxSnapshotAllocatedBytes, Is.GreaterThan(0));
+                Assert.That(metrics.MaxSnapshotAllocatedBytes, Is.LessThanOrEqualTo(16_384),
+                    "Small traversal snapshots should allocate only their detached edge storage.");
             });
         });
     }

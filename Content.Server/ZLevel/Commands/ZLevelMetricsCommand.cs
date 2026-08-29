@@ -187,6 +187,18 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{traversalMetrics.AverageQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.LastQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.MaxQueryMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  traversal snapshots: cached={traversalMetrics.CachedSnapshots}, " +
+            $"requests/hits/builds/edges={traversalMetrics.SnapshotRequests}/" +
+            $"{traversalMetrics.SnapshotCacheHits}/" +
+            $"{traversalMetrics.SnapshotBuilds}/{traversalMetrics.SnapshotEdges}, " +
+            $"hit-rate={traversalMetrics.SnapshotHitPercent:0.00}%, avg/last/max=" +
+            $"{traversalMetrics.AverageSnapshotMilliseconds:0.000}/" +
+            $"{traversalMetrics.LastSnapshotMilliseconds:0.000}/" +
+            $"{traversalMetrics.MaxSnapshotMilliseconds:0.000}ms, allocated avg/last/max=" +
+            $"{traversalMetrics.AverageSnapshotAllocatedBytes:0}/" +
+            $"{traversalMetrics.LastSnapshotAllocatedBytes}/" +
+            $"{traversalMetrics.MaxSnapshotAllocatedBytes}B");
         var pathfindingMetrics = pathfinding.SnapshotZLevelMetrics();
         shell.WriteLine(
             $"  pathfinding floors: chunks/floors/pending=" +

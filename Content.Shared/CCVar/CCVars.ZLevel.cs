@@ -246,6 +246,24 @@ public sealed partial class CCVars
             16_384,
             CVar.CLIENTONLY | CVar.ARCHIVE);
 
+    /// <summary>
+    /// Maximum hierarchical states expanded by one Z-level path request.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelPathfindingMaxStateExpansions =
+        CVarDef.Create("zlevel.pathfinding_max_state_expansions", 64, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum native same-floor paths requested by one hierarchical search.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelPathfindingMaxLocalPaths =
+        CVarDef.Create("zlevel.pathfinding_max_local_paths", 128, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum authored vertical edges evaluated by one hierarchical search.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelPathfindingMaxTraversalEdges =
+        CVarDef.Create("zlevel.pathfinding_max_traversal_edges", 512, CVar.SERVERONLY);
+
     public static readonly CVarDef<bool> ZLevelDebugOverlay =
         CVarDef.Create("zlevel.debug_overlay", false, CVar.CLIENTONLY | CVar.ARCHIVE);
 }

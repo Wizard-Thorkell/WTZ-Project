@@ -152,13 +152,49 @@ when requested. Created floor chunks currently retain the legacy cache lifetime
 even after their last authored tile is removed; P5.4/P8 will use these counters
 to evaluate bounded eviction under long rounds.
 
+## P5.3a Detached Graph And Route Contracts
+
+`ZLevelTraversalGraphSystem.CreateSnapshot` copies currently valid authored
+edges into deterministic order and returns an immutable array stamped with its
+map, topology revision, and environment revision. Search code may inspect this
+value without touching component queries or the graph's mutable indexes.
+
+Snapshots are cached per map and revision. Repeated requests share the same
+detached edge storage; topology or environment changes force a fresh capture,
+and map removal evicts the retained entry. Revisions are currently global to the
+graph, so a connector change on one map conservatively makes every map snapshot
+stale. `zlevelmetrics` exposes cached snapshots, requests, hits, builds, copied
+edges, time, and allocation so P5.4/P8 can decide whether map-scoped revisions
+are warranted by real server workload.
+
+The typed route contract consists of:
+
+- `ZLevelPathEndpoint`, carrying map, exact coordinates, and world Z;
+- `ZLevelPathLeg`, discriminating a native same-floor polygon path from one
+  authored vertical traversal edge;
+- `ZLevelPathRoute`, enforcing connected endpoints, one graph version, finite
+  non-negative costs, and matching revisions for every traversal leg;
+- `ZLevelPathRouteResult`, with distinct no-path, cancellation, budget, topology,
+  and environment outcomes;
+- `ZLevelPathSearchBudget`, with caller-owned remaining state, local-path, and
+  traversal-edge work.
+
+Default limits are controlled by
+`zlevel.pathfinding_max_state_expansions` (64),
+`zlevel.pathfinding_max_local_paths` (128), and
+`zlevel.pathfinding_max_traversal_edges` (512), each clamped to a hard server
+ceiling. P5.3a defines no gameplay fallback and does not encode vertical travel
+as a fake `PathPoly`; P5.3b will populate these contracts with real local A* legs.
+
 ## Remaining P5 Packages
 
-### P5.3 Hierarchical Planning
+### P5.3b Hierarchical Planning
 
-- Search the traversal graph with configurable edge and expansion budgets.
+- Search detached traversal snapshots with configurable edge and expansion
+  budgets.
 - Compose local path legs between the start, connectors, and destination.
-- Reject stale topology/environment revisions and replan affected legs only.
+- Reject stale topology/environment revisions and expose the first invalid leg
+  for P5.4 replanning.
 - Return a typed route rather than encoding vertical actions as fake polygons.
 
 ### P5.4 AI Execution And Dynamic Connectors
@@ -207,3 +243,19 @@ warnings. Reusing one fixture candidate set across a chunk lowers the measured
 warmed breadcrumb build from 59,480 to 55,448 bytes; the focused fixture
 enforces a 58,000-byte ceiling so the old per-tile allocation path cannot return
 silently.
+
+## P5.3a Verification
+
+Focused integration coverage verifies deterministic semantic edge ordering,
+snapshot immutability after later registrations, separate topology/environment
+staleness, connected typed-route invariants, and positive configured budgets.
+After warmup, 256 snapshot requests reuse the same immutable edge array with no
+more than 256 bytes of total current-thread allocation. A cold two/three-edge
+snapshot remains below a 16,384-byte ceiling.
+
+The complete Content Z-level integration matrix passes 248 tests, the Content
+unit/analyzer matrix passes 9 tests, and the generated 3, 6, and 10-floor stress
+baselines pass with 100% warmed boundary/gravity cache hits, zero PVS budget
+exhaustion, and 6,216 measured bytes each. The final measured baseline times for
+this gate are 4.1361 ms, 8.2035 ms, and 13.1701 ms respectively; timing is retained
+as local comparison evidence rather than a release threshold.
