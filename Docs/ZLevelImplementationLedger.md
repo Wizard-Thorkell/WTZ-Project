@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.3 automated double round trips and explicit live-round boundary`.
+- Active package: `P6.3b initialized mapping mutations and autosave lifecycle`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3 active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.3b active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -80,7 +80,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
 | P6.2b | Correlated save protocol and validation before transfer | Complete |
 | P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Complete |
-| P6.3 | Automated double round trips and explicit live-round boundary | Active |
+| P6.3a | Automated double round trips and explicit live-round boundary | Complete |
+| P6.3b | Initialized mapping mutations and autosave lifecycle | Active |
 
 ## Phase P0 Packages
 
@@ -3267,7 +3268,8 @@ rather than GPU or dense decal-network throughput.
 - P2.3c owns Z-aware burnt decals, spawned debris, transient effect stamping,
   camera shake, and final presentation polish outside the gas overlay itself.
 - P6 owns serialization and round-trip restoration of initialized upper-floor
-  atmosphere cells and active hotspots.
+  atmosphere mixtures. Active hotspots are transient round state and require a
+  separate future live-round persistence contract.
 - P8 owns production-scale profiling and any resumable or stricter networking
   budgets suggested by those profiles.
 
@@ -3369,7 +3371,8 @@ rather than GPU or dense decal-network throughput.
   simultaneous remote viewers require P8 profiling before public-server claims.
 - Residual risk: burnt decals and upper-floor fire audio remain intentionally
   suppressed. P2.3c and P4 own those policies respectively; P6 owns initialized
-  atmosphere/hotspot save-load round trips.
+  atmosphere-mixture round trips, while active hotspot restoration is outside
+  mapper-authored persistence.
 - Next package: P2.3c will harden generated decal/debris/effect placement and
   cross-floor presentation without reopening the atmospheric authority model.
 
@@ -5623,14 +5626,123 @@ allocation is inside Robust physics enumeration.
 - Residual risk: initialized-map autosave and Z-level create/copy/delete remain
   disabled until structural idempotence is proven rather than being enabled
   solely because destination writes are now atomic.
-- Next package: P6.3 performs two automated snapshot/load cycles, compares maps,
-  grids, authored entities, pipes, cables, Z boundaries, frames, and references,
-  then documents and enforces the separate live-round persistence boundary.
+- Next package: P6.3a performs two automated snapshot/load cycles, compares maps,
+  grids, authored entities, pipes, cables, Z boundaries, frames, atmosphere, and
+  references, then documents and enforces the separate live-round persistence
+  boundary.
+
+## Completed Package: P6.3a Initialized Map Idempotence
+
+### Scope
+
+- Prove mapper-authored initialized maps remain structurally identical through
+  two complete snapshot, YAML, and initialized-load cycles.
+- Compare semantic state independently of unstable YAML ordering and runtime
+  entity identifiers.
+- Persist atmosphere mixtures on real non-zero native tiles without serializing
+  simulation-only adjacency cells, hotspots, or processing caches.
+- Preserve the existing Z 0 atmosphere schema alongside a separately named,
+  versioned sparse upper-floor field.
+- State explicitly that mapper snapshots are `FileCategory.Map` data and cannot
+  be extended into live-round persistence by an option flag.
+
+### Acceptance Criteria
+
+- Map configuration, two grids, moving frame origin/transform, native tiles from
+  Z -1 through Z 2, boundaries, decals, anchored infrastructure, and internal
+  device references compare equal after both cycles.
+- Z 0 and non-zero atmosphere cells preserve volume, temperature, and every gas
+  species through both cycles.
+- Player and explicit transient roots remain absent from mapper output.
+- A source hotspot does not reappear after either load because fire lifecycle is
+  runtime state rather than authored map data.
+- The official three-floor map and all existing mapping workflows continue to
+  load with the unchanged base atmosphere format.
+
+### Verification Evidence
+
+- Focused initialized snapshot plus official-map coverage passes 3/3, including
+  the double round trip and its canonical semantic comparisons.
+- The combined map-format, initialized-snapshot, correlated-protocol,
+  traditional mapping, and editor matrix passes 11/11.
+- The complete Content Z-level run reports 276 passes and one transient harness
+  skip; the omitted aperture-cache lifecycle case passes immediately when run
+  alone. All 277 cases have passing evidence with no unresolved failure.
+- Relevant Content unit/analyzer coverage passes 13/13 without skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 7.0112, 13.3412, and 29.0055
+  ms respectively.
+- `SpaceStation14.slnx` builds with zero errors and 27 established incremental
+  dependency, vulnerability, and obsolescence warnings; none identifies P6.3a.
+
+### Decisions
+
+- Use a dedicated `zLevelTiles` component field. Flattening both the legacy Z 0
+  and upper-floor serializers would make their `version` and `data` keys
+  collide; the official-map regression caught that incompatible shape.
+- Keep the upper-floor format sparse by local Z and 4x4 chunks while sharing
+  equal gas mixtures. The envelope and chunk size are versioned and validated
+  before reading.
+- Serialize only real atmosphere cells with mixtures. `NoGridTile` adjacency
+  cells, active hotspots, excited groups, and processing queues are rebuilt or
+  discarded because mapper files describe authored state, not a paused round.
+- Preserve in-memory copy fidelity separately: the custom copier clones every
+  tile atmosphere, including runtime cells, while file serialization applies
+  the narrower persistent boundary.
+- Keep `MappingSnapshotSystem` read-only over an initialized source and document
+  live-round save as a separate future contract rather than a mode switch.
+
+### Completion Gate
+
+- [x] Scope check: the diff contains one upper-atmosphere serializer, the
+      minimal component/access compatibility changes, one expanded integration
+      fixture, snapshot contract remarks, and P6 documentation.
+- [x] Invariant review: Z 0 and non-zero layers, local/world Z, a translated and
+      rotated moving frame, explicit/open boundaries, anchoring, references,
+      transient filtering, and initialized lifecycle are covered.
+- [x] Automated verification: 3/3 focused/official, 11/11 mapping matrix, all
+      277 broad cases with the single harness skip recovered individually,
+      13/13 unit/analyzer, 3/3 baselines, and a zero-error full build pass.
+- [x] Performance evidence: persistence adds no gameplay-loop work; the stress
+      baseline remains allocation-stable at 6,336 measured bytes with fully warm
+      relevant caches and no exhausted PVS budget.
+- [x] Documentation: persistent/transient atmosphere state, double-round-trip
+      semantics, live-round boundary, evidence, and P6.3b ownership are recorded
+      here and in the two Z-level mapping documents.
+- [x] Dependency check: P6.3a requires no engine change; the parent continues to
+      pin published WTZ Engine commit `7cbd778024`.
+- [x] Git check: the package diff passes `git diff --check` apart from expected
+      Windows line-ending notices, and WTZ Engine remains clean.
+- [x] Mini review: schema coexistence, semantic idempotence, transient filtering,
+      atmosphere fidelity, and runtime-state exclusions have no blocking finding.
+- [x] Commit: this package is saved as the isolated `Prove initialized Z-level
+      map idempotence` commit and pushed to the parent `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: mapper-authored initialized maps now have a repeatable semantic
+  round-trip oracle instead of relying on one successful load or YAML text
+  equality.
+- Finding: persistent atmosphere is no longer silently lost above Z 0, and the
+  official-map case protects the independent legacy and upper-floor schemas
+  from key collisions.
+- Finding: players, explicit transient roots, and source hotspot state remain
+  outside both generated snapshots as intended.
+- Residual risk: initialized create/copy/delete operations are still blocked;
+  file idempotence does not prove mutation of a live initialized object graph is
+  transactional or lifecycle-correct.
+- Residual risk: active hotspots and processing caches cannot resume a live
+  round. That remains intentionally outside mapper persistence.
+- Next package: P6.3b tests and enables initialized floor mutation with authored
+  filtering, lifecycle correctness, atmosphere handling, failure containment,
+  and validated atomic autosave.
 
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P6.3a | `Prove initialized Z-level map idempotence` | 3 focused/official, 11 mapping, 277 broad cases covered, 13 unit, 3 baseline, full build, diff review | Complete |
 | 2026-08-27 | P0.1 | `Add native Z-level performance observability` | 46 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.2 | `Add deterministic Z-level stress baselines` | 3 baseline cases, 49 integration, 2 unit, diff check | Complete |
 | 2026-08-27 | P0.3 | `Add configurable Z-level performance budgets` | 4 budget, 3 baseline, 53 integration, 2 unit, diff check | Complete |

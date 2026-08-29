@@ -523,7 +523,9 @@ Major unfinished areas:
 
 - Mapping/editor workflow is better, but still not polished enough for real
   authoring.
-- Live map save/load on initialized station maps is not generally safe.
+- Initialized stations can produce validated, atomic mapper-authored snapshots;
+  full live-round persistence of players, minds, objectives, sessions, and
+  transient simulation state is deliberately unsupported.
 - ZLevel tile persistence and network replication support sparse Z-only chunks,
   but the normal mapper workflow still needs more validation.
 - Atmos simulation and common entity-facing machinery are Z-aware, but legacy
@@ -719,7 +721,9 @@ Exit criteria:
 Mapper workflow:
 
 1. Create or load a pre-map-initialized mapping map. Z-level floor operations
-   deliberately refuse live initialized maps.
+   still refuse initialized maps until their separate P6.3b mutation and
+   lifecycle gate; initialized maps can already be saved as filtered authored
+   snapshots without mutating the source.
 2. Press the Z-level initialize button once. This adds format version 1 with the
    active floor as the initial range and default floor.
 3. Select a Z value, then create an empty floor or copy an existing floor into

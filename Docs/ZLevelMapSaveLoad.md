@@ -13,7 +13,8 @@ sessions, and transient round state do not.
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
 | P6.2b | Correlated request/response and validation before transfer | Complete |
 | P6.2c | UTF-8 temporary output and atomic destination replacement | Complete |
-| P6.3 | Automated double round trips and explicit live-round boundary | Active |
+| P6.3a | Automated double round trips and explicit live-round boundary | Complete |
+| P6.3b | Initialized mapping mutations and autosave lifecycle | Active |
 
 ## Snapshot Flow
 
@@ -98,6 +99,15 @@ The map root, grids, native Z-level tiles, `ZLevelMapComponent`, authored decals
 map-savable structure roots, anchored infrastructure, and their persistent
 components are included by the normal Robust map serializer.
 
+Atmosphere on real non-zero native tiles is persistent authored state. It uses
+a versioned sparse representation grouped by local Z and 4x4 chunks, preserving
+volume, temperature, and all gas species while sharing equal mixtures. Runtime
+adjacency cells marked `NoGridTile`, processing queues, excited groups, and
+active hotspot/fire state are reconstructed or discarded instead of entering
+the mapper file. The existing Z 0 atmosphere format remains unchanged; its
+reader additionally accepts the empty mapping emitted when only non-zero cells
+exist.
+
 The following roots are excluded automatically:
 
 - entities with `ActorComponent`;
@@ -168,19 +178,31 @@ The P6.1 integration fixture proves the following properties:
 - snapshot creation does not detach a live follower or delete any source entity;
 - invalid persistent Z state rejects the snapshot.
 
+The P6.3a fixture then performs two complete YAML snapshot/load cycles and
+compares a canonical semantic model rather than unstable YAML order or entity
+identifiers. It covers map configuration, two grids, a translated and rotated
+moving frame, native tiles from Z -1 through Z 2, anchored cable/pipe/APC
+infrastructure, boundaries, decals, internal device references, and persistent
+upper-floor atmosphere. Temperature, volume, and all nine gas species remain
+identical across both cycles. Players and explicit transient roots disappear,
+and an active source hotspot is absent after each load.
+
 ## Current Limitations
 
-P6.2c completes safe manual mapper output. It does not claim live-round
-restoration or yet enable every initialized-map editing workflow.
+P6.3a completes safe manual mapper output and structural idempotence. It does
+not claim live-round restoration or yet enable every initialized-map editing
+workflow.
 
 - Mapping autosave and Z-level create/copy/delete operations still reject
-  initialized maps. They stay restricted until P6.3 proves two complete
-  save/load cycles and structural idempotence.
-- A single in-memory load proves the P6.1 contract but not idempotence. P6.3
-  requires two save/load cycles and structural comparisons of maps, grids,
-  entities, pipes, cables, boundaries, frames, and references.
+  initialized maps. P6.3b owns their separate mutation, lifecycle, failure, and
+  autosave tests; file idempotence alone is not evidence that editing a live
+  object graph is transactional.
 - Saving sessions, chat, minds, objectives, players, or other round state is a
   separate live-round capability and is not part of mapper-authored map files.
+- Active hotspots, processing queues, runtime atmosphere adjacency cells, and
+  other simulation caches are intentionally outside the authored-map contract.
+  A future live-round save format would need explicit restoration semantics for
+  them rather than an option on `MappingSnapshotSystem`.
 - A process or machine crash can leave the hidden same-directory temporary file
   behind. The previous destination remains intact, but automatic stale-temp
   scavenging and explicit directory-metadata fsync are not part of P6.2c.
@@ -190,15 +212,20 @@ restoration or yet enable every initialized-map editing workflow.
 
 ## Verification
 
-P6.2c closes with 5/5 focused atomic-writer tests and the complete WTZ Engine
-client suite passing 42/42 without skips. Content passes 4/4 mapping unit tests,
-1/1 real client/server save-protocol test, 10/10 combined
-mapping/format/snapshot/protocol tests, 13/13 relevant unit/analyzer tests, and
-276/276 Z-level integration tests without skips. The atomic fixture covers new
-file creation, existing-file replacement, injected partial-write failure,
-temporary cleanup, exact Unicode bytes, and dialog cancellation. The full
-solution builds with zero errors and its established 708-warning baseline.
+P6.3a passes 3/3 focused initialized-snapshot and official-map cases. Its new
+fixture performs both complete snapshot/load cycles and compares the source,
+first load, and second load semantically. The combined map-format,
+initialized-snapshot, save-protocol, traditional mapping, and editor matrix
+passes 11/11. Relevant Content unit/analyzer coverage passes 13/13.
+
+The complete Content Z-level run reported 276 passes and one transient harness
+skip; the omitted lighting-cache lifecycle case was immediately rerun alone and
+passed. All 277 cases therefore have passing evidence and there is no unresolved
+skip or failure. The full solution builds with zero errors and 27 established
+incremental dependency, vulnerability, and obsolescence warnings.
 
 The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 7.7195, 14.3521, and 21.9225 ms.
+fail-open candidates. Measured local times are 7.0112, 13.3412, and 29.0055 ms.
+P6.3a adds no tick- or frame-time work; atmosphere serialization runs only for
+explicit mapper persistence operations.

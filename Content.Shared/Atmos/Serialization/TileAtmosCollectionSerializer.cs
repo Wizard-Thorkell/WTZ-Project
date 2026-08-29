@@ -31,10 +31,16 @@ public sealed partial class TileAtmosCollectionSerializer : ITypeSerializer<Dict
         // Backwards compatability
         if (version == 1)
         {
-            var tile2 = node["tiles"];
+            // Empty collections may be represented as an empty mapping when the
+            // containing component has other serialized atmosphere fields.
+            if (!node.TryGet("tiles", out var tile2) ||
+                !node.TryGet("uniqueMixes", out var uniqueMixes))
+            {
+                return tiles;
+            }
 
             var mixies = serializationManager.Read<Dictionary<Vector2i, int>?>(tile2, hookCtx, context);
-            var unique = serializationManager.Read<List<GasMixture>?>(node["uniqueMixes"], hookCtx, context);
+            var unique = serializationManager.Read<List<GasMixture>?>(uniqueMixes, hookCtx, context);
 
             if (unique != null && mixies != null)
             {

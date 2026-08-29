@@ -53,6 +53,7 @@ public sealed partial class GridAtmosphereComponent : Component
     public Dictionary<Vector2i, TileAtmosphere> Tiles = new(1000);
 
     [ViewVariables]
+    [DataField("zLevelTiles", customTypeSerializer: typeof(ZLevelTileAtmosCollectionSerializer))]
     public Dictionary<ZLevelTileIndices, TileAtmosphere> ZLevelTiles = new(256);
 
     [ViewVariables]

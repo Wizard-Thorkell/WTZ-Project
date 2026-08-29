@@ -18,6 +18,12 @@ namespace Content.Server.Mapping;
 /// <summary>
 /// Produces a detached map representation suitable for mapper-authored files.
 /// </summary>
+/// <remarks>
+/// This API always produces <see cref="FileCategory.Map"/> data. An initialized
+/// map may be used as the read-only source, but players, minds, sessions, and
+/// transient round state are intentionally excluded. Live-round persistence
+/// requires a separate save contract and must not be added as an option here.
+/// </remarks>
 public sealed class MappingSnapshotSystem : EntitySystem
 {
     [Dependency] private readonly MapLoaderSystem _mapLoader = default!;

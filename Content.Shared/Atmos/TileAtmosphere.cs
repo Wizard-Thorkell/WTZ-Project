@@ -8,7 +8,11 @@ namespace Content.Shared.Atmos;
 /// You should not be using these directly outside of <see cref="SharedAtmosphereSystem"/>.
 /// Use the public APIs in <see cref="SharedAtmosphereSystem"/> instead.
 /// </summary>
-[Access(typeof(SharedAtmosphereSystem), typeof(SharedGasTileOverlaySystem), typeof(SharedAtmosDebugOverlaySystem))]
+[Access(
+    typeof(SharedAtmosphereSystem),
+    typeof(SharedGasTileOverlaySystem),
+    typeof(SharedAtmosDebugOverlaySystem),
+    typeof(Serialization.ZLevelTileAtmosCollectionSerializer))]
 public sealed class TileAtmosphere : IGasMixtureHolder
 {
     /// <summary>
