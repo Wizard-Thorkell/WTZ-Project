@@ -75,6 +75,7 @@ namespace Content.Server.NPC.Pathfinding
         private EntityQuery<FixturesComponent> _fixturesQuery;
         private EntityQuery<MapGridComponent> _gridQuery;
         private EntityQuery<TransformComponent> _xformQuery;
+        private EntityQuery<ZLevelPositionComponent> _zPositionQuery;
 
         public override void Initialize()
         {
@@ -87,6 +88,7 @@ namespace Content.Server.NPC.Pathfinding
             _fixturesQuery = GetEntityQuery<FixturesComponent>();
             _gridQuery = GetEntityQuery<MapGridComponent>();
             _xformQuery = GetEntityQuery<TransformComponent>();
+            _zPositionQuery = GetEntityQuery<ZLevelPositionComponent>();
 
             _playerManager.PlayerStatusChanged += OnPlayerChange;
             InitializeGrid();
@@ -188,11 +190,29 @@ namespace Content.Server.NPC.Pathfinding
         /// </summary>
         public bool TryCreatePortal(EntityCoordinates coordsA, EntityCoordinates coordsB, out int handle)
         {
+            return TryCreatePortal(
+                coordsA,
+                GetCoordinatesWorldZ(coordsA),
+                coordsB,
+                GetCoordinatesWorldZ(coordsB),
+                out handle);
+        }
+
+        /// <summary>
+        /// Creates a portal between explicit world-floor endpoints.
+        /// </summary>
+        public bool TryCreatePortal(
+            EntityCoordinates coordsA,
+            int worldZA,
+            EntityCoordinates coordsB,
+            int worldZB,
+            out int handle)
+        {
             var mapUidA = _transform.GetMap(coordsA);
             var mapUidB = _transform.GetMap(coordsB);
             handle = -1;
 
-            if (mapUidA != mapUidB || mapUidA == null)
+            if (mapUidA != mapUidB || mapUidA == null || worldZA != worldZB)
             {
                 return false;
             }
@@ -207,22 +227,24 @@ namespace Content.Server.NPC.Pathfinding
             }
 
             handle = _portalIndex++;
-            var portal = new PathPortal(handle, coordsA, coordsB);
+            var localZA = _transform.WorldToLocalZLevel(gridUidA.Value, worldZA);
+            var localZB = _transform.WorldToLocalZLevel(gridUidB.Value, worldZB);
+            var portal = new PathPortal(handle, coordsA, localZA, coordsB, localZB);
             _portals[handle] = portal;
-            var originA = GetOrigin(coordsA, gridUidA.Value);
-            var originB = GetOrigin(coordsB, gridUidB.Value);
+            var keyA = new PathfindingChunkKey(GetOrigin(coordsA, gridUidA.Value), localZA);
+            var keyB = new PathfindingChunkKey(GetOrigin(coordsB, gridUidB.Value), localZB);
 
-            gridA.PortalLookup.Add(portal, originA);
-            gridB.PortalLookup.Add(portal, originB);
+            gridA.PortalLookup.Add(portal, keyA);
+            gridB.PortalLookup.Add(portal, keyB);
 
-            var chunkA = GetChunk(originA, gridUidA.Value);
-            var chunkB = GetChunk(originB, gridUidB.Value);
+            var chunkA = GetChunk(keyA, gridUidA.Value);
+            var chunkB = GetChunk(keyB, gridUidB.Value);
             chunkA.Portals.Add(portal);
             chunkB.Portals.Add(portal);
 
             // TODO: You already have the chunks
-            DirtyChunk(gridUidA.Value, coordsA);
-            DirtyChunk(gridUidB.Value, coordsB);
+            DirtyChunk(gridUidA.Value, coordsA, localZA);
+            DirtyChunk(gridUidB.Value, coordsB, localZB);
 
             return true;
         }
@@ -247,12 +269,18 @@ namespace Content.Server.NPC.Pathfinding
 
             gridA.PortalLookup.Remove(portal);
             gridB.PortalLookup.Remove(portal);
-            var chunkA = GetChunk(GetOrigin(portal.CoordinatesA, gridUidA.Value), gridUidA.Value, gridA);
-            var chunkB = GetChunk(GetOrigin(portal.CoordinatesB, gridUidB.Value), gridUidB.Value, gridB);
+            var chunkA = GetChunk(
+                new PathfindingChunkKey(GetOrigin(portal.CoordinatesA, gridUidA.Value), portal.LocalZA),
+                gridUidA.Value,
+                gridA);
+            var chunkB = GetChunk(
+                new PathfindingChunkKey(GetOrigin(portal.CoordinatesB, gridUidB.Value), portal.LocalZB),
+                gridUidB.Value,
+                gridB);
             chunkA.Portals.Remove(portal);
             chunkB.Portals.Remove(portal);
-            DirtyChunk(gridUidA.Value, portal.CoordinatesA);
-            DirtyChunk(gridUidB.Value, portal.CoordinatesB);
+            DirtyChunk(gridUidA.Value, portal.CoordinatesA, portal.LocalZA);
+            DirtyChunk(gridUidB.Value, portal.CoordinatesB, portal.LocalZB);
 
             return true;
         }
@@ -275,7 +303,15 @@ namespace Content.Server.NPC.Pathfinding
                 (layer, mask) = _physics.GetHardCollision(entity, fixtures);
             }
 
-            var request = new BFSPathRequest(maxRange, limit, start.Coordinates, flags, layer, mask, cancelToken);
+            var request = new BFSPathRequest(
+                maxRange,
+                limit,
+                start.Coordinates,
+                GetEntityWorldZ(entity, start),
+                flags,
+                layer,
+                mask,
+                cancelToken);
             var path = await GetPath(request);
 
             if (path.Result != PathResult.Path)
@@ -297,7 +333,8 @@ namespace Content.Server.NPC.Pathfinding
             if (!TryComp(entity, out TransformComponent? start))
                 return null;
 
-            var request = GetRequest(entity, start.Coordinates, end, range, cancelToken, flags);
+            var worldZ = GetEntityWorldZ(entity, start);
+            var request = GetRequest(entity, start.Coordinates, worldZ, end, worldZ, range, cancelToken, flags);
             var path = await GetPath(request);
 
             if (path.Result != PathResult.Path)
@@ -329,7 +366,15 @@ namespace Content.Server.NPC.Pathfinding
                 !TryComp(target, out TransformComponent? targetXform))
                 return new PathResultEvent(PathResult.NoPath, new List<PathPoly>());
 
-            var request = GetRequest(entity, xform.Coordinates, targetXform.Coordinates, range, cancelToken, flags);
+            var request = GetRequest(
+                entity,
+                xform.Coordinates,
+                GetEntityWorldZ(entity, xform),
+                targetXform.Coordinates,
+                GetEntityWorldZ(target, targetXform),
+                range,
+                cancelToken,
+                flags);
             return await GetPath(request);
         }
 
@@ -341,7 +386,34 @@ namespace Content.Server.NPC.Pathfinding
             CancellationToken cancelToken,
             PathFlags flags = PathFlags.None)
         {
-            var request = GetRequest(entity, start, end, range, cancelToken, flags);
+            var worldZ = GetEntityWorldZ(entity);
+            var request = GetRequest(entity, start, worldZ, end, worldZ, range, cancelToken, flags);
+            return await GetPath(request);
+        }
+
+        /// <summary>
+        /// Gets a path with explicit world floors for both endpoints.
+        /// P5 local navigation rejects different floors until hierarchical composition is enabled.
+        /// </summary>
+        public async Task<PathResultEvent> GetPath(
+            EntityUid entity,
+            EntityCoordinates start,
+            int startWorldZ,
+            EntityCoordinates end,
+            int endWorldZ,
+            float range,
+            CancellationToken cancelToken,
+            PathFlags flags = PathFlags.None)
+        {
+            var request = GetRequest(
+                entity,
+                start,
+                startWorldZ,
+                end,
+                endWorldZ,
+                range,
+                cancelToken,
+                flags);
             return await GetPath(request);
         }
 
@@ -356,7 +428,33 @@ namespace Content.Server.NPC.Pathfinding
             CancellationToken cancelToken,
             PathFlags flags = PathFlags.None)
         {
-            var request = GetRequest(entity, start, end, range, cancelToken, flags);
+            var worldZ = GetEntityWorldZ(entity);
+            var request = GetRequest(entity, start, worldZ, end, worldZ, range, cancelToken, flags);
+            return await GetPath(request, true);
+        }
+
+        /// <summary>
+        /// Gets a thread-safe path with explicit world floors for both endpoints.
+        /// </summary>
+        public async Task<PathResultEvent> GetPathSafe(
+            EntityUid entity,
+            EntityCoordinates start,
+            int startWorldZ,
+            EntityCoordinates end,
+            int endWorldZ,
+            float range,
+            CancellationToken cancelToken,
+            PathFlags flags = PathFlags.None)
+        {
+            var request = GetRequest(
+                entity,
+                start,
+                startWorldZ,
+                end,
+                endWorldZ,
+                range,
+                cancelToken,
+                flags);
             return await GetPath(request, true);
         }
 
@@ -372,8 +470,35 @@ namespace Content.Server.NPC.Pathfinding
             CancellationToken cancelToken,
             PathFlags flags = PathFlags.None)
         {
+            var worldZ = GetCoordinatesWorldZ(start);
+            return await GetPath(start, worldZ, end, worldZ, range, layer, mask, cancelToken, flags);
+        }
+
+        /// <summary>
+        /// Gets a path with explicit world floors and caller-provided collision data.
+        /// </summary>
+        public async Task<PathResultEvent> GetPath(
+            EntityCoordinates start,
+            int startWorldZ,
+            EntityCoordinates end,
+            int endWorldZ,
+            float range,
+            int layer,
+            int mask,
+            CancellationToken cancelToken,
+            PathFlags flags = PathFlags.None)
+        {
             // Don't allow the caller to pass in the request in case they try to do something with its data.
-            var request = new AStarPathRequest(start, end, flags, range, layer, mask, cancelToken);
+            var request = new AStarPathRequest(
+                start,
+                startWorldZ,
+                end,
+                endWorldZ,
+                flags,
+                range,
+                layer,
+                mask,
+                cancelToken);
             return await GetPath(request);
         }
 
@@ -397,19 +522,32 @@ namespace Content.Server.NPC.Pathfinding
         /// </summary>
         public PathPoly? GetPoly(EntityCoordinates coordinates)
         {
+            return GetPoly(coordinates, GetCoordinatesWorldZ(coordinates));
+        }
+
+        /// <summary>
+        /// Gets the polygon at 2D coordinates on an explicit world floor.
+        /// </summary>
+        public PathPoly? GetPoly(EntityCoordinates coordinates, int worldZ)
+        {
             var gridUid = _transform.GetGrid(coordinates);
 
             if (!TryComp<GridPathfindingComponent>(gridUid, out var comp) ||
                 !TryComp(gridUid, out TransformComponent? xform))
             {
+                RecordZLevelPolyQuery(false);
                 return null;
             }
 
             var localPos = Vector2.Transform(_transform.ToMapCoordinates(coordinates).Position, _transform.GetInvWorldMatrix(xform));
             var origin = GetOrigin(localPos);
+            var localZ = _transform.WorldToLocalZLevel(gridUid.Value, worldZ);
 
-            if (!TryGetChunk(origin, comp, out var chunk))
+            if (!TryGetChunk(new PathfindingChunkKey(origin, localZ), comp, out var chunk))
+            {
+                RecordZLevelPolyQuery(false);
                 return null;
+            }
 
             var chunkPos = new Vector2(MathHelper.Mod(localPos.X, ChunkSize), MathHelper.Mod(localPos.Y, ChunkSize));
             var polys = chunk.Polygons[(int)chunkPos.X * ChunkSize + (int)chunkPos.Y];
@@ -419,13 +557,23 @@ namespace Content.Server.NPC.Pathfinding
                 if (!poly.Box.Contains(localPos))
                     continue;
 
+                RecordZLevelPolyQuery(true);
                 return poly;
             }
 
+            RecordZLevelPolyQuery(false);
             return null;
         }
 
-        private PathRequest GetRequest(EntityUid entity, EntityCoordinates start, EntityCoordinates end, float range, CancellationToken cancelToken, PathFlags flags)
+        private PathRequest GetRequest(
+            EntityUid entity,
+            EntityCoordinates start,
+            int startWorldZ,
+            EntityCoordinates end,
+            int endWorldZ,
+            float range,
+            CancellationToken cancelToken,
+            PathFlags flags)
         {
             var layer = 0;
             var mask = 0;
@@ -435,7 +583,29 @@ namespace Content.Server.NPC.Pathfinding
                 (layer, mask) = _physics.GetHardCollision(entity, fixtures);
             }
 
-            return new AStarPathRequest(start, end, flags, range, layer, mask, cancelToken);
+            return new AStarPathRequest(
+                start,
+                startWorldZ,
+                end,
+                endWorldZ,
+                flags,
+                range,
+                layer,
+                mask,
+                cancelToken);
+        }
+
+        private int GetEntityWorldZ(EntityUid uid, TransformComponent? transform = null)
+        {
+            if (!Resolve(uid, ref transform, logMissing: false))
+                return 0;
+
+            return _transform.GetWorldZLevel((uid, transform, CompOrNull<ZLevelPositionComponent>(uid)));
+        }
+
+        private int GetCoordinatesWorldZ(EntityCoordinates coordinates)
+        {
+            return GetEntityWorldZ(coordinates.EntityId);
         }
 
         public PathFlags GetFlags(EntityUid uid)
@@ -529,6 +699,7 @@ namespace Content.Server.NPC.Pathfinding
             {
                 GraphUid = GetNetEntity(poly.GraphUid),
                 ChunkOrigin = poly.ChunkOrigin,
+                LocalZ = poly.LocalZ,
                 TileIndex = poly.TileIndex,
                 Box = poly.Box,
                 Data = poly.Data,
@@ -605,7 +776,9 @@ namespace Content.Server.NPC.Pathfinding
             {
                 var netGrid = GetNetEntity(uid);
 
-                msg.Breadcrumbs.Add(netGrid, new Dictionary<Vector2i, List<PathfindingBreadcrumb>>(comp.Chunks.Count));
+                msg.Breadcrumbs.Add(
+                    netGrid,
+                    new Dictionary<PathfindingChunkKey, List<PathfindingBreadcrumb>>(comp.Chunks.Count));
 
                 foreach (var chunk in comp.Chunks)
                 {
@@ -655,7 +828,9 @@ namespace Content.Server.NPC.Pathfinding
             {
                 var netGrid = GetNetEntity(uid);
 
-                msg.Polys.Add(netGrid, new Dictionary<Vector2i, Dictionary<Vector2i, List<DebugPathPoly>>>(comp.Chunks.Count));
+                msg.Polys.Add(
+                    netGrid,
+                    new Dictionary<PathfindingChunkKey, Dictionary<Vector2i, List<DebugPathPoly>>>(comp.Chunks.Count));
 
                 foreach (var chunk in comp.Chunks)
                 {
@@ -674,7 +849,7 @@ namespace Content.Server.NPC.Pathfinding
 
             var msg = new PathBreadcrumbsRefreshMessage()
             {
-                Origin = chunk.Origin,
+                Key = chunk.Key,
                 GridUid = GetNetEntity(gridUid),
                 Data = GetCrumbs(chunk),
             };
@@ -708,7 +883,7 @@ namespace Content.Server.NPC.Pathfinding
 
             var msg = new PathPolysRefreshMessage()
             {
-                Origin = chunk.Origin,
+                Key = chunk.Key,
                 GridUid = GetNetEntity(gridUid),
                 Polys = data,
             };

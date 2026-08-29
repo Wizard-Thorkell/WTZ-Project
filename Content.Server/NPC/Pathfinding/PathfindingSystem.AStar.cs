@@ -8,6 +8,12 @@ public sealed partial class PathfindingSystem
 {
     private PathResult UpdateAStarPath(AStarPathRequest request)
     {
+        if (request.StartWorldZ != request.EndWorldZ)
+        {
+            RecordZLevelDifferentFloorRouteRejection();
+            return PathResult.NoPath;
+        }
+
         if (request.Start.Equals(request.End))
         {
             return PathResult.Path;
@@ -53,8 +59,8 @@ public sealed partial class PathfindingSystem
         DebugTools.Assert(!request.Task.IsCompleted);
         request.Stopwatch.Restart();
 
-        var startNode = GetPoly(request.Start);
-        var endNode = GetPoly(request.End);
+        var startNode = GetPoly(request.Start, request.StartWorldZ);
+        var endNode = GetPoly(request.End, request.EndWorldZ);
 
         if (startNode == null || endNode == null)
         {

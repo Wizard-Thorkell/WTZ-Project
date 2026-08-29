@@ -18,6 +18,7 @@ public sealed class DebugPathPoly
 {
     public NetEntity GraphUid;
     public Vector2i ChunkOrigin;
+    public int LocalZ;
     public byte TileIndex;
 
     public Box2 Box;

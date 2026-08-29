@@ -63,8 +63,8 @@ namespace Content.Client.NPC
         private PathfindingDebugMode _modes = PathfindingDebugMode.None;
 
         // It's debug data IDC if it doesn't support snapshots I just want something fast.
-        public Dictionary<NetEntity, Dictionary<Vector2i, List<PathfindingBreadcrumb>>> Breadcrumbs = new();
-        public Dictionary<NetEntity, Dictionary<Vector2i, Dictionary<Vector2i, List<DebugPathPoly>>>> Polys = new();
+        public Dictionary<NetEntity, Dictionary<PathfindingChunkKey, List<PathfindingBreadcrumb>>> Breadcrumbs = new();
+        public Dictionary<NetEntity, Dictionary<PathfindingChunkKey, Dictionary<Vector2i, List<DebugPathPoly>>>> Polys = new();
         public readonly List<(TimeSpan Time, PathRouteMessage Message)> Routes = new();
 
         public override void Initialize()
@@ -108,7 +108,7 @@ namespace Content.Client.NPC
         private void OnPolysRefresh(PathPolysRefreshMessage ev)
         {
             var chunks = Polys.GetOrNew(ev.GridUid);
-            chunks[ev.Origin] = ev.Polys;
+            chunks[ev.Key] = ev.Polys;
         }
 
         public override void Shutdown()
@@ -128,7 +128,7 @@ namespace Content.Client.NPC
             if (!Breadcrumbs.TryGetValue(ev.GridUid, out var chunks))
                 return;
 
-            chunks[ev.Origin] = ev.Data;
+            chunks[ev.Key] = ev.Data;
         }
     }
 
@@ -207,10 +207,10 @@ namespace Content.Client.NPC
 
                     foreach (var chunk in crumbs)
                     {
-                        if (found)
+                        if (found || !IsViewedFloor(grid, chunk.Key, args))
                             continue;
 
-                        var origin = chunk.Key * SharedPathfindingSystem.ChunkSize;
+                        var origin = chunk.Key.Origin * SharedPathfindingSystem.ChunkSize;
 
                         var chunkAABB = new Box2(origin, origin + SharedPathfindingSystem.ChunkSize);
 
@@ -222,7 +222,9 @@ namespace Content.Client.NPC
 
                         foreach (var crumb in chunk.Value)
                         {
-                            var crumbMapPos = Vector2.Transform(_system.GetCoordinate(chunk.Key, crumb.Coordinates), worldMatrix);
+                            var crumbMapPos = Vector2.Transform(
+                                _system.GetCoordinate(chunk.Key.Origin, crumb.Coordinates),
+                                worldMatrix);
                             var distance = (crumbMapPos - mouseWorldPos.Position).Length();
 
                             if (distance < nearestDistance)
@@ -239,12 +241,14 @@ namespace Content.Client.NPC
                             // Sandbox moment
                             var coords = $"Point coordinates: {nearest.Value.Coordinates.ToString()}";
                             var gridCoords =
-                                $"Grid coordinates: {_system.GetCoordinate(chunk.Key, nearest.Value.Coordinates).ToString()}";
+                                $"Grid coordinates: {_system.GetCoordinate(chunk.Key.Origin, nearest.Value.Coordinates).ToString()}";
+                            var zLevel = $"Local Z: {chunk.Key.LocalZ}";
                             var layer = $"Layer: {nearest.Value.Data.CollisionLayer.ToString()}";
                             var mask = $"Mask: {nearest.Value.Data.CollisionMask.ToString()}";
 
                             text.AppendLine(coords);
                             text.AppendLine(gridCoords);
+                            text.AppendLine(zLevel);
                             text.AppendLine(layer);
                             text.AppendLine(mask);
                             text.AppendLine($"Flags:");
@@ -277,11 +281,17 @@ namespace Content.Client.NPC
 
                 var tileRef = _mapSystem.GetTileRef(gridUid, grid, mouseWorldPos);
                 var localPos = tileRef.GridIndices;
-                var chunkOrigin = localPos / SharedPathfindingSystem.ChunkSize;
+                var chunkOrigin = new Vector2i(
+                    (int) Math.Floor(localPos.X / (float) SharedPathfindingSystem.ChunkSize),
+                    (int) Math.Floor(localPos.Y / (float) SharedPathfindingSystem.ChunkSize));
+                var chunkTile = new Vector2i(
+                    MathHelper.Mod(localPos.X, SharedPathfindingSystem.ChunkSize),
+                    MathHelper.Mod(localPos.Y, SharedPathfindingSystem.ChunkSize));
+                var worldZ = args.Viewport.Eye?.WorldZLevel ?? _eyeManager.CurrentEye.WorldZLevel;
+                var localZ = _transformSystem.WorldToLocalZLevel(gridUid, worldZ);
 
-                if (!data.TryGetValue(chunkOrigin, out var chunk) ||
-                    !chunk.TryGetValue(new Vector2i(localPos.X % SharedPathfindingSystem.ChunkSize,
-                        localPos.Y % SharedPathfindingSystem.ChunkSize), out var tile))
+                if (!data.TryGetValue(new PathfindingChunkKey(chunkOrigin, localZ), out var chunk) ||
+                    !chunk.TryGetValue(chunkTile, out var tile))
                 {
                     return;
                 }
@@ -306,7 +316,7 @@ namespace Content.Client.NPC
                     // Sandbox moment
                     var coords = $"Point coordinates: {nearest.Value.Coordinates.ToString()}";
                     var gridCoords =
-                        $"Grid coordinates: {_system.GetCoordinate(chunk.Key, nearest.Value.Coordinates).ToString()}";
+                        $"Grid coordinates: {_system.GetCoordinate(chunk.Key.Origin, nearest.Value.Coordinates).ToString()}";
                     var layer = $"Layer: {nearest.Value.Data.CollisionLayer.ToString()}";
                     var mask = $"Mask: {nearest.Value.Data.CollisionMask.ToString()}";
 
@@ -364,7 +374,10 @@ namespace Content.Client.NPC
 
                     foreach (var chunk in crumbs)
                     {
-                        var origin = chunk.Key * SharedPathfindingSystem.ChunkSize;
+                        if (!IsViewedFloor(grid, chunk.Key, args))
+                            continue;
+
+                        var origin = chunk.Key.Origin * SharedPathfindingSystem.ChunkSize;
 
                         var chunkAABB = new Box2(origin, origin + SharedPathfindingSystem.ChunkSize);
 
@@ -397,7 +410,7 @@ namespace Content.Client.NPC
                                 color = Color.Orange;
                             }
 
-                            var coordinate = _system.GetCoordinate(chunk.Key, crumb.Coordinates);
+                            var coordinate = _system.GetCoordinate(chunk.Key.Origin, crumb.Coordinates);
                             worldHandle.DrawRect(new Box2(coordinate - edgeVec, coordinate + edgeVec), color.WithAlpha(0.25f));
                         }
                     }
@@ -424,7 +437,10 @@ namespace Content.Client.NPC
 
                     foreach (var chunk in data)
                     {
-                        var origin = chunk.Key * SharedPathfindingSystem.ChunkSize;
+                        if (!IsViewedFloor(grid, chunk.Key, args))
+                            continue;
+
+                        var origin = chunk.Key.Origin * SharedPathfindingSystem.ChunkSize;
 
                         var chunkAABB = new Box2(origin, origin + SharedPathfindingSystem.ChunkSize);
 
@@ -463,7 +479,10 @@ namespace Content.Client.NPC
 
                     foreach (var chunk in data)
                     {
-                        var origin = chunk.Key * SharedPathfindingSystem.ChunkSize;
+                        if (!IsViewedFloor(grid, chunk.Key, args))
+                            continue;
+
+                        var origin = chunk.Key.Origin * SharedPathfindingSystem.ChunkSize;
 
                         var chunkAABB = new Box2(origin, origin + SharedPathfindingSystem.ChunkSize);
 
@@ -522,7 +541,10 @@ namespace Content.Client.NPC
 
                     foreach (var chunk in crumbs)
                     {
-                        var origin = chunk.Key * SharedPathfindingSystem.ChunkSize;
+                        if (!IsViewedFloor(grid, chunk.Key, args))
+                            continue;
+
+                        var origin = chunk.Key.Origin * SharedPathfindingSystem.ChunkSize;
 
                         var chunkAABB = new Box2(origin, origin + SharedPathfindingSystem.ChunkSize);
 
@@ -540,7 +562,9 @@ namespace Content.Client.NPC
                 {
                     foreach (var node in route.Message.Path)
                     {
-                        if (!_entManager.TryGetComponent<TransformComponent>(_entManager.GetEntity(node.GraphUid), out var graphXform))
+                        var graph = _entManager.GetEntity(node.GraphUid);
+                        if (!_entManager.TryGetComponent<TransformComponent>(graph, out var graphXform) ||
+                            !IsViewedFloor(graph, new PathfindingChunkKey(node.ChunkOrigin, node.LocalZ), args))
                             continue;
 
                         worldHandle.SetTransform(_transformSystem.GetWorldMatrix(graphXform));
@@ -560,6 +584,8 @@ namespace Content.Client.NPC
                     foreach (var (node, cost) in route.Message.Costs)
                     {
                         var graph = _entManager.GetEntity(node.GraphUid);
+                        if (!IsViewedFloor(graph, new PathfindingChunkKey(node.ChunkOrigin, node.LocalZ), args))
+                            continue;
 
                         if (matrix != graph)
                         {
@@ -576,6 +602,15 @@ namespace Content.Client.NPC
             }
 
             worldHandle.SetTransform(Matrix3x2.Identity);
+        }
+
+        private bool IsViewedFloor(
+            EntityUid gridUid,
+            PathfindingChunkKey key,
+            in OverlayDrawArgs args)
+        {
+            var worldZ = args.Viewport.Eye?.WorldZLevel ?? _eyeManager.CurrentEye.WorldZLevel;
+            return key.LocalZ == _transformSystem.WorldToLocalZLevel(gridUid, worldZ);
         }
     }
 }

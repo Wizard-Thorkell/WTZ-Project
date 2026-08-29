@@ -12,6 +12,9 @@ public sealed class PathPoly : IEquatable<PathPoly>
     public readonly Vector2i ChunkOrigin;
 
     [ViewVariables]
+    public readonly int LocalZ;
+
+    [ViewVariables]
     public readonly byte TileIndex;
 
     [ViewVariables]
@@ -23,10 +26,18 @@ public sealed class PathPoly : IEquatable<PathPoly>
     [ViewVariables]
     public readonly HashSet<PathPoly> Neighbors;
 
-    public PathPoly(EntityUid graphUid, Vector2i chunkOrigin, byte tileIndex, Box2 vertices, PathfindingData data, HashSet<PathPoly> neighbors)
+    public PathPoly(
+        EntityUid graphUid,
+        Vector2i chunkOrigin,
+        int localZ,
+        byte tileIndex,
+        Box2 vertices,
+        PathfindingData data,
+        HashSet<PathPoly> neighbors)
     {
         GraphUid = graphUid;
         ChunkOrigin = chunkOrigin;
+        LocalZ = localZ;
         TileIndex = tileIndex;
         Box = vertices;
         Data = data;
@@ -41,12 +52,16 @@ public sealed class PathPoly : IEquatable<PathPoly>
     [ViewVariables]
     public EntityCoordinates Coordinates => new(GraphUid, Box.Center);
 
+    [ViewVariables]
+    public ZLevelEntityCoordinates ZLevelCoordinates => new(GraphUid, Box.Center, LocalZ);
+
     // Explicitly don't check neighbors.
 
     public bool IsEquivalent(PathPoly other)
     {
         return GraphUid.Equals(other.GraphUid) &&
                ChunkOrigin.Equals(other.ChunkOrigin) &&
+               LocalZ == other.LocalZ &&
                TileIndex == other.TileIndex &&
                Data.IsEquivalent(other.Data) &&
                Box.Equals(other.Box);
@@ -57,6 +72,7 @@ public sealed class PathPoly : IEquatable<PathPoly>
         return other != null &&
                GraphUid.Equals(other.GraphUid) &&
                ChunkOrigin.Equals(other.ChunkOrigin) &&
+               LocalZ == other.LocalZ &&
                TileIndex == other.TileIndex &&
                Data.Equals(other.Data) &&
                Box.Equals(other.Box);
@@ -69,6 +85,6 @@ public sealed class PathPoly : IEquatable<PathPoly>
 
     public override int GetHashCode()
     {
-        return HashCode.Combine(GraphUid, ChunkOrigin, TileIndex, Box);
+        return HashCode.Combine(GraphUid, ChunkOrigin, LocalZ, TileIndex, Box);
     }
 }

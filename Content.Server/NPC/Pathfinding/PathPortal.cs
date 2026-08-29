@@ -14,13 +14,22 @@ public struct PathPortal
     public readonly int Handle;
     public readonly EntityCoordinates CoordinatesA;
     public readonly EntityCoordinates CoordinatesB;
+    public readonly int LocalZA;
+    public readonly int LocalZB;
 
     // TODO: Whenever the chunk rebuilds need to add a neighbor.
-    public PathPortal(int handle, EntityCoordinates coordsA, EntityCoordinates coordsB)
+    public PathPortal(
+        int handle,
+        EntityCoordinates coordsA,
+        int localZA,
+        EntityCoordinates coordsB,
+        int localZB)
     {
         Handle = handle;
         CoordinatesA = coordsA;
+        LocalZA = localZA;
         CoordinatesB = coordsB;
+        LocalZB = localZB;
     }
 
     public override int GetHashCode()

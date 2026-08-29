@@ -6,7 +6,7 @@ namespace Content.Shared.NPC;
 public sealed class PathPolysRefreshMessage : EntityEventArgs
 {
     public NetEntity GridUid;
-    public Vector2i Origin;
+    public PathfindingChunkKey Key;
 
     /// <summary>
     /// Multi-dimension arrays aren't supported so

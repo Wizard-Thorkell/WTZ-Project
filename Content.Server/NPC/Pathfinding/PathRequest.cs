@@ -14,6 +14,8 @@ public abstract class PathRequest
 {
     public EntityCoordinates Start;
 
+    public readonly int StartWorldZ;
+
     public Task<PathResult> Task => Tcs.Task;
     public readonly TaskCompletionSource<PathResult> Tcs;
 
@@ -38,9 +40,16 @@ public abstract class PathRequest
 
     #endregion
 
-    public PathRequest(EntityCoordinates start, PathFlags flags, int layer, int mask, CancellationToken cancelToken)
+    public PathRequest(
+        EntityCoordinates start,
+        int startWorldZ,
+        PathFlags flags,
+        int layer,
+        int mask,
+        CancellationToken cancelToken)
     {
         Start = start;
+        StartWorldZ = startWorldZ;
         Flags = flags;
         CollisionLayer = layer;
         CollisionMask = mask;
@@ -52,6 +61,8 @@ public sealed class AStarPathRequest : PathRequest
 {
     public EntityCoordinates End;
 
+    public readonly int EndWorldZ;
+
     /// <summary>
     /// How close we need to be to the end node to be considered as arrived.
     /// </summary>
@@ -59,15 +70,18 @@ public sealed class AStarPathRequest : PathRequest
 
     public AStarPathRequest(
         EntityCoordinates start,
+        int startWorldZ,
         EntityCoordinates end,
+        int endWorldZ,
         PathFlags flags,
         float distance,
         int layer,
         int mask,
-        CancellationToken cancelToken) : base(start, flags, layer, mask, cancelToken)
+        CancellationToken cancelToken) : base(start, startWorldZ, flags, layer, mask, cancelToken)
     {
         Distance = distance;
         End = end;
+        EndWorldZ = endWorldZ;
     }
 }
 
@@ -87,10 +101,11 @@ public sealed class BFSPathRequest : PathRequest
         float expansionRange,
         int expansionLimit,
         EntityCoordinates start,
+        int startWorldZ,
         PathFlags flags,
         int layer,
         int mask,
-        CancellationToken cancelToken) : base(start, flags, layer, mask, cancelToken)
+        CancellationToken cancelToken) : base(start, startWorldZ, flags, layer, mask, cancelToken)
         {
             ExpansionRange = expansionRange;
             ExpansionLimit = expansionLimit;

@@ -114,17 +114,45 @@ The upper search chooses connector edges and local reachability; it does not
 copy local polygons into `ZLevelTrace` and does not pretend empty space is
 walkable. Flight will use separate navigation capabilities in P7.
 
+## P5.2 Floor-Specific Local Navigation
+
+The local polygon graph is now partitioned by `PathfindingChunkKey`, which
+combines the existing XY chunk origin with a grid-local Z. `PathPoly`, debug
+payloads, portal endpoints, dirty queues, and chunk lookup all carry that floor
+identity. Sparse upper floors are discovered from authored Z-level tiles while
+Z 0 retains the normal grid initialization path.
+
+Breadcrumb construction reads `GetZLevelTileRef` for the selected local floor.
+The existing 2D broadphase still supplies spatial candidates, but fixtures are
+accepted only when their effective local Z matches the chunk. Tile edits dirty
+only their own floor. Fixture collision changes, XY movement, grid changes, and
+Z movement dirty the affected old and new chunks/floors independently.
+
+Public path and polygon APIs accept explicit world floors. They convert to local
+Z only after resolving the owning grid, so a `ZLevelFrameComponent` origin can
+move without rebuilding local topology. Entity-to-entity requests resolve both
+actual world floors. Legacy coordinate-only requests remain same-floor and use
+the actor or start-reference floor; callers that need a distinct target floor
+must use the explicit overload or an entity target.
+
+Native `PathPortal` links remain same-world-floor links between grids. Their
+endpoints retain local floors and are re-evaluated after frame changes. They are
+not used to represent authored vertical traversal.
+
+P5.2 deliberately rejects an A* request whose endpoints have different world
+floors. Vertical composition belongs to P5.3 and will return typed local and
+transition legs; returning `NoPath` now is safer than connecting overlapping 2D
+polygons or treating empty space as walkable.
+
+`zlevelmetrics` reports cached chunks/floors, pending invalidations, breadcrumb
+build time and allocation, fixture candidate rejection by floor, polygon hit
+rate, and cross-floor requests rejected pending hierarchical planning. Hot-path
+counters are atomic; the diagnostic snapshot allocates its floor summary only
+when requested. Created floor chunks currently retain the legacy cache lifetime
+even after their last authored tile is removed; P5.4/P8 will use these counters
+to evaluate bounded eviction under long rounds.
+
 ## Remaining P5 Packages
-
-### P5.2 Floor-Specific Local Navigation
-
-- Give `PathPoly`, chunk keys, and endpoint lookup an explicit local/world Z.
-- Build Z 0 and allocated sparse floors as separate local polygon graphs.
-- Read tiles with `GetZLevelTileRef` and filter fixtures by effective world Z.
-- Dirty only the changed `(chunk, local Z)` after tile, fixture, or Z movement.
-- Add Z-aware request overloads while preserving legacy same-floor callers.
-- Prove same-floor routes, overlapping-floor obstacle isolation, moving frames,
-  and Z 0 compatibility before enabling vertical composition.
 
 ### P5.3 Hierarchical Planning
 
@@ -158,3 +186,24 @@ Focused integration coverage verifies:
 The warmed connected-region benchmark performs 256 repeated queries with at
 most 256 bytes of total thread allocation. Location buckets use deterministically
 ordered compact lists so lookup does not allocate an enumerator stack.
+
+## P5.2 Verification
+
+Focused integration coverage verifies:
+
+- independent tiles, fixtures, polygon data, and routes on overlapping floors;
+- invalidation of both old and new floors after fixture Z movement;
+- invalidation of old and new chunks after fixture XY movement;
+- upper-floor tile changes without rebuilding the matching lower-floor chunk;
+- world/local floor conversion after a grid frame changes from world Z 0 to 5;
+- explicit rejection of different-floor requests and legacy Z 0 compatibility.
+
+After warmup, 4,096 explicit-floor `GetPoly` calls allocate no more than 256
+bytes in total. The complete Content Z-level integration matrix passes 247
+tests, the Content unit/analyzer matrix passes 9 tests, and the generated 3, 6,
+and 10-floor stress baselines pass without cache or PVS budget exhaustion. A
+clean full solution build completes with zero errors and the established 708
+warnings. Reusing one fixture candidate set across a chunk lowers the measured
+warmed breadcrumb build from 59,480 to 55,448 bytes; the focused fixture
+enforces a 58,000-byte ceiling so the old per-tile allocation path cannot return
+silently.

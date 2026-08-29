@@ -432,7 +432,9 @@ public sealed partial class NPCSteeringSystem : SharedNPCSteeringSystem
             return;
 
         // Short-circuit with no path.
-        var targetPoly = _pathfindingSystem.GetPoly(steering.Coordinates);
+        var worldZ = _transform.GetWorldZLevel(
+            (uid, xform, CompOrNull<ZLevelPositionComponent>(uid)));
+        var targetPoly = _pathfindingSystem.GetPoly(steering.Coordinates, worldZ);
 
         // If this still causes issues future sloth adjust the collision mask.
         // Thanks past sloth I already realised.

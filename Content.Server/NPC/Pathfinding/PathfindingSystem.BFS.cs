@@ -48,7 +48,7 @@ public sealed partial class PathfindingSystem
         DebugTools.Assert(!request.Task.IsCompleted);
         request.Stopwatch.Restart();
 
-        var startNode = GetPoly(request.Start);
+        var startNode = GetPoly(request.Start, request.StartWorldZ);
 
         if (startNode == null)
         {

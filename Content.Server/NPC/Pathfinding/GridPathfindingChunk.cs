@@ -14,6 +14,11 @@ public sealed class GridPathfindingChunk
     public Vector2i Origin;
 
     [ViewVariables]
+    public int LocalZ;
+
+    public PathfindingChunkKey Key => new(Origin, LocalZ);
+
+    [ViewVariables]
     public readonly List<PathPoly>[] Polygons = new List<PathPoly>[SharedPathfindingSystem.ChunkSize * SharedPathfindingSystem.ChunkSize];
 
     /// <summary>

@@ -3,6 +3,7 @@
 
 using Content.Server.Administration;
 using Content.Server.Explosion.EntitySystems;
+using Content.Server.NPC.Pathfinding;
 using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Administration;
@@ -30,6 +31,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<ZLevelSoundRouteSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
             _entityManager.System<ZLevelTraversalGraphSystem>().ResetMetrics();
+            _entityManager.System<PathfindingSystem>().ResetZLevelMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
             return;
         }
@@ -45,6 +47,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
         var explosion = _entityManager.System<ExplosionSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
+        var pathfinding = _entityManager.System<PathfindingSystem>();
         var soundPlayback = _entityManager.System<ZLevelSoundPlaybackSystem>();
         var soundPortals = _entityManager.System<SharedZLevelSoundPortalSystem>();
         var soundRoutes = _entityManager.System<ZLevelSoundRouteSystem>();
@@ -184,6 +187,24 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{traversalMetrics.AverageQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.LastQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.MaxQueryMilliseconds:0.000}ms");
+        var pathfindingMetrics = pathfinding.SnapshotZLevelMetrics();
+        shell.WriteLine(
+            $"  pathfinding floors: chunks/floors/pending=" +
+            $"{pathfindingMetrics.CachedChunks}/{pathfindingMetrics.CachedFloors}/" +
+            $"{pathfindingMetrics.PendingChunks}, breadcrumb-builds={pathfindingMetrics.BreadcrumbBuilds}, " +
+            $"avg/last/max={pathfindingMetrics.AverageBreadcrumbBuildMilliseconds:0.000}/" +
+            $"{pathfindingMetrics.LastBreadcrumbBuildMilliseconds:0.000}/" +
+            $"{pathfindingMetrics.MaxBreadcrumbBuildMilliseconds:0.000}ms, " +
+            $"allocated avg/last/max={pathfindingMetrics.AverageBreadcrumbBuildAllocatedBytes:0}/" +
+            $"{pathfindingMetrics.LastBreadcrumbBuildAllocatedBytes}/" +
+            $"{pathfindingMetrics.MaxBreadcrumbBuildAllocatedBytes}B");
+        shell.WriteLine(
+            $"  pathfinding isolation: fixture candidates/rejected=" +
+            $"{pathfindingMetrics.FixtureCandidates}/{pathfindingMetrics.FixtureFloorRejects} " +
+            $"({pathfindingMetrics.FixtureFloorRejectPercent:0.00}%), " +
+            $"poly queries/hits={pathfindingMetrics.PolyQueries}/{pathfindingMetrics.PolyHits} " +
+            $"({pathfindingMetrics.PolyHitPercent:0.00}%), " +
+            $"different-floor-rejections={pathfindingMetrics.DifferentFloorRouteRejections}");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

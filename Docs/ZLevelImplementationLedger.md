@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.2 floor-specific local navigation`.
+- Active package: `P5.3 hierarchical route search and typed composition`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1 complete; P5.2 active) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.2 complete; P5.3 active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -65,8 +65,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P5.1 | Navigation inventory and indexed authored traversal-edge contract | Complete |
-| P5.2 | Floor-specific local polygon navigation | Active |
-| P5.3 | Hierarchical route search and typed route composition | Pending |
+| P5.2 | Floor-specific local polygon navigation | Complete |
+| P5.3 | Hierarchical route search and typed route composition | Active |
 | P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Pending |
 
 ## Phase P0 Packages
@@ -4462,6 +4462,130 @@ allocation is inside Robust physics enumeration.
 - Next package: P5.2 separates `PathPoly`, chunks, tile reads, fixture filters,
   endpoint lookup, and dirtying by floor before any vertical route composition.
 
+## Completed Package: P5.2 Floor-Specific Local Navigation
+
+### Scope
+
+- Partition the existing local polygon graph by `(XY chunk, grid-local Z)` and
+  carry floor identity through polygons, native portals, requests, and debug
+  network payloads.
+- Build sparse authored floors from their own tiles and reject broadphase fixture
+  candidates that belong to an overlapping floor.
+- Invalidate only affected floors and chunks after tile, collision, fixture Z,
+  XY movement, grid movement, and frame-origin events.
+- Add explicit world-floor query and route APIs while preserving same-floor
+  behavior for existing callers.
+- Expose floor-specific pathfinding diagnostics and deterministic regression
+  tests without enabling vertical route composition prematurely.
+
+### Acceptance Criteria
+
+- Overlapping floors can have different tiles and blockers without contaminating
+  each other's `PathPoly` data or route result.
+- A tile or fixture change rebuilds every affected old/new location and does not
+  rebuild an unrelated floor.
+- Grid-local navigation survives world-frame origin changes without a topology
+  rebuild, and native cross-grid portals remain same-world-floor links.
+- Entity targets carry their actual floors; ambiguous coordinate-only overloads
+  remain compatible by resolving to the actor or start-reference floor.
+- A different-floor A* request fails closed until P5.3 can compose a typed route.
+- Z 0 callers and the existing 2D pathfinding behavior remain compatible.
+
+### Verification Evidence
+
+- Focused P5.2 integration passes 3/3 after final review. It covers overlapping
+  floor fixtures, same-floor route isolation, fixture Z and cross-chunk XY
+  movement, floor-selective tile invalidation, frame origin 5, legacy Z 0, and
+  deliberate different-floor rejection.
+- The complete Content Z-level integration matrix passes 247/247 and the Content
+  unit/analyzer matrix passes 9/9.
+- The generated 3, 6, and 10-floor stress baselines pass 3/3 with 100% warmed
+  boundary/gravity cache hits and zero PVS budget exhaustion. Measured times are
+  11.0718 ms, 13.3543 ms, and 20.4120 ms; all three measured runs allocate
+  6,336 bytes. Timing remains local comparison evidence rather than a release
+  threshold.
+- After 64 warmup calls, 4,096 explicit-floor `GetPoly` calls complete with no
+  misses and no more than 256 bytes of total current-thread allocation.
+- Reusing one fixture candidate set for all 256 tiles reduces the measured
+  warmed single-chunk breadcrumb build from 59,480 to 55,448 bytes. The focused
+  test enforces a 58,000-byte ceiling that rejects the former per-tile allocation
+  path while retaining 2,552 bytes of local-runtime margin.
+- A clean `SpaceStation14.slnx` build succeeds with zero errors and the same 708
+  established warnings as P5.1. No warning points to the P5.2 files.
+
+### Decisions
+
+- Store local navigation topology by grid-local Z and keep public endpoints in
+  world Z. Frame-origin changes therefore reproject requests without rebuilding
+  local chunks.
+- Continue using the mature 2D broadphase for XY candidate discovery, then apply
+  an effective-floor filter before breadcrumb construction. This preserves door,
+  collision-layer, diagonal-fixture, and access behavior already owned by Robust.
+- Discover sparse upper-floor chunks from authored non-empty tiles while keeping
+  the normal base-grid initialization path for Z 0.
+- Dirty both old and new fixture locations. The package review also fixed the
+  pre-existing same-grid XY move path that previously invalidated only the new
+  chunk.
+- Keep native `PathPortal` restricted to equal world floors. Authored stairs,
+  ladders, shafts, and elevators remain in `ZLevelTraversalGraphSystem`.
+- Reject cross-floor A* before polygon lookup. P5.3 will compose local legs and
+  typed transition legs instead of inserting fake polygon neighbors.
+- Keep metric recording allocation-free in path hot paths. The administrative
+  snapshot may allocate a temporary floor set because it runs only on demand.
+  Record breadcrumb build allocation alongside timing, and reuse the broadphase
+  candidate set instead of allocating one collection per tile.
+- Filter client pathfinding diagnostics to the viewed world floor and use floor
+  division/positive modulo for negative chunk coordinates, matching the server.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to floor-specific local pathfinding,
+      diagnostics, focused tests, and P5 documentation.
+- [x] Invariant review: Z 0 compatibility, local/world frames, sparse floors,
+      moving grids, old/new XY and Z invalidation, server-owned routing, and
+      same-world-floor native portals were reviewed.
+- [x] Automated verification: 3/3 focused, 247/247 Content integration, 9/9
+      Content unit/analyzer, 3/3 baselines, and the clean full build pass.
+- [x] Performance evidence: 4,096 warmed polygon lookups meet the 256-byte
+      allowance; the warmed breadcrumb build uses 55,448 bytes under its
+      58,000-byte ceiling; allocation/timing, candidate rejection, query hit,
+      floor cache, and pending-work counters are exposed through `zlevelmetrics`.
+- [x] Documentation: topology ownership, coordinate contracts, overload limits,
+      metrics, tests, performance values, and deliberate `NoPath` behavior are
+      recorded here and in `Docs/ZLevelPathfinding.md`.
+- [x] Dependency check: no WTZ Engine change is required; the engine remains at
+      `3aaca280f628876939afcc10a9be920b3898902a` with a clean tree.
+- [x] Git check: generated results remain ignored; final parent/engine status,
+      remote pairing, and `git diff --check` are verified immediately before
+      committing.
+- [x] Mini review: no blocking correctness or performance issue remains; the
+      limits assigned to P5.3/P5.4 are explicit below.
+- [x] Commit: the isolated `Separate pathfinding navigation by Z level` parent
+      commit is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: local pathfinding can now represent coincident walkable and blocked
+  floors without false obstruction or false reachability between them.
+- Finding: local topology is frame-stable and invalidation is floor-selective;
+  fixture movement now covers both old/new Z and old/new XY chunks.
+- Finding: diagnostics expose whether workload growth comes from sparse chunks,
+  broadphase candidates, floor rejects, query misses, or pending rebuilds.
+- Residual risk: plain `EntityCoordinates` cannot identify an upper target when
+  its reference entity is only a grid. Those overloads intentionally choose the
+  actor/start floor; cross-floor callers must use explicit world Z or an entity.
+- Residual risk: NPC steering still owns a queue of plain local polygons and
+  cannot execute a vertical action. Different-floor requests remain `NoPath`
+  until the typed route contract is complete.
+- Residual risk: live chunk and traversal graph state remains simulation-thread
+  owned. P5.3 must publish immutable search input before using worker jobs.
+- Residual risk: like the legacy 2D cache, a created floor chunk remains cached
+  after its last authored tile is removed. `cached chunks/floors` exposes the
+  high-water mark; eviction and long-round retention belong to P5.4/P8.
+- Next package: P5.3 adds bounded hierarchical search over traversal connectors,
+  composes local and transition legs, and rejects stale revisions
+  deterministically.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4504,3 +4628,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P4.3b | `Centralize audio recipient filtering` / `Authorize routed vertical sound per session` | 3 playback, 11 sound, 240 Content integration, 5 Content unit/analyzer, 447/1,026 engine shared, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P4.3c | `Allow content audio source positioning` / `Present routed vertical sound on clients` | 4 unit, 5 playback, 13 sound, 242 Content integration, 9 Content unit/analyzer, 37/138 engine client, 447/1,026 engine shared, 3 baseline, clean builds, diff review | Complete |
 | 2026-08-29 | P5.1 | `Index authored Z-level traversal edges` | 3 focused, 16 movement, 244 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
+| 2026-08-29 | P5.2 | `Separate pathfinding navigation by Z level` | 3 focused, 247 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |

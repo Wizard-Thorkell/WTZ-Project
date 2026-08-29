@@ -45,6 +45,9 @@ public sealed partial class PathfindingSystem
         SubscribeLocalEvent<CollisionLayerChangeEvent>(OnCollisionLayerChange);
         SubscribeLocalEvent<PhysicsBodyTypeChangedEvent>(OnBodyTypeChange);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChange);
+        SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChange);
+        SubscribeLocalEvent<FixturesComponent, ZLevelPositionChangedEvent>(OnFixtureZLevelChange);
+        SubscribeLocalEvent<ZLevelFrameChangedEvent>(OnZLevelFrameChanged);
         _transform.OnGlobalMoveEvent += OnMoveEvent;
     }
 
@@ -55,7 +58,24 @@ public sealed partial class PathfindingSystem
             if (change.OldTile.IsEmpty == change.NewTile.IsEmpty)
                 continue;
 
-            DirtyChunk(ev.Entity, _maps.GridTileToLocal(ev.Entity, ev.Entity.Comp, change.GridIndices));
+            DirtyChunk(ev.Entity, _maps.GridTileToLocal(ev.Entity, ev.Entity.Comp, change.GridIndices), 0);
+        }
+    }
+
+    private void OnZLevelTileChange(ref ZLevelTileChangedEvent ev)
+    {
+        foreach (var change in ev.Changes)
+        {
+            if (change.OldTile.IsEmpty == change.NewTile.IsEmpty)
+                continue;
+
+            DirtyChunk(
+                ev.Entity,
+                _maps.GridTileToLocal(
+                    ev.Entity,
+                    ev.Entity.Comp,
+                    new Vector2i(change.GridIndices.X, change.GridIndices.Y)),
+                change.GridIndices.Z);
         }
     }
 
@@ -109,9 +129,9 @@ public sealed partial class PathfindingSystem
             var dirt = new GridPathfindingChunk[comp.DirtyChunks.Count];
             var idx = 0;
 
-            foreach (var origin in comp.DirtyChunks)
+            foreach (var key in comp.DirtyChunks)
             {
-                var chunk = GetChunk(origin, uid, pathfinding);
+                var chunk = GetChunk(key, uid, pathfinding);
                 dirt[idx] = chunk;
                 idx++;
             }
@@ -198,16 +218,30 @@ public sealed partial class PathfindingSystem
             // We do this because there's no guarantee of where these are for chunks.
             foreach (var portal in dirtyPortals)
             {
-                var polyA = GetPoly(portal.CoordinatesA);
-                var polyB = GetPoly(portal.CoordinatesB);
+                var gridUidA = _transform.GetGrid(portal.CoordinatesA);
+                var gridUidB = _transform.GetGrid(portal.CoordinatesB);
+                if (gridUidA is null || gridUidB is null)
+                    continue;
+
+                var worldZA = _transform.LocalToWorldZLevel(gridUidA.Value, portal.LocalZA);
+                var worldZB = _transform.LocalToWorldZLevel(gridUidB.Value, portal.LocalZB);
+                if (worldZA != worldZB)
+                    continue;
+
+                var polyA = GetPoly(portal.CoordinatesA, worldZA);
+                var polyB = GetPoly(portal.CoordinatesB, worldZB);
 
                 if (polyA == null || polyB == null)
                     continue;
 
                 DebugTools.Assert((polyA.Data.Flags & PathfindingBreadcrumbFlag.Invalid) == 0x0);
                 DebugTools.Assert((polyB.Data.Flags & PathfindingBreadcrumbFlag.Invalid) == 0x0);
-                var chunkA = GetChunk(polyA.ChunkOrigin, polyA.GraphUid);
-                var chunkB = GetChunk(polyB.ChunkOrigin, polyB.GraphUid);
+                var chunkA = GetChunk(
+                    new PathfindingChunkKey(polyA.ChunkOrigin, polyA.LocalZ),
+                    polyA.GraphUid);
+                var chunkB = GetChunk(
+                    new PathfindingChunkKey(polyB.ChunkOrigin, polyB.LocalZ),
+                    polyB.GraphUid);
 
                 chunkA.PortalPolys.TryAdd(portal, polyA);
                 chunkB.PortalPolys.TryAdd(portal, polyB);
@@ -244,7 +278,7 @@ public sealed partial class PathfindingSystem
 
         // This will also rebuild on door open / closes which I think is good?
         var aabb = _lookup.GetAABBNoContainer(ev.BodyUid, xform.Coordinates.Position, xform.LocalRotation);
-        DirtyChunkArea(xform.GridUid.Value, aabb);
+        DirtyChunkArea(xform.GridUid.Value, aabb, GetEntityLocalZ(ev.BodyUid, xform));
     }
 
     private void OnCollisionLayerChange(ref CollisionLayerChangeEvent ev)
@@ -255,7 +289,7 @@ public sealed partial class PathfindingSystem
             return;
 
         var aabb = _lookup.GetAABBNoContainer(ev.Body, xform.Coordinates.Position, xform.LocalRotation);
-        DirtyChunkArea(xform.GridUid.Value, aabb);
+        DirtyChunkArea(xform.GridUid.Value, aabb, GetEntityLocalZ(ev.Body, xform));
     }
 
     private void OnBodyTypeChange(ref PhysicsBodyTypeChangedEvent ev)
@@ -264,7 +298,36 @@ public sealed partial class PathfindingSystem
             xform.GridUid != null)
         {
             var aabb = _lookup.GetAABBNoContainer(ev.Entity, xform.Coordinates.Position, xform.LocalRotation);
-            DirtyChunkArea(xform.GridUid.Value, aabb);
+            DirtyChunkArea(xform.GridUid.Value, aabb, GetEntityLocalZ(ev.Entity, xform));
+        }
+    }
+
+    private void OnFixtureZLevelChange(Entity<FixturesComponent> entity, ref ZLevelPositionChangedEvent args)
+    {
+        if (!_xformQuery.TryComp(entity.Owner, out var xform) ||
+            xform.GridUid is not { } gridUid ||
+            !IsBodyRelevant(entity.Comp))
+        {
+            return;
+        }
+
+        var aabb = _lookup.GetAABBNoContainer(entity.Owner, xform.Coordinates.Position, xform.LocalRotation);
+        DirtyChunkArea(gridUid, aabb, args.OldZLevel);
+        DirtyChunkArea(gridUid, aabb, args.NewZLevel);
+    }
+
+    private void OnZLevelFrameChanged(ref ZLevelFrameChangedEvent args)
+    {
+        foreach (var portal in _portals.Values)
+        {
+            var gridUidA = _transform.GetGrid(portal.CoordinatesA);
+            var gridUidB = _transform.GetGrid(portal.CoordinatesB);
+
+            if (gridUidA == args.GridUid)
+                DirtyChunk(args.GridUid, portal.CoordinatesA, portal.LocalZA);
+
+            if (gridUidB == args.GridUid)
+                DirtyChunk(args.GridUid, portal.CoordinatesB, portal.LocalZB);
         }
     }
 
@@ -278,20 +341,30 @@ public sealed partial class PathfindingSystem
         }
 
         var gridUid = ev.Component.GridUid;
-        var oldGridUid = ev.OldPosition.EntityId == ev.NewPosition.EntityId
-            ? gridUid
-            : _transform.GetGrid((ev.Entity.Owner, ev.Component));
+        var oldGridUid = _transform.GetGrid(ev.OldPosition);
+        var currentLocalZ = GetEntityLocalZ(ev.Sender, ev.Component);
 
-        if (oldGridUid != null && oldGridUid != gridUid)
+        if (oldGridUid != null)
         {
             var aabb = _lookup.GetAABBNoContainer(ev.Sender, ev.OldPosition.Position, ev.OldRotation);
-            DirtyChunkArea(oldGridUid.Value, aabb);
+            var oldLocalZ = currentLocalZ;
+            if (oldGridUid != gridUid)
+            {
+                var worldZ = _transform.GetWorldZLevel(
+                    (ev.Sender, ev.Component, _zPositionQuery.CompOrNull(ev.Sender)));
+                oldLocalZ = _transform.WorldToLocalZLevel(oldGridUid.Value, worldZ);
+            }
+
+            DirtyChunkArea(
+                oldGridUid.Value,
+                aabb,
+                oldLocalZ);
         }
 
         if (gridUid != null)
         {
             var aabb = _lookup.GetAABBNoContainer(ev.Sender, ev.NewPosition.Position, ev.NewRotation);
-            DirtyChunkArea(gridUid.Value, aabb);
+            DirtyChunkArea(gridUid.Value, aabb, currentLocalZ);
         }
     }
 
@@ -306,8 +379,25 @@ public sealed partial class PathfindingSystem
         {
             for (var y = Math.Floor(mapGrid.LocalAABB.Bottom); y <= Math.Ceiling(mapGrid.LocalAABB.Top + ChunkSize); y += ChunkSize)
             {
-                DirtyChunk(ev.EntityUid, _maps.GridTileToLocal(ev.EntityUid, mapGrid, new Vector2i((int)x, (int)y)));
+                DirtyChunk(
+                    ev.EntityUid,
+                    _maps.GridTileToLocal(ev.EntityUid, mapGrid, new Vector2i((int)x, (int)y)),
+                    0);
             }
+        }
+
+        foreach (var tile in _maps.GetAllNonEmptyZLevelTiles(ev.EntityUid, mapGrid))
+        {
+            if (tile.GridIndices.Z == 0)
+                continue;
+
+            DirtyChunk(
+                ev.EntityUid,
+                _maps.GridTileToLocal(
+                    ev.EntityUid,
+                    mapGrid,
+                    new Vector2i(tile.GridIndices.X, tile.GridIndices.Y)),
+                tile.GridIndices.Z);
         }
     }
 
@@ -319,7 +409,7 @@ public sealed partial class PathfindingSystem
     /// <summary>
     /// Queues the entire relevant chunk to be re-built in the next update.
     /// </summary>
-    private void DirtyChunk(EntityUid gridUid, EntityCoordinates coordinates)
+    private void DirtyChunk(EntityUid gridUid, EntityCoordinates coordinates, int localZ)
     {
         if (!TryComp<GridPathfindingComponent>(gridUid, out var comp))
             return;
@@ -331,10 +421,10 @@ public sealed partial class PathfindingSystem
 
         var chunks = comp.DirtyChunks;
         // TODO: Change these args around.
-        chunks.Add(GetOrigin(coordinates, gridUid));
+        chunks.Add(new PathfindingChunkKey(GetOrigin(coordinates, gridUid), localZ));
     }
 
-    private void DirtyChunkArea(EntityUid gridUid, Box2 aabb)
+    private void DirtyChunkArea(EntityUid gridUid, Box2 aabb, int localZ)
     {
         if (!TryComp<GridPathfindingComponent>(gridUid, out var comp))
             return;
@@ -354,32 +444,44 @@ public sealed partial class PathfindingSystem
                 (int) Math.Floor((corner.X) / ChunkSize),
                 (int) Math.Floor((corner.Y) / ChunkSize));
 
-            chunks.Add(sampledPoint);
+            chunks.Add(new PathfindingChunkKey(sampledPoint, localZ));
         }
     }
 
-    private GridPathfindingChunk GetChunk(Vector2i origin, EntityUid uid, GridPathfindingComponent? component = null)
+    private GridPathfindingChunk GetChunk(
+        PathfindingChunkKey key,
+        EntityUid uid,
+        GridPathfindingComponent? component = null)
     {
         if (!Resolve(uid, ref component))
         {
             throw new InvalidOperationException();
         }
 
-        if (component.Chunks.TryGetValue(origin, out var chunk))
+        if (component.Chunks.TryGetValue(key, out var chunk))
             return chunk;
 
         chunk = new GridPathfindingChunk()
         {
-            Origin = origin,
+            Origin = key.Origin,
+            LocalZ = key.LocalZ,
         };
 
-        component.Chunks[origin] = chunk;
+        component.Chunks[key] = chunk;
         return chunk;
     }
 
-    private bool TryGetChunk(Vector2i origin, GridPathfindingComponent component, [NotNullWhen(true)] out GridPathfindingChunk? chunk)
+    private bool TryGetChunk(
+        PathfindingChunkKey key,
+        GridPathfindingComponent component,
+        [NotNullWhen(true)] out GridPathfindingChunk? chunk)
     {
-        return component.Chunks.TryGetValue(origin, out chunk);
+        return component.Chunks.TryGetValue(key, out chunk);
+    }
+
+    private int GetEntityLocalZ(EntityUid uid, TransformComponent transform)
+    {
+        return _transform.GetZLevel((uid, transform, _zPositionQuery.CompOrNull(uid)));
     }
 
     private byte GetIndex(int x, int y)
@@ -400,11 +502,14 @@ public sealed partial class PathfindingSystem
 
     private void BuildBreadcrumbs(GridPathfindingChunk chunk, Entity<MapGridComponent> grid)
     {
-        var sw = new Stopwatch();
-        sw.Start();
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        long fixtureCandidates = 0;
+        long fixtureFloorRejects = 0;
         var points = chunk.Points;
         var gridOrigin = chunk.Origin * ChunkSize;
         var tileEntities = new ValueList<EntityUid>();
+        var available = new HashSet<EntityUid>();
         var chunkPolys = chunk.BufferPolygons;
 
         for (var i = 0; i < chunkPolys.Length; i++)
@@ -425,12 +530,23 @@ public sealed partial class PathfindingSystem
                 var tilePos = new Vector2i(x, y) + gridOrigin;
                 tilePolys.Clear();
 
-                var tile = _maps.GetTileRef(grid.Owner, grid.Comp, tilePos);
-                var flags = tile.Tile.IsEmpty ? PathfindingBreadcrumbFlag.Space : PathfindingBreadcrumbFlag.None;
+                var floorTile = _maps.GetZLevelTileRef(
+                    grid.Owner,
+                    grid.Comp,
+                    new ZLevelTileIndices(tilePos.X, tilePos.Y, chunk.LocalZ));
+                var flags = floorTile.Tile.IsEmpty
+                    ? PathfindingBreadcrumbFlag.Space
+                    : PathfindingBreadcrumbFlag.None;
                 // var isBorder = x < 0 || y < 0 || x == ChunkSize - 1 || y == ChunkSize - 1;
 
                 tileEntities.Clear();
-                var available = _lookup.GetLocalEntitiesIntersecting(tile, flags: LookupFlags.Dynamic | LookupFlags.Static);
+                available.Clear();
+                _lookup.GetLocalEntitiesIntersecting(
+                    grid.Owner,
+                    tilePos,
+                    available,
+                    flags: LookupFlags.Dynamic | LookupFlags.Static,
+                    gridComp: grid.Comp);
 
                 foreach (var ent in available)
                 {
@@ -446,6 +562,13 @@ public sealed partial class PathfindingSystem
                     if (xform.ParentUid != grid.Owner ||
                         _maps.LocalToTile(grid.Owner, grid.Comp, xform.Coordinates) != tilePos)
                     {
+                        continue;
+                    }
+
+                    fixtureCandidates++;
+                    if (GetEntityLocalZ(ent, xform) != chunk.LocalZ)
+                    {
+                        fixtureFloorRejects++;
                         continue;
                     }
 
@@ -623,12 +746,23 @@ public sealed partial class PathfindingSystem
                     var polyData = points[x * SubStep + poly.Left, y * SubStep + poly.Bottom].Data;
 
                     var neighbors = new HashSet<PathPoly>();
-                    tilePoly.Add(new PathPoly(grid, chunk.Origin, GetIndex(x, y), box, polyData, neighbors));
+                    tilePoly.Add(new PathPoly(
+                        grid,
+                        chunk.Origin,
+                        chunk.LocalZ,
+                        GetIndex(x, y),
+                        box,
+                        polyData,
+                        neighbors));
                 }
             }
         }
 
-        // Log.Debug($"Built breadcrumbs in {sw.Elapsed.TotalMilliseconds}ms");
+        RecordZLevelBreadcrumbBuild(
+            fixtureCandidates,
+            fixtureFloorRejects,
+            System.Diagnostics.Stopwatch.GetTimestamp() - started,
+            GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
         SendBreadcrumbs(chunk, grid);
     }
 
@@ -711,10 +845,18 @@ public sealed partial class PathfindingSystem
 
         var chunkPolys = chunk.Polygons;
         var component = pathfinding.Comp;
-        component.Chunks.TryGetValue(chunk.Origin + new Vector2i(-1, 0), out var leftChunk);
-        component.Chunks.TryGetValue(chunk.Origin + new Vector2i(0, -1), out var bottomChunk);
-        component.Chunks.TryGetValue(chunk.Origin + new Vector2i(1, 0), out var rightChunk);
-        component.Chunks.TryGetValue(chunk.Origin + new Vector2i(0, 1), out var topChunk);
+        component.Chunks.TryGetValue(
+            new PathfindingChunkKey(chunk.Origin + new Vector2i(-1, 0), chunk.LocalZ),
+            out var leftChunk);
+        component.Chunks.TryGetValue(
+            new PathfindingChunkKey(chunk.Origin + new Vector2i(0, -1), chunk.LocalZ),
+            out var bottomChunk);
+        component.Chunks.TryGetValue(
+            new PathfindingChunkKey(chunk.Origin + new Vector2i(1, 0), chunk.LocalZ),
+            out var rightChunk);
+        component.Chunks.TryGetValue(
+            new PathfindingChunkKey(chunk.Origin + new Vector2i(0, 1), chunk.LocalZ),
+            out var topChunk);
 
         // Now we can get the neighbors for our tile polys
         for (var x = 0; x < ChunkSize; x++)

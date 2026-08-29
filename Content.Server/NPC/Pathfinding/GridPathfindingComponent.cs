@@ -1,4 +1,5 @@
 using Robust.Shared.Serialization.TypeSerializers.Implementations.Custom;
+using Content.Shared.NPC;
 
 namespace Content.Server.NPC.Pathfinding;
 
@@ -9,7 +10,7 @@ namespace Content.Server.NPC.Pathfinding;
 public sealed partial class GridPathfindingComponent : Component
 {
     [ViewVariables]
-    public readonly HashSet<Vector2i> DirtyChunks = new();
+    public readonly HashSet<PathfindingChunkKey> DirtyChunks = new();
 
     /// <summary>
     /// Next time the graph is allowed to update.
@@ -19,13 +20,13 @@ public sealed partial class GridPathfindingComponent : Component
     public TimeSpan NextUpdate;
 
     [ViewVariables]
-    public readonly Dictionary<Vector2i, GridPathfindingChunk> Chunks = new();
+    public readonly Dictionary<PathfindingChunkKey, GridPathfindingChunk> Chunks = new();
 
     /// <summary>
     /// Retrieves the chunk where the specified portal is stored on this grid.
     /// </summary>
     [ViewVariables]
-    public readonly Dictionary<PathPortal, Vector2i> PortalLookup = new();
+    public readonly Dictionary<PathPortal, PathfindingChunkKey> PortalLookup = new();
 
     [ViewVariables]
     public readonly List<PathPortal> DirtyPortals = new();
