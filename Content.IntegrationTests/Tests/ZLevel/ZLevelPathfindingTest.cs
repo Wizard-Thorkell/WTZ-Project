@@ -802,8 +802,11 @@ public sealed class ZLevelPathfindingTest : GameTest
         });
     }
 
-    [Test]
-    public async Task MoveToOperatorPlansAndInstallsHierarchicalRoute()
+    [TestCase(NPCBlackboard.FollowTarget, NPCBlackboard.PathfindKey)]
+    [TestCase("TargetCoordinates", "TargetPathfind")]
+    public async Task MoveToOperatorPlansFollowAndHostileHierarchicalRoutes(
+        string targetKey,
+        string pathfindKey)
     {
         var testMap = await Pair.CreateTestMap();
         EntityUid npc = default;
@@ -825,6 +828,8 @@ public sealed class ZLevelPathfindingTest : GameTest
             Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(npc, 0), Is.True);
 
             moveTo = new MoveToOperator();
+            moveTo.TargetKey = targetKey;
+            moveTo.PathfindKey = pathfindKey;
             moveTo.Initialize(SEntMan.EntitySysManager);
             blackboard = new NPCBlackboard();
             blackboard.SetValue(NPCBlackboard.Owner, npc);
@@ -847,7 +852,7 @@ public sealed class ZLevelPathfindingTest : GameTest
             {
                 Assert.That(plan.Valid, Is.True);
                 Assert.That(plan.Effects, Is.Not.Null);
-                Assert.That(plan.Effects, Does.ContainKey($"{NPCBlackboard.PathfindKey}:ZLevel"));
+                Assert.That(plan.Effects, Does.ContainKey($"{pathfindKey}:ZLevel"));
             });
 
             foreach (var (key, value) in plan.Effects!)
@@ -1381,7 +1386,285 @@ public sealed class ZLevelPathfindingTest : GameTest
         });
     }
 
-    private void ConfigureCorridors(TestMapData testMap)
+    [Test]
+    public async Task UnrelatedMapChangesPreserveSnapshotsAndInFlightRouteSearch()
+    {
+        var routeMap = await Pair.CreateTestMap();
+        var noisyMap = await Pair.CreateTestMap();
+        EntityUid noisyTraversal = default;
+        ZLevelTraversalGraphSnapshot routeSnapshot = default;
+        ZLevelTraversalGraphSnapshot noisySnapshot = default;
+        Task<ZLevelPathRouteResult>? routeTask = null;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(routeMap);
+            ConfigureCorridors(noisyMap);
+            SpawnUpStairs(routeMap, 2.5f);
+            noisyTraversal = SpawnUpStairs(noisyMap, 2.5f);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitPost(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            graph.ResetMetrics();
+            routeSnapshot = graph.CreateSnapshot(routeMap.MapId);
+            noisySnapshot = graph.CreateSnapshot(noisyMap.MapId);
+
+            routeTask = pathfinding.GetZLevelPath(
+                new ZLevelPathEndpoint(routeMap.MapId, Coordinates(routeMap, 0.5f), 0),
+                new ZLevelPathEndpoint(routeMap.MapId, Coordinates(routeMap, 5.5f), 1),
+                0f,
+                (int) CollisionGroup.MobLayer,
+                (int) CollisionGroup.MobMask,
+                CancellationToken.None);
+            Assert.That(routeTask.IsCompleted, Is.False);
+
+            var dynamicTraversal = SEntMan.EnsureComponent<ZLevelDynamicTraversalComponent>(noisyTraversal);
+            Assert.That(graph.ConfigureDynamicTraversal(
+                noisyTraversal,
+                false,
+                true,
+                false,
+                TimeSpan.Zero,
+                0f,
+                dynamicTraversal),
+                Is.True);
+            SpawnUpStairs(noisyMap, 4.5f);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.GetVersion(routeMap.MapId), Is.EqualTo(routeSnapshot.Version));
+                Assert.That(graph.ValidateSnapshot(routeSnapshot),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+                Assert.That(graph.ValidateSnapshot(noisySnapshot),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.TopologyAndEnvironmentChanged));
+                Assert.That(graph.CreateSnapshot(routeMap.MapId).Edges.Equals(routeSnapshot.Edges), Is.True,
+                    "Unrelated map churn must retain the detached edge storage for this map.");
+            });
+        });
+
+        await Pair.RunTicksSync(10);
+        var route = await routeTask!;
+
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var metrics = graph.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(route.Status, Is.EqualTo(ZLevelPathRouteStatus.Success));
+                Assert.That(route.Route, Is.Not.Null);
+                Assert.That(route.Diagnostics.TopologyRevision, Is.EqualTo(routeSnapshot.TopologyRevision));
+                Assert.That(route.Diagnostics.EnvironmentRevision, Is.EqualTo(routeSnapshot.EnvironmentRevision));
+                Assert.That(graph.ValidateSnapshot(routeSnapshot),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+                Assert.That(metrics.TrackedMapRevisions, Is.GreaterThanOrEqualTo(2));
+                Assert.That(metrics.SnapshotBuilds, Is.EqualTo(2));
+                Assert.That(metrics.SnapshotCacheHits, Is.GreaterThanOrEqualTo(2));
+            });
+
+            var trackedMaps = graph.TrackedMapRevisionCount;
+            var cachedSnapshots = metrics.CachedSnapshots;
+            SEntMan.System<SharedMapSystem>().DeleteMap(noisyMap.MapId);
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.TrackedMapRevisionCount, Is.EqualTo(trackedMaps - 1));
+                Assert.That(graph.Snapshot().CachedSnapshots, Is.EqualTo(cachedSnapshots - 1));
+                Assert.That(graph.ValidateSnapshot(routeSnapshot),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+            });
+        });
+    }
+
+    [Test]
+    public async Task UnrelatedMapChangesDoNotRevalidateAnActiveRoute()
+    {
+        var routeMap = await Pair.CreateTestMap();
+        var noisyMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        EntityUid noisyTraversal = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(routeMap);
+            ConfigureCorridors(noisyMap);
+            SpawnUpStairs(routeMap, 2.5f);
+            noisyTraversal = SpawnUpStairs(noisyMap, 2.5f);
+            var dynamicTraversal = SEntMan.EnsureComponent<ZLevelDynamicTraversalComponent>(noisyTraversal);
+            Assert.That(SEntMan.System<ZLevelTraversalGraphSystem>().ConfigureDynamicTraversal(
+                noisyTraversal,
+                true,
+                true,
+                false,
+                TimeSpan.Zero,
+                0f,
+                dynamicTraversal),
+                Is.True);
+
+            target = SEntMan.SpawnEntity(null, Coordinates(routeMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+            npc = SpawnTraversalUser(routeMap, 0.5f);
+        });
+        await Pair.RunTicksSync(40);
+
+        var route = await RequestNPCZLevelPath(routeMap, npc, target);
+        Assert.That(route.Succeeded, Is.True);
+
+        ZLevelTraversalGraphVersion routeVersion = default;
+        long globalTopology = 0;
+        long globalEnvironment = 0;
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            var steering = steeringSystem.Register(npc, new EntityCoordinates(target, Vector2.Zero));
+            steering.Range = 0.2f;
+            Assert.That(steeringSystem.TryInstallZLevelRoute(npc, route.Route!, steering), Is.True);
+
+            routeVersion = graph.GetVersion(routeMap.MapId);
+            globalTopology = graph.TopologyRevision;
+            globalEnvironment = graph.EnvironmentRevision;
+            graph.ResetMetrics();
+            steeringSystem.ResetZLevelMetrics();
+
+            var dynamicTraversal = SEntMan.GetComponent<ZLevelDynamicTraversalComponent>(noisyTraversal);
+            Assert.That(graph.ConfigureDynamicTraversal(
+                noisyTraversal,
+                false,
+                true,
+                false,
+                TimeSpan.Zero,
+                0f,
+                dynamicTraversal),
+                Is.True);
+            SpawnUpStairs(noisyMap, 4.5f);
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+        await Pair.RunTicksSync(2);
+
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var steeringMetrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.TopologyRevision, Is.GreaterThan(globalTopology));
+                Assert.That(graph.EnvironmentRevision, Is.GreaterThan(globalEnvironment));
+                Assert.That(graph.GetVersion(routeMap.MapId), Is.EqualTo(routeVersion));
+                Assert.That(steering.ZLevelRoute, Is.SameAs(route.Route));
+                Assert.That(steering.ZLevelValidatedTopologyRevision, Is.EqualTo(routeVersion.TopologyRevision));
+                Assert.That(steering.ZLevelValidatedEnvironmentRevision, Is.EqualTo(routeVersion.EnvironmentRevision));
+                Assert.That(steering.LastZLevelReplanReason, Is.EqualTo(NPCZLevelReplanReason.None));
+                Assert.That(steeringMetrics.Replans, Is.Zero);
+                Assert.That(graph.Snapshot().EdgeQueries, Is.Zero,
+                    "A revision change on another map must not force exact-edge route validation.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task ConcurrentNPCsPlanAndExecuteIndependentVerticalRoutes()
+    {
+        const int npcCount = 8;
+        var testMap = await Pair.CreateTestMap();
+        var npcs = new List<EntityUid>(npcCount);
+        var targets = new List<EntityUid>(npcCount);
+        var cachedChunksBeforeRoutes = 0;
+        var cachedFloorsBeforeRoutes = 0;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap, npcCount);
+            for (var lane = 0; lane < npcCount; lane++)
+            {
+                SpawnUpStairs(testMap, 2.5f, lane);
+                var target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f, lane));
+                Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+                targets.Add(target);
+                npcs.Add(SpawnTraversalUser(testMap, 0.5f, lane));
+            }
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitAssertion(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            var steeringSystem = SEntMan.System<NPCSteeringSystem>();
+            var floorMetrics = pathfinding.SnapshotZLevelMetrics();
+            cachedChunksBeforeRoutes = floorMetrics.CachedChunks;
+            cachedFloorsBeforeRoutes = floorMetrics.CachedFloors;
+            Assert.Multiple(() =>
+            {
+                Assert.That(cachedFloorsBeforeRoutes, Is.EqualTo(2));
+                Assert.That(floorMetrics.PendingChunks, Is.Zero);
+            });
+            pathfinding.ResetZLevelRouteMetrics();
+            steeringSystem.ResetZLevelMetrics();
+            for (var i = 0; i < npcCount; i++)
+            {
+                var steering = steeringSystem.Register(npcs[i], new EntityCoordinates(targets[i], Vector2.Zero));
+                steering.Range = 0.2f;
+                SEntMan.EnsureComponent<ActiveNPCComponent>(npcs[i]);
+            }
+        });
+
+        await Pair.RunSeconds(12f);
+        await Server.WaitAssertion(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            var routeMetrics = pathfinding.SnapshotZLevelRouteMetrics();
+            var floorMetrics = pathfinding.SnapshotZLevelMetrics();
+            var steeringMetrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            var failures = new List<string>();
+            for (var i = 0; i < npcCount; i++)
+            {
+                var steering = SEntMan.GetComponent<NPCSteeringComponent>(npcs[i]);
+                var transform = SEntMan.GetComponent<TransformComponent>(npcs[i]);
+                var distance = transform.Coordinates.TryDistance(
+                    SEntMan,
+                    new EntityCoordinates(targets[i], Vector2.Zero),
+                    out var value)
+                    ? value
+                    : float.PositiveInfinity;
+                if (SEntMan.System<SharedZLevelSystem>().GetZLevel(npcs[i]) != 1 ||
+                    steering.Status != SteeringStatus.InRange ||
+                    distance > steering.Range)
+                {
+                    failures.Add(
+                        $"npc={i},z={SEntMan.System<SharedZLevelSystem>().GetZLevel(npcs[i])}," +
+                        $"status={steering.Status},distance={distance:F2},route={steering.ZLevelRoute != null}," +
+                        $"replan={steering.LastZLevelReplanReason},failure={steering.LastZLevelExecutionFailureReason}");
+                }
+            }
+
+            var state = string.Join(" | ", failures);
+            Assert.Multiple(() =>
+            {
+                Assert.That(failures, Is.Empty, state);
+                Assert.That(routeMetrics.Queries, Is.EqualTo(npcCount), state);
+                Assert.That(routeMetrics.Successes, Is.EqualTo(npcCount), state);
+                Assert.That(routeMetrics.StateBudgetExhaustions, Is.Zero, state);
+                Assert.That(routeMetrics.LocalPathBudgetExhaustions, Is.Zero, state);
+                Assert.That(routeMetrics.TraversalEdgeBudgetExhaustions, Is.Zero, state);
+                Assert.That(steeringMetrics.RoutesInstalled, Is.EqualTo(npcCount), state);
+                Assert.That(steeringMetrics.RoutesCompleted, Is.EqualTo(npcCount), state);
+                Assert.That(steeringMetrics.TraversalsStarted, Is.EqualTo(npcCount), state);
+                Assert.That(steeringMetrics.TraversalsCompleted, Is.EqualTo(npcCount), state);
+                Assert.That(steeringMetrics.Replans, Is.Zero, state);
+                Assert.That(steeringMetrics.ExecutionFailures, Is.Zero, state);
+                Assert.That(floorMetrics.CachedFloors, Is.EqualTo(cachedFloorsBeforeRoutes), state);
+                Assert.That(floorMetrics.CachedChunks, Is.EqualTo(cachedChunksBeforeRoutes), state);
+                Assert.That(floorMetrics.PendingChunks, Is.Zero, state);
+            });
+        });
+    }
+
+    private void ConfigureCorridors(TestMapData testMap, int laneCount = 1)
     {
         var map = SEntMan.System<SharedMapSystem>();
         var format = SEntMan.System<SharedZLevelMapSystem>();
@@ -1390,10 +1673,14 @@ public sealed class ZLevelPathfindingTest : GameTest
 
         grid.CanSplit = false;
         format.Configure(testMap.MapUid, 0, 1, 0, ZLevelDefaultBoundaryMode.TileAboveCloses);
-        for (var x = 0; x <= 6; x++)
+        for (var lane = 0; lane < laneCount; lane++)
         {
-            map.SetTile(testMap.Grid, grid, new Vector2i(x, 0), floor);
-            map.SetZLevelTile(testMap.Grid, grid, new ZLevelTileIndices(x, 0, 1), floor);
+            var y = lane * 2;
+            for (var x = 0; x <= 6; x++)
+            {
+                map.SetTile(testMap.Grid, grid, new Vector2i(x, y), floor);
+                map.SetZLevelTile(testMap.Grid, grid, new ZLevelTileIndices(x, y, 1), floor);
+            }
         }
     }
 
@@ -1479,16 +1766,16 @@ public sealed class ZLevelPathfindingTest : GameTest
         return await task!;
     }
 
-    private EntityUid SpawnUpStairs(TestMapData testMap, float x)
+    private EntityUid SpawnUpStairs(TestMapData testMap, float x, int lane = 0)
     {
-        var stairs = SEntMan.SpawnEntity("ZLevelStairsUp", Coordinates(testMap, x));
+        var stairs = SEntMan.SpawnEntity("ZLevelStairsUp", Coordinates(testMap, x, lane));
         SEntMan.System<ZLevelTraversalGraphSystem>().RefreshTraversal(stairs);
         return stairs;
     }
 
-    private EntityUid SpawnTraversalUser(TestMapData testMap, float x)
+    private EntityUid SpawnTraversalUser(TestMapData testMap, float x, int lane = 0)
     {
-        var user = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, x));
+        var user = SEntMan.SpawnEntity("MobMouse", Coordinates(testMap, x, lane));
         SEntMan.RemoveComponent<HTNComponent>(user);
         SEntMan.RemoveComponent<ActiveNPCComponent>(user);
         SEntMan.EnsureComponent<GodmodeComponent>(user);
@@ -1496,8 +1783,8 @@ public sealed class ZLevelPathfindingTest : GameTest
         return user;
     }
 
-    private static EntityCoordinates Coordinates(TestMapData testMap, float x)
+    private static EntityCoordinates Coordinates(TestMapData testMap, float x, int lane = 0)
     {
-        return new EntityCoordinates(testMap.Grid, new Vector2(x, 0.5f));
+        return new EntityCoordinates(testMap.Grid, new Vector2(x, lane * 2 + 0.5f));
     }
 }

@@ -89,7 +89,7 @@ public sealed partial class NPCSteeringSystem
         steering.LoadedZLevelLegIndex = -1;
         steering.ZLevelPlannedTargetCoordinates = _transform.ToCoordinates(targetFrame.Value, targetMap);
         steering.ZLevelPendingTraversal = null;
-        StampZLevelRouteValidation(steering);
+        StampZLevelRouteValidation(route, steering);
         steering.LastZLevelExecutionFailureReason = NPCZLevelExecutionFailureReason.None;
         steering.Status = SteeringStatus.Moving;
         steering.CurrentPath.Clear();
@@ -198,8 +198,9 @@ public sealed partial class NPCSteeringSystem
         if (route == null)
             return ZLevelRoutePreparation.None;
 
-        if ((steering.ZLevelValidatedTopologyRevision != _zLevelTraversalGraph.TopologyRevision ||
-             steering.ZLevelValidatedEnvironmentRevision != _zLevelTraversalGraph.EnvironmentRevision) &&
+        var graphVersion = _zLevelTraversalGraph.GetVersion(route.GraphVersion.MapId);
+        if ((steering.ZLevelValidatedTopologyRevision != graphVersion.TopologyRevision ||
+             steering.ZLevelValidatedEnvironmentRevision != graphVersion.EnvironmentRevision) &&
             !ValidateAndStampZLevelRoute(route, steering))
         {
             ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.RouteInvalid);
@@ -315,7 +316,7 @@ public sealed partial class NPCSteeringSystem
             return ZLevelRouteArrival.Repath;
         }
 
-        StampZLevelRouteValidation(steering);
+        StampZLevelRouteValidation(route, steering);
 
         var traversal = leg.Traversal.Source.Traversal;
         var wasPending = _zLevelTraversal.IsTraversalPending(uid, traversal);
@@ -390,14 +391,17 @@ public sealed partial class NPCSteeringSystem
         if (!_pathfindingSystem.ValidateZLevelPathRoute(route).IsValid)
             return false;
 
-        StampZLevelRouteValidation(steering);
+        StampZLevelRouteValidation(route, steering);
         return true;
     }
 
-    private void StampZLevelRouteValidation(NPCSteeringComponent steering)
+    private void StampZLevelRouteValidation(
+        ZLevelPathRoute route,
+        NPCSteeringComponent steering)
     {
-        steering.ZLevelValidatedTopologyRevision = _zLevelTraversalGraph.TopologyRevision;
-        steering.ZLevelValidatedEnvironmentRevision = _zLevelTraversalGraph.EnvironmentRevision;
+        var version = _zLevelTraversalGraph.GetVersion(route.GraphVersion.MapId);
+        steering.ZLevelValidatedTopologyRevision = version.TopologyRevision;
+        steering.ZLevelValidatedEnvironmentRevision = version.EnvironmentRevision;
     }
 
     private void ReplanZLevelRoute(

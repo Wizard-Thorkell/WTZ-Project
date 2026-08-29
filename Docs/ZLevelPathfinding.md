@@ -161,11 +161,12 @@ value without touching component queries or the graph's mutable indexes.
 
 Snapshots are cached per map and revision. Repeated requests share the same
 detached edge storage; topology or environment changes force a fresh capture,
-and map removal evicts the retained entry. Revisions are currently global to the
-graph, so a connector change on one map conservatively makes every map snapshot
-stale. `zlevelmetrics` exposes cached snapshots, requests, hits, builds, copied
-edges, time, and allocation so P5.4/P8 can decide whether map-scoped revisions
-are warranted by real server workload.
+and map removal evicts the retained entry. P5.4b2 measurements justified making
+topology and environment revisions map-scoped: a connector change invalidates
+only its owning map. Global revision counters remain monotonic diagnostics and
+do not participate in snapshot, search, or active-route validity. `zlevelmetrics`
+exposes cached snapshots, tracked map revisions, requests, hits, builds, copied
+edges, time, and allocation.
 
 The typed route contract consists of:
 
@@ -277,16 +278,35 @@ with equivalent execution behavior. Zero-delay traversal executes directly and
 cannot leave an orphaned action; deleting a base-floor user also clears pending
 state even when Z 0 is represented without `ZLevelPositionComponent`.
 
-## Remaining P5 Packages
+## P5.4b2 Map-Scoped Revisions And Hardening
 
-### P5.4b2 Phase Hardening
+`ZLevelTraversalGraphSystem` owns independent topology and environment revision
+pairs for every live map. Registration moves invalidate both old and new maps;
+tile, boundary, frame, and dynamic-state events invalidate only the map that owns
+the affected connector. Map removal evicts both its detached snapshot and its
+revision record. The process-global counters remain useful aggregate telemetry,
+but no runtime consumer uses them as a validity stamp.
 
-- Validate hostile/follow behavior through multiple floors and close the P5
-  phase gate with concurrent NPC scale, budget, and long-running tests.
-- Replace global graph invalidation with map-scoped revisions, then verify that
-  unrelated maps cannot stale snapshots or active routes.
-- Measure retained floor chunks and per-route validation under prolonged load;
-  add bounded eviction or pooling only where the measurements justify it.
+Snapshots, in-flight searches, route installation, and active steering compare
+the version of the route's map. An unrelated map can therefore change without
+rebuilding retained edge arrays or forcing an exact-edge scan on every NPC tick.
+A change on the route's own map still triggers authoritative exact-edge
+validation and a replan whenever topology, availability, power, destination,
+delay, or cost makes the captured route stale.
+
+Scale fixtures exercise eight simultaneous NPCs, both follow and hostile HTN
+inputs, and 512 consecutive dynamic connector mutations. Native navigation cache
+storage remains at its pre-route high-water mark and graph snapshots remain one
+bounded slot per live map. The evidence does not justify speculative pooling or
+extra eviction in P5; longer public-server endurance belongs to P8.
+
+## P5 Phase Status
+
+P5 is complete. Authored static and dynamic vertical connectors now participate
+in floor-specific local navigation, bounded hierarchical planning, exact
+server-authoritative traversal, stale-route recovery, and map-scoped caching.
+Physical elevator cabins and flight remain P7 content built on these contracts.
+The active roadmap work moves to P6 initialized-map save/load.
 
 ## P5.1 Verification
 
@@ -394,3 +414,20 @@ baselines pass 3/3 with 100% warmed boundary/gravity cache hits, zero PVS budget
 exhaustion or fail-open candidates, and 6,336 measured bytes each. Local times
 are 6.9300, 13.1226, and 21.6093 ms; they remain comparison evidence rather than
 release thresholds.
+
+## P5.4b2 Verification
+
+The final focused matrix passes 11/11 and covers prolonged dynamic churn,
+unrelated-map snapshot/search/route isolation, map-removal eviction, eight
+concurrent NPCs, and follow/hostile planning. The 512-mutation fixture retains
+one graph snapshot slot with at most 16 KiB per rebuild. All eight NPCs complete
+their vertical routes without budget exhaustion, replans, or execution failures;
+the measured native cache remains unchanged at 9 chunks and 2 floors.
+
+The combined movement/pathfinding matrix passes 40/40, the complete Content
+Z-level integration matrix passes 274/274, and the Content unit/analyzer matrix
+passes 9/9, all without skips. Generated 3-, 6-, and 10-floor baselines pass 3/3
+with 100% warmed boundary/gravity cache hits, zero PVS budget exhaustion or
+fail-open candidates, and 6,336 measured bytes each. Local times are 6.9267,
+13.2397, and 21.1442 ms. The full solution build completes with zero errors and
+27 established warnings.

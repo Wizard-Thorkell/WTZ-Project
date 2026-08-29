@@ -329,6 +329,65 @@ public sealed class ZLevelDynamicTraversalTest : MovementTest
         });
     }
 
+    [Test]
+    public async Task DynamicTraversalChurnKeepsSnapshotStorageBounded()
+    {
+        const int iterations = 512;
+
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var elevator = SpawnDynamicElevator(TimeSpan.FromSeconds(0.25), TimeSpan.Zero, 0f);
+            var dynamicTraversal = SEntMan.GetComponent<ZLevelDynamicTraversalComponent>(elevator);
+            var mapId = SEntMan.GetComponent<TransformComponent>(elevator).MapID;
+            var cachedBefore = graph.Snapshot().CachedSnapshots;
+            graph.ResetMetrics();
+
+            var snapshot = graph.CreateSnapshot(mapId);
+            var initialVersion = snapshot.Version;
+            for (var i = 0; i < iterations; i++)
+            {
+                var enabled = (i & 1) != 0;
+                Assert.That(graph.ConfigureDynamicTraversal(
+                    elevator,
+                    enabled,
+                    true,
+                    true,
+                    TimeSpan.Zero,
+                    0f,
+                    dynamicTraversal),
+                    Is.True);
+                Assert.That(graph.ValidateSnapshot(snapshot),
+                    Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.EnvironmentChanged));
+
+                snapshot = graph.CreateSnapshot(mapId);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(graph.ValidateSnapshot(snapshot),
+                        Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+                    Assert.That(snapshot.Edges.Length, Is.EqualTo(enabled ? 1 : 0));
+                    Assert.That(graph.CreateSnapshot(mapId).Edges.Equals(snapshot.Edges), Is.True);
+                });
+            }
+
+            var version = graph.GetVersion(mapId);
+            var metrics = graph.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(version.TopologyRevision, Is.EqualTo(initialVersion.TopologyRevision));
+                Assert.That(version.EnvironmentRevision,
+                    Is.EqualTo(initialVersion.EnvironmentRevision + iterations));
+                Assert.That(metrics.DynamicStateChanges, Is.EqualTo(iterations));
+                Assert.That(metrics.SnapshotRequests, Is.EqualTo(1 + iterations * 2));
+                Assert.That(metrics.SnapshotBuilds, Is.EqualTo(1 + iterations));
+                Assert.That(metrics.SnapshotCacheHits, Is.EqualTo(iterations));
+                Assert.That(metrics.CachedSnapshots, Is.InRange(cachedBefore, cachedBefore + 1));
+                Assert.That(metrics.MaxSnapshotAllocatedBytes, Is.LessThanOrEqualTo(16_384));
+                Assert.That(snapshot.Edges, Has.Length.EqualTo(1));
+            });
+        });
+    }
+
     private EntityUid SpawnDynamicElevator(
         TimeSpan traversalDelay,
         TimeSpan waitDelay,

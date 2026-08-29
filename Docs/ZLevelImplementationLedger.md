@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.4b2 map-scoped revisions, concurrent NPC scale, and P5 phase hardening`.
+- Active package: `P6.1 initialized mapping snapshot contract and transient-state filtering`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,8 +45,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.4b1 complete; P5.4b2 active) |
-| P6 | Safe initialized-map save/load and automated round trips | Pending |
+| P5 | Hierarchical pathfinding with vertical transition edges | Complete |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.1 active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -70,7 +70,15 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5.3b | Hierarchical route search and typed route composition | Complete |
 | P5.4a | Static AI route execution and traversal lifecycle | Complete |
 | P5.4b1 | Dynamic traversal state, cost, power, destination, and lifecycle | Complete |
-| P5.4b2 | Map-scoped revisions, concurrent NPC scale, and phase hardening | Active |
+| P5.4b2 | Map-scoped revisions, concurrent NPC scale, and phase hardening | Complete |
+
+## Phase P6 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P6.1 | Initialized mapping snapshot contract and transient-state filtering | Active |
+| P6.2 | Atomic save/validate/replace and internal-reference fidelity | Pending |
+| P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Phase P0 Packages
 
@@ -5031,6 +5039,115 @@ allocation is inside Robust physics enumeration.
   execution fixtures, prolonged invalidation tests, and the consolidated P5
   phase gate.
 
+## Completed Package: P5.4b2 Map-Scoped Revisions And Phase Hardening
+
+### Scope
+
+- Replace process-global graph staleness decisions with independent topology and
+  environment revisions for each live map while retaining aggregate counters for
+  diagnostics.
+- Prevent unrelated-map changes from rebuilding detached snapshots or forcing
+  exact-edge validation and replanning of active NPC routes.
+- Exercise prolonged dynamic state churn, hostile/follow planning, concurrent
+  vertical traversal, cache retention, map removal, and phase-wide regressions.
+- Close P5 without speculative pooling or eviction that the measured cache
+  envelope does not justify.
+
+### Acceptance Criteria
+
+- A topology or environment change on map B leaves map A's graph version,
+  detached snapshot, in-flight search, and active route unchanged.
+- Removing a map evicts its retained graph snapshot and revision record without
+  disturbing live maps.
+- Follow and hostile HTN consumers install the same typed hierarchical route,
+  and at least eight NPCs can plan and execute independent vertical routes.
+- Repeated dynamic connector mutations keep retained snapshot storage bounded,
+  preserve deterministic revisions, and restore an executable final edge.
+- Existing Z 0, movement, interaction, combat, lighting, sound, and mapping
+  regressions remain green.
+
+### Verification Evidence
+
+- The final focused matrix passes 11/11 with no skips. It includes six dynamic
+  traversal cases, unrelated-map snapshot/search and active-route isolation,
+  eight concurrent NPCs, and both follow and hostile `MoveToOperator` inputs.
+- The 512-mutation churn fixture records exactly 512 environment revisions and
+  state changes, retains one per-map snapshot slot, and keeps each rebuilt
+  detached snapshot at or below 16 KiB.
+- All eight concurrent NPCs plan, traverse, and arrive independently with zero
+  budget exhaustion, replans, or execution failures. The native navigation
+  cache remains at its measured pre-route high-water mark of 9 chunks and 2
+  floors after execution.
+- The combined movement/pathfinding matrix passes 40/40, the complete Content
+  Z-level integration matrix passes 274/274, and the Content unit/analyzer
+  matrix passes 9/9, all without skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
+  100% warmed boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 6.9267, 13.2397, and 21.1442
+  ms respectively.
+- A full incremental `SpaceStation14.slnx` build succeeds with zero errors and
+  27 established dependency, vulnerability, and obsolescence warnings; none
+  points to this package.
+
+### Decisions
+
+- Make `ZLevelTraversalGraphVersion` map-scoped and authoritative for snapshot,
+  search, and route validation. Keep global revisions as monotonic aggregate
+  diagnostics only.
+- Retain a map revision entry for the lifetime of its map so revisions never
+  move backwards while live; evict both revision and snapshot state on map
+  removal. Robust map IDs are not reused.
+- Validate an active route's exact edges only when its own map version changes.
+  This preserves safety while eliminating cross-map work from ordinary ticks.
+- Keep follow and hostile planning on the established `MoveToOperator` path;
+  separate Z-level planners would duplicate policy without adding capability.
+- Do not add chunk pooling or more aggressive eviction in P5. The prolonged and
+  concurrent fixtures show bounded high-water retention, and map teardown now
+  removes graph-owned state.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to graph revision ownership, its NPC and
+      diagnostics consumers, focused scale/isolation tests, and P5 documentation.
+- [x] Invariant review: Z 0, world/local floors, moving frames, map migration and
+      removal, exact edge authority, async search, and dynamic state were reviewed.
+- [x] Automated verification: 11/11 focused, 40/40 movement/pathfinding, 274/274
+      Content integration, 9/9 Content unit/analyzer, 3/3 baselines, and the full
+      solution build pass without skips or errors.
+- [x] Performance evidence: 512 mutations retain one snapshot slot under the
+      allocation ceiling; 8 concurrent routes do not grow native navigation
+      caches; warmed stress allocation remains 6,336 bytes at every depth.
+- [x] Documentation: map-version authority, lifecycle, scale evidence, decisions,
+      limitations, and the P6 handoff are recorded here and in
+      `Docs/ZLevelPathfinding.md`.
+- [x] Dependency check: no WTZ Engine change is required; the paired engine
+      remains at `3aaca280f628876939afcc10a9be920b3898902a`.
+- [x] Git check: generated baseline artifacts remain ignored; staged scope,
+      parent/engine status, and `git diff --check` are verified before commit.
+- [x] Mini review: no blocking P5 correctness or measured retention issue remains;
+      initialized mapping save/load is now the active P6 responsibility.
+- [x] Commit: the isolated `Harden hierarchical Z-level pathfinding` parent commit
+      is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: graph invalidation now has the same ownership boundary as route data:
+  one map cannot make another map's snapshots, searches, or active routes stale.
+- Finding: map movement, connector migration, frame changes, tile changes,
+  dynamic state, and map deletion all invalidate or evict the intended map state.
+- Finding: representative follow/hostile consumers and eight simultaneous NPCs
+  execute the complete local/traversal/local lifecycle without shared-state leaks.
+- Finding: the exploratory cache measurement exposed the native 8-tile chunk
+  border high-water behavior; the useful invariant is stable retention before
+  and after routing, which passes at 9 chunks and 2 floors.
+- Residual risk: eight deterministic NPCs and 512 mutations are a package-scale
+  envelope, not a substitute for P8 long-duration public-server load testing.
+- Residual risk: dynamic elevators still provide navigation/runtime policy only;
+  cabins, controls, construction, power load, and mapper-facing content remain P7.
+- Next package: P6.1 inventories initialized map serialization, defines the safe
+  mapping snapshot boundary, and excludes players, minds, sessions, and other
+  transient round state before any atomic replacement workflow is added.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -5078,3 +5195,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.3b | `Compose hierarchical Z-level paths` | 8 focused, 253 Content integration, 9 Content unit/analyzer, 3 baseline, full build, budget/timing/diff review | Complete |
 | 2026-08-29 | P5.4a | `Execute hierarchical Z-level NPC routes` | 18 focused, 263 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/timing/diff review | Complete |
 | 2026-08-29 | P5.4b1 | `Model dynamic Z-level traversal state` | 5 dynamic, 36 movement/pathfinding, 269 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/allocation/diff review | Complete |
+| 2026-08-29 | P5.4b2 | `Harden hierarchical Z-level pathfinding` | 11 focused, 40 movement/pathfinding, 274 Content integration, 9 Content unit/analyzer, 3 baseline, full build, 8-NPC/512-mutation/cache/diff review | Complete |

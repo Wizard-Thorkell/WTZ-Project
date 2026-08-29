@@ -177,6 +177,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var traversalMetrics = traversalGraph.Snapshot();
         shell.WriteLine(
             $"  traversal graph: nodes/locations={traversalMetrics.Nodes}/{traversalMetrics.Locations}, " +
+            $"tracked maps={traversalMetrics.TrackedMapRevisions}, " +
             $"revision={traversalMetrics.TopologyRevision}/{traversalMetrics.EnvironmentRevision}, " +
             $"location hit-rate={traversalMetrics.LocationHitPercent:0.00}%, " +
             $"connected q/visits/budget={traversalMetrics.ConnectedQueries}/" +

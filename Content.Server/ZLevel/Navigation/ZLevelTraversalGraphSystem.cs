@@ -35,6 +35,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private readonly List<EntityUid> _entityBuffer = new();
     private readonly List<ZLevelTraversalNavigationEdge> _edgeBuffer = new();
     private readonly Dictionary<MapId, ZLevelTraversalGraphSnapshot> _snapshotCache = new();
+    private readonly Dictionary<MapId, ZLevelTraversalMapRevision> _mapRevisions = new();
 
     private long _topologyRevision;
     private long _environmentRevision;
@@ -70,6 +71,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
     public int NodeCount => _registrations.Count;
     public int LocationCount => _byLocation.Count;
+    public int TrackedMapRevisionCount => _mapRevisions.Count;
     public long TopologyRevision => _topologyRevision;
     public long EnvironmentRevision => _environmentRevision;
 
@@ -288,6 +290,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             return ZLevelTraversalEdgeStatus.Invalid;
         }
 
+        var version = GetVersion(registration.MapId);
         edge = new ZLevelTraversalNavigationEdge(
             source,
             destination,
@@ -295,8 +298,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             navigationCost,
             ClampDynamicDelay(registration.Profile.TraversalDelay) + waitDelay,
             registration.Profile.RequireDirectDestinationSupport,
-            _topologyRevision,
-            _environmentRevision);
+            version.TopologyRevision,
+            version.EnvironmentRevision);
         _validEdges++;
         RecordQueryTime(started);
         return ZLevelTraversalEdgeStatus.Valid;
@@ -329,9 +332,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     public ZLevelTraversalGraphSnapshot CreateSnapshot(MapId mapId)
     {
         _snapshotRequests++;
+        var version = GetVersion(mapId);
         if (_snapshotCache.TryGetValue(mapId, out var cached) &&
-            cached.TopologyRevision == _topologyRevision &&
-            cached.EnvironmentRevision == _environmentRevision)
+            cached.TopologyRevision == version.TopologyRevision &&
+            cached.EnvironmentRevision == version.EnvironmentRevision)
         {
             _snapshotCacheHits++;
             return cached;
@@ -345,8 +349,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         var edges = _edgeBuffer.ToImmutableArray();
         var snapshot = new ZLevelTraversalGraphSnapshot(
             mapId,
-            _topologyRevision,
-            _environmentRevision,
+            version.TopologyRevision,
+            version.EnvironmentRevision,
             edges);
         _snapshotCache[mapId] = snapshot;
 
@@ -368,8 +372,12 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     /// </summary>
     public ZLevelTraversalGraphSnapshotStatus ValidateSnapshot(in ZLevelTraversalGraphSnapshot snapshot)
     {
-        var topologyChanged = snapshot.TopologyRevision != _topologyRevision;
-        var environmentChanged = snapshot.EnvironmentRevision != _environmentRevision;
+        if (snapshot.MapId == MapId.Nullspace || !_map.MapExists(snapshot.MapId))
+            return ZLevelTraversalGraphSnapshotStatus.TopologyChanged;
+
+        var version = GetVersion(snapshot.MapId);
+        var topologyChanged = snapshot.TopologyRevision != version.TopologyRevision;
+        var environmentChanged = snapshot.EnvironmentRevision != version.EnvironmentRevision;
 
         if (topologyChanged && environmentChanged)
             return ZLevelTraversalGraphSnapshotStatus.TopologyAndEnvironmentChanged;
@@ -380,11 +388,25 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         return ZLevelTraversalGraphSnapshotStatus.Current;
     }
 
+    /// <summary>
+    /// Returns the map-scoped graph clocks used by snapshots and route owners.
+    /// Global revisions remain aggregate diagnostics only.
+    /// </summary>
+    public ZLevelTraversalGraphVersion GetVersion(MapId mapId)
+    {
+        var revision = GetMapRevision(mapId);
+        return new ZLevelTraversalGraphVersion(
+            mapId,
+            revision.TopologyRevision,
+            revision.EnvironmentRevision);
+    }
+
     public ZLevelTraversalGraphMetricsSnapshot Snapshot()
     {
         return new ZLevelTraversalGraphMetricsSnapshot(
             NodeCount,
             LocationCount,
+            TrackedMapRevisionCount,
             _topologyRevision,
             _environmentRevision,
             _refreshes,
@@ -638,10 +660,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
     private void OnBoundaryChanged(ref ZLevelBoundaryChangedEvent args)
     {
-        if (HasRelevantTraversal(args.Grid.Owner, args.Tile, args.LowerZ) ||
-            HasRelevantTraversal(args.Grid.Owner, args.Tile, args.LowerZ + 1))
+        if (TryGetRelevantTraversalMap(args.Grid.Owner, args.Tile, args.LowerZ, out var mapId) ||
+            TryGetRelevantTraversalMap(args.Grid.Owner, args.Tile, args.LowerZ + 1, out mapId))
         {
-            _environmentRevision++;
+            InvalidateEnvironment(mapId);
         }
     }
 
@@ -652,7 +674,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             if (registration.Key.GridUid != args.GridUid)
                 continue;
 
-            _environmentRevision++;
+            InvalidateEnvironment(registration.MapId);
             return;
         }
     }
@@ -660,6 +682,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private void OnMapRemoved(MapRemovedEvent args)
     {
         _snapshotCache.Remove(args.MapId);
+        _mapRevisions.Remove(args.MapId);
     }
 
     private void RefreshRegistration(EntityUid uid)
@@ -679,7 +702,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             if (hadOld)
             {
                 _registrations.Remove(uid);
-                _topologyRevision++;
+                InvalidateTopology(oldRegistration.MapId);
             }
 
             return;
@@ -695,7 +718,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         var insertionIndex = entities.BinarySearch(uid);
         if (insertionIndex < 0)
             entities.Insert(~insertionIndex, uid);
-        _topologyRevision++;
+
+        if (hadOld && oldRegistration.MapId != newRegistration.MapId)
+            InvalidateTopology(oldRegistration.MapId);
+        InvalidateTopology(newRegistration.MapId);
     }
 
     private void RemoveRegistration(EntityUid uid)
@@ -704,7 +730,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             return;
 
         RemoveFromLocation(uid, registration.Key);
-        _topologyRevision++;
+        InvalidateTopology(registration.MapId);
     }
 
     private void RemoveFromLocation(EntityUid uid, ZLevelTraversalNodeKey key)
@@ -841,10 +867,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
     private void InvalidateDynamicTraversal(EntityUid uid)
     {
-        if (!_registrations.ContainsKey(uid))
+        if (!_registrations.TryGetValue(uid, out var registration))
             return;
 
-        _environmentRevision++;
+        InvalidateEnvironment(registration.MapId);
         _dynamicStateChanges++;
     }
 
@@ -878,17 +904,65 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
     private void InvalidateEnvironmentAt(EntityUid gridUid, Vector2i tile, int localZ)
     {
-        if (HasRelevantTraversal(gridUid, tile, localZ) ||
-            HasRelevantTraversal(gridUid, tile, localZ - 1) ||
-            HasRelevantTraversal(gridUid, tile, localZ + 1))
+        if (TryGetRelevantTraversalMap(gridUid, tile, localZ, out var mapId) ||
+            TryGetRelevantTraversalMap(gridUid, tile, localZ - 1, out mapId) ||
+            TryGetRelevantTraversalMap(gridUid, tile, localZ + 1, out mapId))
         {
-            _environmentRevision++;
+            InvalidateEnvironment(mapId);
         }
     }
 
-    private bool HasRelevantTraversal(EntityUid gridUid, Vector2i tile, int localZ)
+    private bool TryGetRelevantTraversalMap(
+        EntityUid gridUid,
+        Vector2i tile,
+        int localZ,
+        out MapId mapId)
     {
-        return _byLocation.ContainsKey(new ZLevelTraversalNodeKey(gridUid, tile, localZ));
+        mapId = MapId.Nullspace;
+        if (!_byLocation.TryGetValue(new ZLevelTraversalNodeKey(gridUid, tile, localZ), out var traversals))
+            return false;
+
+        foreach (var traversal in traversals)
+        {
+            if (!_registrations.TryGetValue(traversal, out var registration))
+                continue;
+
+            mapId = registration.MapId;
+            return true;
+        }
+
+        return false;
+    }
+
+    private ZLevelTraversalMapRevision GetMapRevision(MapId mapId)
+    {
+        return _mapRevisions.GetValueOrDefault(mapId);
+    }
+
+    private void InvalidateTopology(MapId mapId)
+    {
+        if (mapId == MapId.Nullspace)
+            return;
+
+        _topologyRevision++;
+        var revision = GetMapRevision(mapId);
+        _mapRevisions[mapId] = revision with
+        {
+            TopologyRevision = revision.TopologyRevision + 1,
+        };
+    }
+
+    private void InvalidateEnvironment(MapId mapId)
+    {
+        if (mapId == MapId.Nullspace)
+            return;
+
+        _environmentRevision++;
+        var revision = GetMapRevision(mapId);
+        _mapRevisions[mapId] = revision with
+        {
+            EnvironmentRevision = revision.EnvironmentRevision + 1,
+        };
     }
 
     private void RecordQueryTime(long started)
@@ -908,6 +982,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         ZLevelTraversalNodeKey Key,
         MapId MapId,
         ZLevelTraversalProfile Profile);
+
+    private readonly record struct ZLevelTraversalMapRevision(
+        long TopologyRevision,
+        long EnvironmentRevision);
 
     private sealed class ZLevelTraversalNavigationEdgeComparer : IComparer<ZLevelTraversalNavigationEdge>
     {
@@ -1013,6 +1091,7 @@ public enum ZLevelTraversalGraphSnapshotStatus : byte
 public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     int Nodes,
     int Locations,
+    int TrackedMapRevisions,
     long TopologyRevision,
     long EnvironmentRevision,
     long Refreshes,
