@@ -32,6 +32,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     [Dependency] private readonly ZLevelTraversalGraphSystem _graph = default!;
 
     private readonly Dictionary<EntityUid, PendingTraversal> _pendingTraversals = new();
+    private readonly Dictionary<EntityUid, StartingTraversal> _startingTraversals = new();
     private readonly HashSet<(EntityUid User, EntityUid Traversal)> _suppressedAutoTraversals = new();
     private readonly List<EntityUid> _traversalBuffer = new();
     private readonly List<EntityUid> _pendingTraversalUserBuffer = new();
@@ -49,7 +50,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         SubscribeLocalEvent<ZLevelTraversalComponent, DoAfterAttemptEvent<ZLevelTraversalDoAfterEvent>>(OnTraversalDoAfterAttempt);
         SubscribeLocalEvent<ZLevelTraversalComponent, ZLevelTraversalDoAfterEvent>(OnTraversalDoAfter);
         SubscribeLocalEvent<ZLevelTraversalComponent, EntityTerminatingEvent>(OnTraversalTerminating);
-        SubscribeLocalEvent<ZLevelPositionComponent, EntityTerminatingEvent>(OnTerminating);
+        SubscribeLocalEvent<EntityTerminatingEvent>(OnEntityTerminating);
 
         _transform.OnGlobalMoveEvent += OnMoverMoved;
     }
@@ -134,7 +135,8 @@ public sealed class ZLevelTraversalSystem : EntitySystem
             return;
         }
 
-        if (TryGetConnectedTraversalAtTile(traversal, oldTile, out _))
+        if (_graph.TryResolveEdge(traversal.Owner, out var edge) == ZLevelTraversalEdgeStatus.Valid &&
+            TryGetConnectedTraversalAtTile(traversal, oldTile, edge, out _))
             return;
 
         TryStartTraversal(traversal, user, popupOnFailure: false);
@@ -144,25 +146,38 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         Entity<ZLevelTraversalComponent> ent,
         ref DoAfterAttemptEvent<ZLevelTraversalDoAfterEvent> args)
     {
-        if (!TryGetConnectedTraversalAtUser(ent, args.DoAfter.Args.User, out _))
+        var user = args.DoAfter.Args.User;
+        var ownsPending = _pendingTraversals.TryGetValue(user, out var pending) &&
+                          pending.Traversal == ent.Owner &&
+                          pending.DoAfter == args.DoAfter.Id;
+        var ownsStarting = _startingTraversals.TryGetValue(user, out var starting) &&
+                           starting.Traversal == ent.Owner;
+        var expectedEdge = ownsPending ? pending.Edge : starting.Edge;
+        if ((!ownsPending && !ownsStarting) ||
+            !TryGetConnectedTraversalAtUser(ent, user, expectedEdge, out var currentTraversal) ||
+            _graph.TryResolveEdge(currentTraversal.Owner, out var currentEdge) != ZLevelTraversalEdgeStatus.Valid ||
+            !ZLevelTraversalGraphSystem.HasEquivalentExecutionProfile(expectedEdge, currentEdge))
+        {
             args.Cancel();
+        }
     }
 
     private void OnTraversalDoAfter(Entity<ZLevelTraversalComponent> ent, ref ZLevelTraversalDoAfterEvent args)
     {
-        if (_pendingTraversals.TryGetValue(args.User, out var pending) &&
-            pending.Traversal == ent.Owner &&
-            pending.DoAfter == args.DoAfter.Id)
-        {
+        var ownsPending = _pendingTraversals.TryGetValue(args.User, out var pending) &&
+                          pending.Traversal == ent.Owner &&
+                          pending.DoAfter == args.DoAfter.Id;
+        if (ownsPending)
             _pendingTraversals.Remove(args.User);
-        }
 
-        if (args.Handled || args.Cancelled)
+        if (args.Handled || args.Cancelled || !ownsPending)
             return;
 
         args.Handled = true;
-        if (!TryGetConnectedTraversalAtUser(ent, args.User, out var currentTraversal) ||
-            !TryUseTraversal(currentTraversal, args.User, popupOnFailure: false))
+        if (!TryGetConnectedTraversalAtUser(ent, args.User, pending.Edge, out var currentTraversal) ||
+            _graph.TryResolveEdge(currentTraversal.Owner, out var currentEdge) != ZLevelTraversalEdgeStatus.Valid ||
+            !ZLevelTraversalGraphSystem.HasEquivalentExecutionProfile(pending.Edge, currentEdge) ||
+            !TryUseTraversal(currentTraversal, currentEdge, args.User, popupOnFailure: false))
         {
             return;
         }
@@ -170,10 +185,12 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         SuppressDestinationAutoTraversal(args.User);
     }
 
-    private void OnTerminating(Entity<ZLevelPositionComponent> ent, ref EntityTerminatingEvent args)
+    private void OnEntityTerminating(ref EntityTerminatingEvent args)
     {
-        _pendingTraversals.Remove(ent.Owner);
-        _suppressedAutoTraversals.RemoveWhere(entry => entry.User == ent.Owner);
+        var uid = args.Entity.Owner;
+        _pendingTraversals.Remove(uid);
+        _startingTraversals.Remove(uid);
+        _suppressedAutoTraversals.RemoveWhere(entry => entry.User == uid);
     }
 
     private void OnTraversalTerminating(Entity<ZLevelTraversalComponent> ent, ref EntityTerminatingEvent args)
@@ -206,6 +223,30 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     }
 
     /// <summary>
+    /// Starts the exact edge captured by a planned route. Dynamic state,
+    /// destination, cost, and delay must still match at execution time.
+    /// </summary>
+    public bool TryStartTraversal(
+        ZLevelTraversalNavigationEdge edge,
+        EntityUid user,
+        bool popupOnFailure = false)
+    {
+        var traversal = edge.Source.Traversal;
+        if (_pendingTraversals.TryGetValue(user, out var pending))
+        {
+            return pending.Traversal == traversal &&
+                   ZLevelTraversalGraphSystem.HasEquivalentEdge(pending.Edge, edge) &&
+                   _graph.TryResolveEdge(traversal, out var currentPending) == ZLevelTraversalEdgeStatus.Valid &&
+                   ZLevelTraversalGraphSystem.HasEquivalentEdge(edge, currentPending);
+        }
+
+        return TryComp<ZLevelTraversalComponent>(traversal, out var component) &&
+               _graph.TryResolveEdge(traversal, out var current) == ZLevelTraversalEdgeStatus.Valid &&
+               ZLevelTraversalGraphSystem.HasEquivalentEdge(edge, current) &&
+               TryStartTraversal((traversal, component), current, user, popupOnFailure);
+    }
+
+    /// <summary>
     /// Returns whether the user is waiting for an authored vertical traversal.
     /// </summary>
     public bool IsTraversalPending(EntityUid user, EntityUid? traversal = null)
@@ -233,17 +274,42 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
     private bool TryStartTraversal(Entity<ZLevelTraversalComponent> ent, EntityUid user, bool popupOnFailure = true)
     {
-        if (!CanUseTraversal(ent.Owner, user))
+        if (_graph.TryResolveEdge(ent.Owner, out var edge) != ZLevelTraversalEdgeStatus.Valid)
         {
             if (popupOnFailure)
                 _popup.PopupEntity(Loc.GetString("zlevel-traversal-failed"), ent, user);
             return false;
         }
 
+        return TryStartTraversal(ent, edge, user, popupOnFailure);
+    }
+
+    private bool TryStartTraversal(
+        Entity<ZLevelTraversalComponent> ent,
+        ZLevelTraversalNavigationEdge edge,
+        EntityUid user,
+        bool popupOnFailure = true)
+    {
+        if (!CanUseTraversal(ent.Owner, user, edge))
+        {
+            if (popupOnFailure)
+                _popup.PopupEntity(Loc.GetString("zlevel-traversal-failed"), ent, user);
+            return false;
+        }
+
+        if (edge.TraversalDelay <= TimeSpan.Zero)
+        {
+            if (!TryUseTraversal(ent, edge, user, popupOnFailure))
+                return false;
+
+            SuppressDestinationAutoTraversal(user);
+            return true;
+        }
+
         var doAfterArgs = new DoAfterArgs(
             EntityManager,
             user,
-            ent.Comp.TraversalDelay,
+            edge.TraversalDelay,
             new ZLevelTraversalDoAfterEvent(),
             ent.Owner,
             target: ent.Owner)
@@ -257,20 +323,34 @@ public sealed class ZLevelTraversalSystem : EntitySystem
             DuplicateCondition = DuplicateConditions.SameEvent,
         };
 
-        if (!_doAfter.TryStartDoAfter(doAfterArgs, out var doAfterId))
-            return false;
+        _startingTraversals[user] = new StartingTraversal(ent.Owner, edge);
+        DoAfterId? doAfterId;
+        try
+        {
+            if (!_doAfter.TryStartDoAfter(doAfterArgs, out doAfterId))
+                return false;
+        }
+        finally
+        {
+            _startingTraversals.Remove(user);
+        }
 
-        _pendingTraversals[user] = new PendingTraversal(ent.Owner, doAfterId.Value);
+        _pendingTraversals[user] = new PendingTraversal(ent.Owner, edge, doAfterId.Value);
         return true;
     }
 
-    private bool TryUseTraversal(Entity<ZLevelTraversalComponent> ent, EntityUid user, bool popupOnFailure = true, bool popupOnSuccess = true)
+    private bool TryUseTraversal(
+        Entity<ZLevelTraversalComponent> ent,
+        ZLevelTraversalNavigationEdge edge,
+        EntityUid user,
+        bool popupOnFailure = true,
+        bool popupOnSuccess = true)
     {
-        if (!CanUseTraversal(ent.Owner, user) ||
+        if (!CanUseTraversal(ent.Owner, user, edge) ||
             !_zLevel.TryTraverseAdjacentLevel(
                 user,
-                ent.Comp.ZOffset,
-                ent.Comp.RequireDirectDestinationSupport))
+                edge.ZOffset,
+                edge.RequireDirectDestinationSupport))
         {
             if (popupOnFailure)
                 _popup.PopupEntity(Loc.GetString("zlevel-traversal-failed"), ent, user);
@@ -316,6 +396,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     private bool TryGetConnectedTraversalAtUser(
         Entity<ZLevelTraversalComponent> origin,
         EntityUid user,
+        in ZLevelTraversalNavigationEdge expected,
         out Entity<ZLevelTraversalComponent> traversal)
     {
         traversal = default;
@@ -327,16 +408,17 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         }
 
         var userTile = _map.TileIndicesFor(userXform.GridUid.Value, grid, userXform.Coordinates);
-        return TryGetConnectedTraversalAtTile(origin, userTile, out traversal);
+        return TryGetConnectedTraversalAtTile(origin, userTile, expected, out traversal);
     }
 
     private bool TryGetConnectedTraversalAtTile(
         Entity<ZLevelTraversalComponent> origin,
         Vector2i targetTile,
+        in ZLevelTraversalNavigationEdge expected,
         out Entity<ZLevelTraversalComponent> traversal)
     {
         traversal = default;
-        if (!_graph.TryGetConnectedTraversal(origin.Owner, targetTile, out var connected) ||
+        if (!_graph.TryGetConnectedExecutableTraversal(origin.Owner, targetTile, expected, out var connected) ||
             !TryComp<ZLevelTraversalComponent>(connected, out var component))
         {
             return false;
@@ -366,10 +448,21 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
     private bool CanUseTraversal(EntityUid traversal, EntityUid user)
     {
-        if (!TryComp(traversal, out TransformComponent? traversalXform) ||
+        return _graph.TryResolveEdge(traversal, out var edge) == ZLevelTraversalEdgeStatus.Valid &&
+               CanUseTraversal(traversal, user, edge);
+    }
+
+    private bool CanUseTraversal(
+        EntityUid traversal,
+        EntityUid user,
+        ZLevelTraversalNavigationEdge edge)
+    {
+        if (edge.Source.Traversal != traversal ||
+            !TryComp(traversal, out TransformComponent? traversalXform) ||
             !TryComp(user, out TransformComponent? userXform) ||
             traversalXform.MapID != userXform.MapID ||
             traversalXform.GridUid == null ||
+            traversalXform.GridUid != edge.Source.GridUid ||
             traversalXform.GridUid != userXform.GridUid ||
             !TryComp<MapGridComponent>(traversalXform.GridUid.Value, out var grid))
         {
@@ -378,13 +471,20 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
         var traversalZ = _transform.GetZLevel((traversal, traversalXform, CompOrNull<ZLevelPositionComponent>(traversal)));
         var userZ = _transform.GetZLevel((user, userXform, CompOrNull<ZLevelPositionComponent>(user)));
-        if (traversalZ != userZ)
+        if (traversalZ != edge.Source.LocalZ || traversalZ != userZ)
             return false;
 
         var traversalTile = _map.TileIndicesFor(traversalXform.GridUid.Value, grid, traversalXform.Coordinates);
         var userTile = _map.TileIndicesFor(traversalXform.GridUid.Value, grid, userXform.Coordinates);
-        return traversalTile == userTile;
+        return traversalTile == edge.Source.Tile && traversalTile == userTile;
     }
 
-    private readonly record struct PendingTraversal(EntityUid Traversal, DoAfterId DoAfter);
+    private readonly record struct PendingTraversal(
+        EntityUid Traversal,
+        ZLevelTraversalNavigationEdge Edge,
+        DoAfterId DoAfter);
+
+    private readonly record struct StartingTraversal(
+        EntityUid Traversal,
+        ZLevelTraversalNavigationEdge Edge);
 }

@@ -319,7 +319,7 @@ public sealed partial class NPCSteeringSystem
 
         var traversal = leg.Traversal.Source.Traversal;
         var wasPending = _zLevelTraversal.IsTraversalPending(uid, traversal);
-        if (!_zLevelTraversal.TryStartTraversal(traversal, uid))
+        if (!_zLevelTraversal.TryStartTraversal(leg.Traversal, uid))
         {
             ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.TraversalUnavailable);
             return ZLevelRouteArrival.Repath;

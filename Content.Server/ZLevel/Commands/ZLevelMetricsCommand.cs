@@ -190,6 +190,11 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{traversalMetrics.LastQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.MaxQueryMilliseconds:0.000}ms");
         shell.WriteLine(
+            $"  dynamic traversals: disabled/unavailable/unpowered=" +
+            $"{traversalMetrics.DisabledEdges}/{traversalMetrics.UnavailableEdges}/" +
+            $"{traversalMetrics.UnpoweredEdges}, state/destination changes=" +
+            $"{traversalMetrics.DynamicStateChanges}/{traversalMetrics.DestinationChanges}");
+        shell.WriteLine(
             $"  traversal snapshots: cached={traversalMetrics.CachedSnapshots}, " +
             $"requests/hits/builds/edges={traversalMetrics.SnapshotRequests}/" +
             $"{traversalMetrics.SnapshotCacheHits}/" +

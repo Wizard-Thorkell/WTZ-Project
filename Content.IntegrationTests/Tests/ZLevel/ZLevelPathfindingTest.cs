@@ -15,6 +15,7 @@ using Content.Server.NPC.HTN;
 using Content.Server.NPC.HTN.PrimitiveTasks.Operators;
 using Content.Server.NPC.Pathfinding;
 using Content.Server.NPC.Systems;
+using Content.Server.ZLevel.Components;
 using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Damage.Components;
@@ -277,6 +278,82 @@ public sealed class ZLevelPathfindingTest : GameTest
                     Is.EqualTo(ZLevelPathRouteValidationStatus.TraversalChanged));
                 Assert.That(invalid.LegIndex, Is.EqualTo(1));
             });
+        });
+    }
+
+    [Test]
+    public async Task DynamicTraversalPolicyInvalidatesCapturedHierarchicalRoute()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid traversal = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            traversal = SpawnUpStairs(testMap, 2.5f);
+            var dynamicTraversal = SEntMan.EnsureComponent<ZLevelDynamicTraversalComponent>(traversal);
+            Assert.That(SEntMan.System<ZLevelTraversalGraphSystem>().ConfigureDynamicTraversal(
+                traversal,
+                true,
+                true,
+                false,
+                TimeSpan.FromSeconds(1.5),
+                6f,
+                dynamicTraversal),
+                Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        var result = await RequestZLevelPath(testMap, 0.5f, 0, 5.5f, 1);
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(ZLevelPathRouteStatus.Success));
+            Assert.That(result.Route, Is.Not.Null);
+            var traversalLeg = result.Route!.Legs.Single(leg => leg.Kind == ZLevelPathLegKind.Traversal);
+            Assert.That(traversalLeg.Traversal.Cost, Is.EqualTo(10f));
+            Assert.That(traversalLeg.Traversal.TraversalDelay, Is.EqualTo(TimeSpan.FromSeconds(3.5)));
+        });
+
+        await Server.WaitAssertion(() =>
+        {
+            var pathfinding = SEntMan.System<PathfindingSystem>();
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var dynamicTraversal = SEntMan.GetComponent<ZLevelDynamicTraversalComponent>(traversal);
+            Assert.That(pathfinding.ValidateZLevelPathRoute(result.Route!),
+                Is.EqualTo(ZLevelPathRouteValidationResult.Valid));
+            Assert.That(graph.ConfigureDynamicTraversal(
+                traversal,
+                true,
+                true,
+                false,
+                TimeSpan.FromSeconds(2),
+                6f,
+                dynamicTraversal),
+                Is.True);
+
+            var validation = pathfinding.ValidateZLevelPathRoute(result.Route!);
+            Assert.Multiple(() =>
+            {
+                Assert.That(validation.Status, Is.EqualTo(ZLevelPathRouteValidationStatus.TraversalChanged));
+                Assert.That(validation.LegIndex, Is.EqualTo(1));
+            });
+
+            Assert.That(graph.ConfigureDynamicTraversal(
+                traversal,
+                false,
+                true,
+                false,
+                TimeSpan.FromSeconds(2),
+                6f,
+                dynamicTraversal),
+                Is.True);
+        });
+
+        var unavailable = await RequestZLevelPath(testMap, 0.5f, 0, 5.5f, 1);
+        Assert.Multiple(() =>
+        {
+            Assert.That(unavailable.Status, Is.EqualTo(ZLevelPathRouteStatus.NoPath));
+            Assert.That(unavailable.Route, Is.Null);
         });
     }
 

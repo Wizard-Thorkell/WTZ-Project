@@ -253,16 +253,40 @@ steering cannot carry an NPC back out of range on the following tick.
 traversals, replans, execution failures, and discarded stale path results.
 Deleting a connector now cancels every pending user rather than only the first.
 
+## P5.4b1 Dynamic Traversal State
+
+`ZLevelDynamicTraversalComponent` adds server-authoritative enabled, callable,
+power, expected-wait, and wait-cost state to any authored connector. Runtime
+mutation goes through `ZLevelTraversalGraphSystem`, which rejects non-finite or
+out-of-range policy, invalidates detached snapshots, and exposes disabled,
+unavailable, unpowered, state-change, and destination-change counters.
+
+The graph resolves expected waiting into both the route cost and traversal
+delay. Dynamic elevator destination selection is deliberately adjacent-only;
+the selected `ZOffset` still has to pass the same boundary and direct-support
+checks as stairs. A destination change is topology, while availability, power,
+and waiting policy are environment changes. The visual cabin, call controls,
+multi-stop content, and construction workflow remain P7 content built on this
+contract.
+
+AI starts the exact edge captured by its route. A cost-only update invalidates
+planning without interrupting physical travel already underway, while power,
+availability, destination, or effective-delay changes cancel the normal
+`DoAfter`. Contiguous wide connectors preserve one timer only across live tiles
+with equivalent execution behavior. Zero-delay traversal executes directly and
+cannot leave an orphaned action; deleting a base-floor user also clears pending
+state even when Z 0 is represented without `ZLevelPositionComponent`.
+
 ## Remaining P5 Packages
 
-### P5.4b Dynamic Connectors And Phase Hardening
+### P5.4b2 Phase Hardening
 
-- Add dynamic elevator edges with state, power, wait cost, and destination
-  selection rather than treating elevators as static stairs.
 - Validate hostile/follow behavior through multiple floors and close the P5
   phase gate with concurrent NPC scale, budget, and long-running tests.
-- Decide from observed load whether global graph revisions, retained floor
-  chunks, and per-route validation need map-scoped revisions or bounded eviction.
+- Replace global graph invalidation with map-scoped revisions, then verify that
+  unrelated maps cannot stale snapshots or active routes.
+- Measure retained floor chunks and per-route validation under prolonged load;
+  add bounded eviction or pooling only where the measurements justify it.
 
 ## P5.1 Verification
 
@@ -351,6 +375,22 @@ release thresholds. A full incremental `SpaceStation14.slnx` build completes
 with zero errors and 27 established warnings.
 
 P5.4a deliberately enables only static authored stairs, ladders, and shafts.
-Dynamic elevator availability, wait cost, destination selection, power
-transitions, and multi-NPC scale belong to P5.4b; flight remains a separate P7
-capability.
+Flight remains a separate P7 capability.
+
+## P5.4b1 Verification
+
+The focused dynamic traversal fixture passes 5/5. It covers bounded policy
+configuration, effective cost/delay, detached snapshot invalidation, disabled,
+unavailable, and unpowered outcomes, powered recovery, adjacent elevator
+destination selection, executable wide-connector matching, cancellation during
+power/availability/destination changes, authoritative waiting, zero-delay
+execution, and deletion of a base-floor user. The combined movement/pathfinding
+regression passes 36/36, including dynamic route cost, validation, and no-path
+behavior.
+
+The complete Content Z-level integration matrix passes 269/269 and the Content
+unit/analyzer matrix passes 9/9. The generated 3-, 6-, and 10-floor stress
+baselines pass 3/3 with 100% warmed boundary/gravity cache hits, zero PVS budget
+exhaustion or fail-open candidates, and 6,336 measured bytes each. Local times
+are 6.9300, 13.1226, and 21.6093 ms; they remain comparison evidence rather than
+release thresholds.

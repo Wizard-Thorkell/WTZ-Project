@@ -3,6 +3,9 @@
 
 using System.Collections.Immutable;
 using System.Diagnostics;
+using Content.Server.Power.Components;
+using Content.Server.ZLevel.Components;
+using Content.Shared.Power;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -18,6 +21,8 @@ namespace Content.Server.ZLevel.Navigation;
 public sealed class ZLevelTraversalGraphSystem : EntitySystem
 {
     public const int ConnectedTraversalVisitBudget = 512;
+    public const float MaximumDynamicWaitNavigationCost = 1_000_000f;
+    public static readonly TimeSpan MaximumDynamicWaitDelay = TimeSpan.FromMinutes(5);
 
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
@@ -44,6 +49,11 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private long _closedEdges;
     private long _unsupportedEdges;
     private long _invalidEdges;
+    private long _disabledEdges;
+    private long _unavailableEdges;
+    private long _unpoweredEdges;
+    private long _dynamicStateChanges;
+    private long _destinationChanges;
     private long _snapshotRequests;
     private long _snapshotCacheHits;
     private long _snapshotBuilds;
@@ -73,6 +83,9 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         SubscribeLocalEvent<ZLevelTraversalComponent, EntParentChangedMessage>(OnParentChanged);
         SubscribeLocalEvent<ZLevelTraversalComponent, AnchorStateChangedEvent>(OnAnchorChanged);
         SubscribeLocalEvent<ZLevelTraversalComponent, ZLevelPositionChangedEvent>(OnZLevelChanged);
+        SubscribeLocalEvent<ZLevelDynamicTraversalComponent, ComponentStartup>(OnDynamicStartup);
+        SubscribeLocalEvent<ZLevelDynamicTraversalComponent, ComponentShutdown>(OnDynamicShutdown);
+        SubscribeLocalEvent<ZLevelDynamicTraversalComponent, PowerChangedEvent>(OnDynamicPowerChanged);
         SubscribeLocalEvent<PlacementEntityEvent>(OnPlacement);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
@@ -123,6 +136,36 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         Vector2i targetTile,
         out EntityUid traversal)
     {
+        return TryGetConnectedTraversal(origin, targetTile, null, out traversal);
+    }
+
+    /// <summary>
+    /// Finds a contiguous connector whose live execution behavior still
+    /// matches an already captured traversal.
+    /// </summary>
+    public bool TryGetConnectedExecutableTraversal(
+        EntityUid origin,
+        Vector2i targetTile,
+        in ZLevelTraversalNavigationEdge expected,
+        out EntityUid traversal)
+    {
+        traversal = default;
+        if (expected.Source.Traversal != origin ||
+            TryResolveEdge(origin, out var current) != ZLevelTraversalEdgeStatus.Valid ||
+            !HasEquivalentExecutionProfile(expected, current))
+        {
+            return false;
+        }
+
+        return TryGetConnectedTraversal(origin, targetTile, current, out traversal);
+    }
+
+    private bool TryGetConnectedTraversal(
+        EntityUid origin,
+        Vector2i targetTile,
+        ZLevelTraversalNavigationEdge? expected,
+        out EntityUid traversal)
+    {
         var started = Stopwatch.GetTimestamp();
         _connectedQueries++;
         traversal = default;
@@ -149,16 +192,20 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             }
 
             if (tile == targetTile &&
-                TryGetMatchingTraversal(registration.Key with { Tile = tile }, registration.Profile, out traversal))
+                TryGetMatchingTraversal(
+                    registration.Key with { Tile = tile },
+                    registration.Profile,
+                    expected,
+                    out traversal))
             {
                 RecordQueryTime(started);
                 return true;
             }
 
-            TryQueueConnected(tile + new Vector2i(1, 0), registration);
-            TryQueueConnected(tile + new Vector2i(-1, 0), registration);
-            TryQueueConnected(tile + new Vector2i(0, 1), registration);
-            TryQueueConnected(tile + new Vector2i(0, -1), registration);
+            TryQueueConnected(tile + new Vector2i(1, 0), registration, expected);
+            TryQueueConnected(tile + new Vector2i(-1, 0), registration, expected);
+            TryQueueConnected(tile + new Vector2i(0, 1), registration, expected);
+            TryQueueConnected(tile + new Vector2i(0, -1), registration, expected);
         }
 
         RecordQueryTime(started);
@@ -178,11 +225,22 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
         if (!_registrations.TryGetValue(traversal, out var registration) ||
             registration.Profile.ZOffset is not (-1 or 1) ||
-            !TryComp<MapGridComponent>(registration.Key.GridUid, out var grid))
+            !TryComp<MapGridComponent>(registration.Key.GridUid, out var grid) ||
+            !float.IsFinite(registration.Profile.NavigationCost))
         {
             _invalidEdges++;
             RecordQueryTime(started);
             return ZLevelTraversalEdgeStatus.Invalid;
+        }
+
+        var dynamicStatus = TryResolveDynamicPolicy(
+            traversal,
+            out var waitDelay,
+            out var waitNavigationCost);
+        if (dynamicStatus != ZLevelTraversalEdgeStatus.Valid)
+        {
+            RecordQueryTime(started);
+            return dynamicStatus;
         }
 
         var sourceZ = registration.Key.LocalZ;
@@ -222,12 +280,20 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             LocalZ = destinationZ,
             WorldZ = worldSourceZ + registration.Profile.ZOffset,
         };
+        var navigationCost = Math.Max(0f, registration.Profile.NavigationCost) + waitNavigationCost;
+        if (!float.IsFinite(navigationCost))
+        {
+            _invalidEdges++;
+            RecordQueryTime(started);
+            return ZLevelTraversalEdgeStatus.Invalid;
+        }
+
         edge = new ZLevelTraversalNavigationEdge(
             source,
             destination,
             registration.Profile.ZOffset,
-            Math.Max(0f, registration.Profile.NavigationCost),
-            registration.Profile.TraversalDelay,
+            navigationCost,
+            ClampDynamicDelay(registration.Profile.TraversalDelay) + waitDelay,
             registration.Profile.RequireDirectDestinationSupport,
             _topologyRevision,
             _environmentRevision);
@@ -332,6 +398,11 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             _closedEdges,
             _unsupportedEdges,
             _invalidEdges,
+            _disabledEdges,
+            _unavailableEdges,
+            _unpoweredEdges,
+            _dynamicStateChanges,
+            _destinationChanges,
             _snapshotCache.Count,
             _snapshotRequests,
             _snapshotCacheHits,
@@ -361,6 +432,11 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         _closedEdges = 0;
         _unsupportedEdges = 0;
         _invalidEdges = 0;
+        _disabledEdges = 0;
+        _unavailableEdges = 0;
+        _unpoweredEdges = 0;
+        _dynamicStateChanges = 0;
+        _destinationChanges = 0;
         _snapshotRequests = 0;
         _snapshotCacheHits = 0;
         _snapshotBuilds = 0;
@@ -379,6 +455,109 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     public void RefreshTraversal(EntityUid uid)
     {
         RefreshRegistration(uid);
+    }
+
+    /// <summary>
+    /// Applies runtime availability and waiting policy while invalidating every
+    /// cached route that could have observed the previous state.
+    /// </summary>
+    public bool ConfigureDynamicTraversal(
+        EntityUid uid,
+        bool enabled,
+        bool callable,
+        bool requirePower,
+        TimeSpan waitDelay,
+        float waitNavigationCost,
+        ZLevelDynamicTraversalComponent? component = null)
+    {
+        if (!Resolve(uid, ref component, false) ||
+            waitDelay < TimeSpan.Zero ||
+            waitDelay > MaximumDynamicWaitDelay ||
+            !float.IsFinite(waitNavigationCost) ||
+            waitNavigationCost < 0f ||
+            waitNavigationCost > MaximumDynamicWaitNavigationCost)
+        {
+            return false;
+        }
+
+        if (component.Enabled == enabled &&
+            component.Callable == callable &&
+            component.RequirePower == requirePower &&
+            component.WaitDelay == waitDelay &&
+            component.WaitNavigationCost.Equals(waitNavigationCost))
+        {
+            return true;
+        }
+
+        component.Enabled = enabled;
+        component.Callable = callable;
+        component.RequirePower = requirePower;
+        component.WaitDelay = waitDelay;
+        component.WaitNavigationCost = waitNavigationCost;
+        InvalidateDynamicTraversal(uid);
+        return true;
+    }
+
+    /// <summary>
+    /// Selects the currently offered adjacent destination of a dynamic elevator.
+    /// Boundary and destination support validation remain authoritative.
+    /// </summary>
+    public bool SetElevatorDestination(
+        EntityUid uid,
+        int zOffset,
+        ZLevelTraversalComponent? traversal = null)
+    {
+        if (zOffset is not (-1 or 1) ||
+            !Resolve(uid, ref traversal, false) ||
+            traversal.Kind != ZLevelTraversalKind.Elevator ||
+            !HasComp<ZLevelDynamicTraversalComponent>(uid))
+        {
+            return false;
+        }
+
+        if (traversal.ZOffset == zOffset)
+            return true;
+
+        traversal.ZOffset = zOffset;
+        _destinationChanges++;
+        RefreshRegistration(uid);
+        return true;
+    }
+
+    /// <summary>
+    /// Compares the executable semantics of two captured edges while ignoring
+    /// graph revision stamps.
+    /// </summary>
+    public static bool HasEquivalentEdge(
+        ZLevelTraversalNavigationEdge left,
+        ZLevelTraversalNavigationEdge right)
+    {
+        return left.Source == right.Source &&
+               left.Destination == right.Destination &&
+               left.ZOffset == right.ZOffset &&
+               left.Cost.Equals(right.Cost) &&
+               left.TraversalDelay == right.TraversalDelay &&
+               left.RequireDirectDestinationSupport == right.RequireDirectDestinationSupport;
+    }
+
+    /// <summary>
+    /// Compares connected multi-tile traversal behavior while allowing each
+    /// tile to retain its own connector entity and XY position.
+    /// </summary>
+    public static bool HasEquivalentExecutionProfile(
+        ZLevelTraversalNavigationEdge left,
+        ZLevelTraversalNavigationEdge right)
+    {
+        return left.Source.GridUid == right.Source.GridUid &&
+               left.Source.LocalZ == right.Source.LocalZ &&
+               left.Source.WorldZ == right.Source.WorldZ &&
+               left.Source.MapId == right.Source.MapId &&
+               left.Source.Kind == right.Source.Kind &&
+               left.Destination.LocalZ == right.Destination.LocalZ &&
+               left.Destination.WorldZ == right.Destination.WorldZ &&
+               left.ZOffset == right.ZOffset &&
+               left.TraversalDelay == right.TraversalDelay &&
+               left.RequireDirectDestinationSupport == right.RequireDirectDestinationSupport;
     }
 
     private void OnStartup(Entity<ZLevelTraversalComponent> entity, ref ComponentStartup args)
@@ -409,6 +588,24 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private void OnZLevelChanged(Entity<ZLevelTraversalComponent> entity, ref ZLevelPositionChangedEvent args)
     {
         RefreshRegistration(entity.Owner);
+    }
+
+    private void OnDynamicStartup(Entity<ZLevelDynamicTraversalComponent> entity, ref ComponentStartup args)
+    {
+        InvalidateDynamicTraversal(entity.Owner);
+    }
+
+    private void OnDynamicShutdown(Entity<ZLevelDynamicTraversalComponent> entity, ref ComponentShutdown args)
+    {
+        InvalidateDynamicTraversal(entity.Owner);
+    }
+
+    private void OnDynamicPowerChanged(
+        Entity<ZLevelDynamicTraversalComponent> entity,
+        ref PowerChangedEvent args)
+    {
+        if (entity.Comp.RequirePower)
+            InvalidateDynamicTraversal(entity.Owner);
     }
 
     private void OnPlacement(PlacementEntityEvent args)
@@ -566,6 +763,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private bool TryGetMatchingTraversal(
         ZLevelTraversalNodeKey key,
         ZLevelTraversalProfile profile,
+        ZLevelTraversalNavigationEdge? expected,
         out EntityUid traversal)
     {
         traversal = default;
@@ -575,7 +773,10 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         foreach (var candidate in entities)
         {
             if (!_registrations.TryGetValue(candidate, out var registration) ||
-                !HasEquivalentConnectedBehavior(registration.Profile, profile))
+                !HasEquivalentConnectedBehavior(registration.Profile, profile) ||
+                expected is { } expectedEdge &&
+                (TryResolveEdge(candidate, out var candidateEdge) != ZLevelTraversalEdgeStatus.Valid ||
+                 !HasEquivalentExecutionProfile(expectedEdge, candidateEdge)))
                 continue;
 
             traversal = candidate;
@@ -595,12 +796,74 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
                left.TraversalDelay == right.TraversalDelay;
     }
 
+    private ZLevelTraversalEdgeStatus TryResolveDynamicPolicy(
+        EntityUid uid,
+        out TimeSpan waitDelay,
+        out float waitNavigationCost)
+    {
+        waitDelay = TimeSpan.Zero;
+        waitNavigationCost = 0f;
+        if (!TryComp<ZLevelDynamicTraversalComponent>(uid, out var dynamicTraversal))
+            return ZLevelTraversalEdgeStatus.Valid;
+
+        if (!dynamicTraversal.Enabled)
+        {
+            _disabledEdges++;
+            return ZLevelTraversalEdgeStatus.Disabled;
+        }
+
+        if (!dynamicTraversal.Callable)
+        {
+            _unavailableEdges++;
+            return ZLevelTraversalEdgeStatus.Unavailable;
+        }
+
+        if (dynamicTraversal.RequirePower &&
+            (!TryComp<ApcPowerReceiverComponent>(uid, out var power) || !power.Powered))
+        {
+            _unpoweredEdges++;
+            return ZLevelTraversalEdgeStatus.Unpowered;
+        }
+
+        if (!float.IsFinite(dynamicTraversal.WaitNavigationCost))
+        {
+            _invalidEdges++;
+            return ZLevelTraversalEdgeStatus.Invalid;
+        }
+
+        waitDelay = ClampDynamicDelay(dynamicTraversal.WaitDelay);
+        waitNavigationCost = Math.Clamp(
+            dynamicTraversal.WaitNavigationCost,
+            0f,
+            MaximumDynamicWaitNavigationCost);
+        return ZLevelTraversalEdgeStatus.Valid;
+    }
+
+    private void InvalidateDynamicTraversal(EntityUid uid)
+    {
+        if (!_registrations.ContainsKey(uid))
+            return;
+
+        _environmentRevision++;
+        _dynamicStateChanges++;
+    }
+
+    private static TimeSpan ClampDynamicDelay(TimeSpan delay)
+    {
+        return delay < TimeSpan.Zero
+            ? TimeSpan.Zero
+            : delay > MaximumDynamicWaitDelay
+                ? MaximumDynamicWaitDelay
+                : delay;
+    }
+
     private void TryQueueConnected(
         Vector2i tile,
-        TraversalRegistration origin)
+        TraversalRegistration origin,
+        ZLevelTraversalNavigationEdge? expected)
     {
         if (!_connectedVisited.Contains(tile) &&
-            TryGetMatchingTraversal(origin.Key with { Tile = tile }, origin.Profile, out _) &&
+            TryGetMatchingTraversal(origin.Key with { Tile = tile }, origin.Profile, expected, out _) &&
             _connectedVisited.Add(tile))
         {
             _connectedPending.Enqueue(tile);
@@ -715,6 +978,9 @@ public enum ZLevelTraversalEdgeStatus : byte
     Invalid,
     ClosedBoundary,
     MissingDestinationSupport,
+    Disabled,
+    Unavailable,
+    Unpowered,
 }
 
 /// <summary>
@@ -760,6 +1026,11 @@ public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     long ClosedEdges,
     long UnsupportedEdges,
     long InvalidEdges,
+    long DisabledEdges,
+    long UnavailableEdges,
+    long UnpoweredEdges,
+    long DynamicStateChanges,
+    long DestinationChanges,
     int CachedSnapshots,
     long SnapshotRequests,
     long SnapshotCacheHits,

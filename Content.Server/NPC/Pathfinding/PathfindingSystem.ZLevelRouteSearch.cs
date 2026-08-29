@@ -172,7 +172,7 @@ public sealed partial class PathfindingSystem
                     if (_zLevelTraversalGraph.TryResolveEdge(
                             leg.Traversal.Source.Traversal,
                             out var current) != ZLevelTraversalEdgeStatus.Valid ||
-                        !HasEquivalentTraversalEdge(leg.Traversal, current))
+                        !ZLevelTraversalGraphSystem.HasEquivalentEdge(leg.Traversal, current))
                     {
                         return new ZLevelPathRouteValidationResult(
                             ZLevelPathRouteValidationStatus.TraversalChanged,
@@ -860,18 +860,6 @@ public sealed partial class PathfindingSystem
                 ZLevelPathRouteStatus.TopologyAndEnvironmentChanged,
             _ => ZLevelPathRouteStatus.InvalidRequest,
         };
-    }
-
-    private static bool HasEquivalentTraversalEdge(
-        ZLevelTraversalNavigationEdge left,
-        ZLevelTraversalNavigationEdge right)
-    {
-        return left.Source == right.Source &&
-               left.Destination == right.Destination &&
-               left.ZOffset == right.ZOffset &&
-               left.Cost.Equals(right.Cost) &&
-               left.TraversalDelay == right.TraversalDelay &&
-               left.RequireDirectDestinationSupport == right.RequireDirectDestinationSupport;
     }
 
     private sealed class ZLevelRouteSearchState

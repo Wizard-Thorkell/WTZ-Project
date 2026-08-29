@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/pathfinding`.
-- Active package: `P5.4b dynamic connectors and P5 phase hardening`.
+- Active package: `P5.4b2 map-scoped revisions, concurrent NPC scale, and P5 phase hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.4a complete; P5.4b active) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1-P5.4b1 complete; P5.4b2 active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -69,7 +69,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5.3a | Detached graph snapshots, typed routes, revisions, and budgets | Complete |
 | P5.3b | Hierarchical route search and typed route composition | Complete |
 | P5.4a | Static AI route execution and traversal lifecycle | Complete |
-| P5.4b | Dynamic elevators, multi-NPC scale, and phase hardening | Active |
+| P5.4b1 | Dynamic traversal state, cost, power, destination, and lifecycle | Complete |
+| P5.4b2 | Map-scoped revisions, concurrent NPC scale, and phase hardening | Active |
 
 ## Phase P0 Packages
 
@@ -4908,6 +4909,128 @@ allocation is inside Robust physics enumeration.
   changing connector availability, then closes P5 with concurrent and prolonged
   navigation tests.
 
+## Completed Package: P5.4b1 Dynamic Traversal State
+
+### Scope
+
+- Add server-authoritative enabled, callable, power, wait-delay, and wait-cost
+  state to authored vertical connectors.
+- Resolve dynamic state into detached graph edges, route validation, exact NPC
+  execution, metrics, and snapshot invalidation.
+- Allow adjacent elevator destination selection while preserving normal
+  boundary and direct-support authority.
+- Cancel in-progress traversal when executable state changes and retain one
+  timer only across contiguous tiles with equivalent live behavior.
+- Harden instant traversal and entity-deletion lifecycle paths discovered by
+  the focused simulation.
+
+### Acceptance Criteria
+
+- Disabled, unavailable, and unpowered connectors fail closed with distinct
+  statuses and counters; restoring power makes the edge usable again.
+- Expected waiting contributes to both route cost and the visible traversal
+  delay, with finite non-negative limits enforced at the mutation API.
+- A route captured before cost, delay, state, or destination changes validates
+  against the exact live edge and replans instead of executing stale data.
+- Power, availability, destination, or effective-delay changes cancel a normal
+  pending `DoAfter`; a cost-only planning update does not interrupt physical
+  traversal already underway.
+- Elevator destination selection is limited to adjacent floors and still
+  requires an open traversal boundary and destination support.
+- Z 0 players, static stairs, wide stairs, and zero-delay connectors preserve
+  their established behavior.
+
+### Verification Evidence
+
+- The focused `ZLevelDynamicTraversalTest` fixture passes 5/5. It covers policy
+  bounds, effective cost/delay, snapshot invalidation, all availability states,
+  powered recovery, destination changes, executable connected regions, three
+  mid-action cancellation causes, authoritative waiting, instant traversal,
+  and deletion of a Z 0 user without `ZLevelPositionComponent`.
+- The combined movement/pathfinding matrix passes 36/36 with no skips. Dynamic
+  route cost/delay, exact route invalidation, unavailable no-path behavior, and
+  all static NPC execution regressions are included.
+- The complete Content `FullyQualifiedName~ZLevel` matrix passes 269/269 and
+  the Content Z-level unit/analyzer matrix passes 9/9.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
+  100% warmed boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 6.9300, 13.1226, and 21.6093
+  ms respectively.
+- A full incremental `SpaceStation14.slnx` build succeeds with zero errors and
+  27 established dependency, vulnerability, and obsolescence warnings; none
+  points to this package.
+
+### Decisions
+
+- Keep `ZLevelDynamicTraversalComponent` server-only and mutate it through
+  `ZLevelTraversalGraphSystem`. Explicit graph invalidation is the authority;
+  non-networked components must not be passed to `Dirty`.
+- Treat destination changes as topology and availability, power, wait delay,
+  and wait cost as environment. P5.4b2 will scope both revision streams by map.
+- Keep route equivalence stricter than physical execution equivalence. Route
+  cost changes invalidate planning, while an already-running action only cares
+  about live availability, destination, delay, frame, and support policy.
+- Preserve the structural connected-region API for graph inspection and add an
+  executable variant for active timers. This keeps static graph benchmarks
+  allocation-stable while preventing disabled or mismatched wide tiles from
+  extending a traversal.
+- Execute zero-delay connectors directly instead of creating an instant
+  `DoAfter`, whose synchronous completion could otherwise leave stale ownership.
+- Subscribe cleanup to entity termination globally rather than to
+  `ZLevelPositionComponent`; base-floor entities validly omit that component.
+- Leave cabin movement, call panels, sprites, construction, and multi-stop
+  elevator content in P7. P5.4b1 supplies the navigation/runtime contract.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to dynamic traversal policy, graph and
+      execution consumers, diagnostics, focused tests, and P5 documentation.
+- [x] Invariant review: Z 0 component absence, local/world frames, moving grids,
+      exact edge identity, server authority, boundary/support policy, and static
+      connector compatibility were reviewed.
+- [x] Automated verification: 5/5 focused dynamic, 36/36 movement/pathfinding,
+      269/269 Content Z-level integration, 9/9 Content unit/analyzer, 3/3
+      baselines, and the full solution build pass without skips or errors.
+- [x] Performance evidence: warmed stress allocation remains 6,336 bytes at all
+      three depths; graph counters distinguish dynamic outcomes and changes;
+      the structural connected-region allocation benchmark remains green.
+- [x] Documentation: policy ownership, invalidation, route versus execution
+      semantics, lifecycle fixes, evidence, limitations, and next work are
+      recorded here and in `Docs/ZLevelPathfinding.md`.
+- [x] Dependency check: no WTZ Engine change is required; the paired engine
+      remains at `3aaca280f628876939afcc10a9be920b3898902a`.
+- [x] Git check: `git diff --check` passes except expected Windows line-ending
+      notices; generated baseline and TRX artifacts remain ignored.
+- [x] Mini review: no blocking dynamic-state correctness issue remains; map
+      revision scope and concurrent/endurance evidence remain in P5.4b2.
+- [x] Commit: the isolated `Model dynamic Z-level traversal state` parent
+      commit is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: dynamic connectors are now first-class graph edges rather than
+  static stairs with ad hoc teleports, and players and NPCs share one delayed,
+  server-authoritative execution path.
+- Finding: the focused tests caught two runtime-only lifecycle defects: dirtying
+  non-networked components and validating `DoAfter` ownership before its ID was
+  returned. Both now fail safely and have regressions.
+- Finding: graph planning and physical execution deliberately use different
+  equivalence strength, preventing needless interruption after a pure cost
+  update while rejecting stale route starts.
+- Finding: entity cleanup no longer assumes that Z 0 owns an explicit position
+  component, closing a process-lifetime pending-state leak.
+- Residual risk: topology and environment revisions are still global, so churn
+  on one map can trigger validation work on another even though exact routes
+  remain usable.
+- Residual risk: concurrent hostile/follow consumers and prolonged dynamic
+  toggling have not yet supplied a scale envelope for a public server.
+- Residual risk: this contract selects an adjacent destination but does not yet
+  provide a physical cabin, controls, power load, or mapper-facing elevator
+  prototypes; those are P7 content responsibilities.
+- Next package: P5.4b2 introduces map-scoped graph versions, concurrent NPC
+  execution fixtures, prolonged invalidation tests, and the consolidated P5
+  phase gate.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4954,3 +5077,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.3a | `Define hierarchical Z-level route contracts` | 1 focused, 248 Content integration, 9 Content unit/analyzer, 3 baseline, full build, cache/allocation/diff review | Complete |
 | 2026-08-29 | P5.3b | `Compose hierarchical Z-level paths` | 8 focused, 253 Content integration, 9 Content unit/analyzer, 3 baseline, full build, budget/timing/diff review | Complete |
 | 2026-08-29 | P5.4a | `Execute hierarchical Z-level NPC routes` | 18 focused, 263 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/timing/diff review | Complete |
+| 2026-08-29 | P5.4b1 | `Model dynamic Z-level traversal state` | 5 dynamic, 36 movement/pathfinding, 269 Content integration, 9 Content unit/analyzer, 3 baseline, full build, lifecycle/allocation/diff review | Complete |
