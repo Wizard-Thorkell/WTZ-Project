@@ -104,7 +104,8 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
 
     public ZLevelTraceBufferResult Trace(in ZLevelTraceRequest request, ZLevelTraceBuffer buffer)
     {
-        ArgumentNullException.ThrowIfNull(buffer);
+        if (buffer is null)
+            throw new ArgumentException("Trace buffer cannot be null.", nameof(buffer));
         var started = Stopwatch.GetTimestamp();
         var result = TraceCore(request, buffer);
         _metrics.RecordTrace(

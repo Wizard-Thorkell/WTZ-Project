@@ -765,8 +765,6 @@ public sealed class ZLevelTraceTest : GameTest
                 Assert.That(buffer.TileVisits, Is.EqualTo(immutable.TileVisits));
                 Assert.That(buffer.EntityHits, Is.EqualTo(immutable.EntityHits));
                 Assert.That(buffer.BoundaryCrossings, Is.EqualTo(immutable.BoundaryCrossings));
-                Assert.That(buffer.SegmentSpan.Length, Is.EqualTo(buffer.Segments.Count));
-                Assert.That(buffer.TileVisitSpan.Length, Is.EqualTo(buffer.TileVisits.Count));
             });
 
             var reverse = trace.Trace(request with

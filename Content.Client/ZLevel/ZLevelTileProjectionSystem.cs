@@ -357,9 +357,9 @@ public sealed class ZLevelTileProjectionSystem : EntitySystem
         int minimumLocalZ,
         int maximumLocalZ)
     {
-        ReadOnlySpan<int> offsets = stackalloc int[] { -1, 1 };
-        foreach (var offset in offsets)
+        for (var offsetIndex = 0; offsetIndex < 2; offsetIndex++)
         {
+            var offset = offsetIndex == 0 ? -1 : 1;
             foreach (var context in _gridContexts)
             {
                 var targetLocalZ = context.ViewerLocalZ + offset;

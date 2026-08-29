@@ -3,7 +3,6 @@
 
 using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.Graphics;
@@ -442,9 +441,9 @@ public sealed class ZLevelLightingProjectionSystem : EntitySystem
         _maxRenderTimestampTicks = Math.Max(_maxRenderTimestampTicks, elapsed);
     }
 
-    internal ReadOnlySpan<LightShadowMapRequest> GetShadowRequests()
+    internal List<LightShadowMapRequest> GetShadowRequests()
     {
-        return CollectionsMarshal.AsSpan(_shadowRequests);
+        return _shadowRequests;
     }
 
     private ZLevelProjectionPlanResult AddGridRuns(

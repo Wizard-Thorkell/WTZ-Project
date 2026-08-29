@@ -5,7 +5,7 @@ meta:
   forkId: ""
   forkVersion: ""
   time: 08/10/2026 14:06:24
-  entityCount: 85
+  entityCount: 92
 maps:
 - 1
 grids:
@@ -738,12 +738,44 @@ entities:
       zLevel: 2
     - type: ZLevelKinematics
       grounded: True
+  - uid: 86
+    components:
+    - type: MetaData
+      name: Z0 lighting shadow blocker
+    - type: Transform
+      pos: 2.5,2.5
+      parent: 2
+    - type: ZLevelPosition
+    - type: ZLevelKinematics
+      grounded: True
+  - uid: 87
+    components:
+    - type: MetaData
+      name: Z1 lighting shadow blocker
+    - type: Transform
+      pos: 2.5,2.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 1
+    - type: ZLevelKinematics
+      grounded: True
+  - uid: 88
+    components:
+    - type: MetaData
+      name: Z2 lighting shadow blocker
+    - type: Transform
+      pos: 2.5,2.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 2
+    - type: ZLevelKinematics
+      grounded: True
 - proto: ZLevelStairsDown
   entities:
   - uid: 76
     components:
     - type: Transform
-      pos: 2.5,2.5
+      pos: 1.5,5.5
       parent: 2
     - type: ZLevelPosition
       zLevel: 1
@@ -752,7 +784,7 @@ entities:
   - uid: 78
     components:
     - type: Transform
-      pos: 4.5,4.5
+      pos: 5.5,5.5
       parent: 2
     - type: ZLevelPosition
       zLevel: 2
@@ -763,7 +795,7 @@ entities:
   - uid: 75
     components:
     - type: Transform
-      pos: 2.5,2.5
+      pos: 1.5,5.5
       parent: 2
     - type: ZLevelPosition
     - type: ZLevelKinematics
@@ -771,12 +803,42 @@ entities:
   - uid: 77
     components:
     - type: Transform
-      pos: 4.5,4.5
+      pos: 5.5,5.5
       parent: 2
     - type: ZLevelPosition
       zLevel: 1
     - type: ZLevelKinematics
       grounded: True
+- proto: ZLevelFloorOpeningMarker
+  entities:
+  - uid: 89
+    components:
+    - type: Transform
+      pos: 1.5,4.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 1
+  - uid: 90
+    components:
+    - type: Transform
+      pos: 5.5,4.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 1
+  - uid: 91
+    components:
+    - type: Transform
+      pos: 1.5,4.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 2
+  - uid: 92
+    components:
+    - type: Transform
+      pos: 5.5,4.5
+      parent: 2
+    - type: ZLevelPosition
+      zLevel: 2
 - proto: AlwaysPoweredLightExterior
   entities:
   - uid: 83
@@ -789,7 +851,8 @@ entities:
     - type: PointLight
       energy: 2
       color: '#FF4040FF'
-      radius: 3
+      radius: 5
+      softness: 0.75
     - type: ZLevelPosition
   - uid: 84
     components:
@@ -801,7 +864,8 @@ entities:
     - type: PointLight
       energy: 2
       color: '#40FF70FF'
-      radius: 3
+      radius: 5
+      softness: 0.75
     - type: ZLevelPosition
       zLevel: 1
   - uid: 85
@@ -814,7 +878,8 @@ entities:
     - type: PointLight
       energy: 2
       color: '#4080FFFF'
-      radius: 3
+      radius: 5
+      softness: 0.75
     - type: ZLevelPosition
       zLevel: 2
 ...

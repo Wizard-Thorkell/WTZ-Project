@@ -3,7 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Physics;
 
@@ -32,12 +31,6 @@ public sealed class ZLevelTraceBuffer
     public IReadOnlyList<ZLevelTraceTileVisit> TileVisits => _tileVisits;
     public IReadOnlyList<ZLevelTraceEntityHit> EntityHits => _entityHits;
     public IReadOnlyList<ZLevelTraceBoundaryCrossing> BoundaryCrossings => _boundaryCrossings;
-
-    public ReadOnlySpan<ZLevelTraceSegment> SegmentSpan => CollectionsMarshal.AsSpan(_segments);
-    public ReadOnlySpan<ZLevelTraceTileVisit> TileVisitSpan => CollectionsMarshal.AsSpan(_tileVisits);
-    public ReadOnlySpan<ZLevelTraceEntityHit> EntityHitSpan => CollectionsMarshal.AsSpan(_entityHits);
-    public ReadOnlySpan<ZLevelTraceBoundaryCrossing> BoundaryCrossingSpan =>
-        CollectionsMarshal.AsSpan(_boundaryCrossings);
 
     public int SegmentCapacity => _segments.Capacity;
     public int TileVisitCapacity => _tileVisits.Capacity;

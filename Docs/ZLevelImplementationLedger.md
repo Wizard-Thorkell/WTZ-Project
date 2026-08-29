@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/lighting-hardening`.
-- Active package: `P3.4c3 real RGB fixture, captures, and visual hardening`.
+- Active package: `P3 consolidated completion gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -1809,7 +1809,7 @@ P2.4 is split into independently gated subpackages:
 | P3.3 | Bounded lower-floor light/FOV projection and attenuation | Complete |
 | P3.4a | Lighting retention, frame budgets, and whole-emitter fail-soft behavior | Complete |
 | P3.4b | Independent lower-tile/FOV and mapping-preview budgets and batching | Complete |
-| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | In progress (c1-c2 complete; c3 next) |
+| P3.4c | Lower-floor shadows, pixel regressions, and rendering hardening | Complete (c1-c3) |
 
 ## Completed Package: P3.1 Native Active-Floor Rendering Contract
 
@@ -2646,6 +2646,130 @@ P2.4 is split into independently gated subpackages:
 - Next package: run the canonical RGB fixture in a real client, capture Z 0/Z 1/
   Z 2 and mapping preview in hard and soft modes, add repeatable pixel checks,
   and harden any artifact found before the consolidated P3 gate.
+
+## Completed Package: P3.4c3 Real-Client RGB Capture And Visual Hardening
+
+### Scope
+
+- Add a deterministic real-client command and PowerShell runner that capture the
+  canonical RGB fixture on Z 0, Z 1, Z 2, and mapping preview in shadowless,
+  hard-shadow, and soft-shadow modes.
+- Analyze actual PNG pixels using fixed probes plus a grid-aligned RGB signature,
+  and emit a machine-readable report whose failed checks fail the runner.
+- Synchronize each synthetic camera floor with the server-attached player so PVS
+  delivers the correct tiles, lights, and occluders before capture.
+- Preserve lower-floor point-light and occluder render dependencies through
+  bounded server PVS while ordinary hidden entities remain opening-clipped.
+- Harden Content for the real sandbox and GLSL compiler paths exercised only by
+  a graphical client.
+
+### Acceptance Criteria
+
+- One command launches an isolated local round, captures all 11 expected PNGs,
+  writes `report.json`, terminates both processes, and returns non-zero for any
+  setup, timeout, client, server, or pixel-check failure.
+- Z 0, Z 1, and Z 2 shadowless baselines are nonblank and dominated by red,
+  green, and blue respectively.
+- Both hard and soft modes produce measurable occluder contrast on every floor,
+  and each hard/soft signature pair differs by more than 0.0004 normalized RMS.
+- Hard and soft mapping previews differ from their normal Z 1 captures, use the
+  projected tile path, and retain the native active floor.
+- The run observes actual external shadow-atlas work with no row/group fallback
+  or exhaustion on the canonical fixture.
+- Ordinary lower-floor entities remain PVS-hidden behind a closed floor while
+  enabled lights and occluders needed by off-column apertures remain available.
+
+### Evidence
+
+- `ZLevelLightingCaptureAnalysisTest` passes 3/3 unit cases for RGB probes,
+  signature difference/luminance, and translated-grid signature alignment.
+- `ZLevelPvsKeepsLowerFloorLightingDependencies` passes and distinguishes one
+  ordinary hidden entity from retained lower-floor light/occluder inputs.
+- `ZLevelLightingShadowTest` passes 13/13; the cumulative Content integration
+  filter containing `ZLevel` passes 229/229 with no failures or skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,216 measured bytes,
+  100% warm boundary/gravity cache hits, zero evictions or budget exhaustion,
+  and measured times of 4.202, 12.106, and 14.638 ms.
+- Three consecutive real NVIDIA/OpenGL runs pass all 19/19 checks. The final run
+  captures 11 frames in 14.714 seconds, reports hard/soft differences of
+  0.000569, 0.000648, and 0.000603 for Z 0/Z 1/Z 2, renders 289 atlases for
+  379 light rows and 379 floor groups, builds/renders mapping preview in 112/112
+  frames, and renders 11,683 projected tiles without fallback or exhaustion.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental` passes in
+  1 minute 47 seconds with zero errors and 711 established warnings. Both final
+  PNG inspection and `git diff --check` pass.
+- WTZ Engine's exact ImageSharp getter allowlist is committed and remotely
+  verified at `b6051ff8c6d7b04638be2dbbbd0020b159906771`; the parent package points its
+  submodule at that commit.
+
+### Decisions
+
+- Sample the authored 7 by 7 grid region in local coordinates and transform each
+  point through the live grid world matrix. Whole-screen signatures were
+  rejected because stars and UI dilute small projected-shadow differences and
+  do not follow moving-grid framing.
+- Use fixed shadow and clear probes at `(1.5, 4.5)` and `(5.5, 4.5)` plus an
+  active-floor color probe at `(3.5, 2.5)`. The fixture authors symmetric
+  apertures through both vertical boundaries and one blocker per floor.
+- Require a non-zero 0.0004 normalized hard/soft difference. Two stricter 0.0005
+  runs passed, but Z 1/Z 2 margins were narrow enough that 0.0004 better tolerates
+  cross-driver raster variation without accepting identical output.
+- Move the attached player authoritatively with the Debug-admin `zlevelset`
+  command and wait for target-layer inventory. Moving only a client camera left
+  server PVS correctly centered on Z 0 and produced black upper-floor captures.
+- Treat enabled point lights and occluders as bounded render dependencies in
+  PVS. Their effects may cross an aperture away from their own closed column;
+  ordinary entities retain the stricter per-column visibility rule.
+- Replace Content-exposed `ReadOnlySpan` members and selected `stackalloc` paths
+  uncovered by the graphical sandbox with retained lists/scalars. Add only the
+  exact ImageSharp pixel getter required by capture analysis to the engine
+  sandbox, and rename the GLSL-reserved `packed` shader identifier.
+
+### Completion Gate
+
+- [x] Scope check: reviewed every Content, fixture, shader, runner, documentation,
+      engine-sandbox, and submodule-pointer change as one P3.4c3 package.
+- [x] Invariant review: covered Z 0, all authored floors, local/world conversion,
+      moving-grid signature alignment, server authority, PVS limits, aperture
+      channels, ordinary-entity privacy, and restoration after capture.
+- [x] Automated verification: 3/3 analyzer, 13/13 shadow, 229/229 cumulative
+      Content Z-level integration, 3/3 baseline, a zero-error clean full build,
+      and a real-client 19/19 capture pass using the final threshold.
+- [x] Performance evidence: retained baseline allocation/cache results and capture
+      atlas, row/group, preview, duration, fallback, and exhaustion counters.
+- [x] Documentation: recorded commands, architecture, fixture coordinates, PVS
+      dependency policy, pixel thresholds, results, limitations, and next gate.
+- [x] Dependency check: the minimal WTZ Engine sandbox allowlist change is clean,
+      committed, pushed, and remotely verified before the parent pointer update.
+- [x] Git check: `git diff --check` passes, both diffs were inspected, generated
+      PNG/report/log artifacts remain ignored, and the engine SHA is verified.
+- [x] Mini review: findings, residual risks, and consolidated P3 work are recorded.
+- [x] Commit: engine is saved as `Allow safe ImageSharp pixel reads`; parent is
+      prepared as `Harden Z-level lighting with real visual capture` on
+      `zlevel/lighting-hardening`, with remote verification following the commit.
+
+### Mini Review
+
+- Finding: a real client exposed three integration assumptions that headless
+  tests could not: Content sandbox restrictions, a reserved GLSL identifier,
+  and server PVS remaining attached to the real player rather than a local eye.
+- Finding: grid-aligned signatures turn the visual check into fixture evidence;
+  they remain stable when camera framing, background stars, or grid transforms
+  differ outside the authored region.
+- Finding: the PVS exception is narrow and bounded. It restores all inputs needed
+  for off-column projected shadows without making ordinary lower-floor entities
+  visible through closed floors.
+- Residual risk: captures currently cover one NVIDIA/OpenGL machine. Cross-vendor
+  raster behavior and automated graphical CI remain P8 hardening work.
+- Residual risk: retained lower structural inputs are bounded by XY range and
+  floor distance, but dense lighting across overlapping viewers needs P8 server
+  profiling.
+- Residual risk: source-floor occluders cast lateral shadows while intermediate
+  floors contribute aperture clipping only; this deliberate policy remains a
+  future quality option rather than a P3 correctness defect.
+- Next package: run the consolidated P3 completion gate across active rendering,
+  caches, projection, budgets, tile composition, shadows, PVS, map persistence,
+  and visual evidence before starting P4 vertical sound.
 
 P2.2 is split into independently gated subpackages:
 
@@ -3612,3 +3736,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.4b | `Bound Z-level tile projection work` | 13 package, 32 lighting/tile, 215 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4c1 | `Expose external point-light shadow atlases` / `Track external Z-level shadow atlas support` | 7 engine unit, 1 engine integration, 37 complete engine client unit, 137 complete engine client integration, full engine build, diff check | Complete |
 | 2026-08-28 | P3.4c2 | `Render bounded lower-floor light shadows` | 13 package, 228 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
+| 2026-08-28 | P3.4c3 | `Allow safe ImageSharp pixel reads` / `Harden Z-level lighting with real visual capture` | 3 analyzer, 1 PVS, 13 shadow, 229 Content Z-level, 3 baseline, full build, 3x 19 real GL checks, diff review | Complete |

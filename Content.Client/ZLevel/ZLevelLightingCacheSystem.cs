@@ -391,7 +391,10 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         Entity<MapGridComponent> grid,
         ZLevelApertureChunkKey key)
     {
-        Span<ulong> words = stackalloc ulong[ZLevelApertureChunk.WordCount];
+        ulong word0 = 0;
+        ulong word1 = 0;
+        ulong word2 = 0;
+        ulong word3 = 0;
         var origin = key.ChunkIndices * ZLevelApertureChunk.ChunkSize;
         var openCount = 0;
 
@@ -412,7 +415,22 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
                 }
 
                 var bit = x + y * ZLevelApertureChunk.ChunkSize;
-                words[bit >> 6] |= 1UL << (bit & 63);
+                var mask = 1UL << (bit & 63);
+                switch (bit >> 6)
+                {
+                    case 0:
+                        word0 |= mask;
+                        break;
+                    case 1:
+                        word1 |= mask;
+                        break;
+                    case 2:
+                        word2 |= mask;
+                        break;
+                    default:
+                        word3 |= mask;
+                        break;
+                }
                 openCount++;
             }
         }
@@ -420,10 +438,10 @@ public sealed class ZLevelLightingCacheSystem : EntitySystem
         return new ZLevelApertureChunk(
             key,
             ++_nextRevision,
-            words[0],
-            words[1],
-            words[2],
-            words[3],
+            word0,
+            word1,
+            word2,
+            word3,
             openCount);
     }
 

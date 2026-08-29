@@ -26,10 +26,11 @@ void vertex()
 
 void fragment()
 {
-    highp float packed = floor(UV2.y + 0.5);
-    highp float falloffQuantized = floor(packed / PARAMETER_BASE);
+    highp float packedParameters = floor(UV2.y + 0.5);
+    highp float falloffQuantized = floor(packedParameters / PARAMETER_BASE);
     highp float falloff = falloffQuantized / FALLOFF_QUANTIZATION;
-    highp float curveFactor = (packed - falloffQuantized * PARAMETER_BASE) / CURVE_QUANTIZATION;
+    highp float curveFactor =
+        (packedParameters - falloffQuantized * PARAMETER_BASE) / CURVE_QUANTIZATION;
 
     highp vec2 horizontal = (UV - vec2(0.5)) * 2.0;
     highp float s = clamp(sqrt(dot(horizontal, horizontal) + UV2.x), 0.0, 1.0);

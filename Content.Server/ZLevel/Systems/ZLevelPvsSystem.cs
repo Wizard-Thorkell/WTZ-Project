@@ -8,6 +8,7 @@ using System.Numerics;
 using Content.Shared.CCVar;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
+using Robust.Server.GameObjects;
 using Robust.Shared;
 using Robust.Shared.Configuration;
 using Robust.Shared.Enums;
@@ -44,6 +45,8 @@ public sealed class ZLevelPvsSystem : EntitySystem
 
     private EntityQuery<EyeComponent> _eyeQuery;
     private EntityQuery<MetaDataComponent> _metaQuery;
+    private EntityQuery<OccluderComponent> _occluderQuery;
+    private EntityQuery<PointLightComponent> _pointLightQuery;
     private EntityQuery<TransformComponent> _transformQuery;
     private float _refreshAccumulator = RefreshInterval;
     private float _priorityViewSize;
@@ -58,6 +61,8 @@ public sealed class ZLevelPvsSystem : EntitySystem
 
         _eyeQuery = GetEntityQuery<EyeComponent>();
         _metaQuery = GetEntityQuery<MetaDataComponent>();
+        _occluderQuery = GetEntityQuery<OccluderComponent>();
+        _pointLightQuery = GetEntityQuery<PointLightComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
 
         Subs.CVar(_configuration, CVars.NetPVS, OnPvsEnabled, true);
@@ -151,8 +156,11 @@ public sealed class ZLevelPvsSystem : EntitySystem
                 }
 
                 visibilityChecks++;
-                if (_visibility.IsEntityVisibleFrom(candidate, viewer.MapId, viewer.ZLevel))
+                if (_visibility.IsEntityVisibleFrom(candidate, viewer.MapId, viewer.ZLevel) ||
+                    IsVerticalRenderDependencyVisible(candidate, viewer))
+                {
                     _visible.Add(candidate);
+                }
             }
         }
 
@@ -169,6 +177,29 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _culled.ExceptWith(_visible);
         _pvs.ReplaceSessionCulling(session, _culled);
         RecordRefresh(started, visibilityChecks, false);
+    }
+
+    /// <summary>
+    /// Lower-floor lights and occluders can affect an opening away from their own tile.
+    /// Keep these bounded render inputs in PVS and let client projection clip the result.
+    /// </summary>
+    private bool IsVerticalRenderDependencyVisible(EntityUid candidate, in ViewerContext viewer)
+    {
+        var isEnabledLight = _pointLightQuery.TryComp(candidate, out var light) && light.Enabled;
+        var isEnabledOccluder = _occluderQuery.TryComp(candidate, out var occluder) && occluder.Enabled;
+        if ((!isEnabledLight && !isEnabledOccluder) ||
+            !_transformQuery.TryComp(candidate, out var transform) ||
+            transform.MapID != viewer.MapId)
+        {
+            return false;
+        }
+
+        var candidateWorldZ = _transform.GetWorldZLevel((
+            candidate,
+            transform,
+            CompOrNull<ZLevelPositionComponent>(candidate)));
+        var depth = (long) viewer.ZLevel - candidateWorldZ;
+        return depth > 0 && depth <= _visibility.MaxVisibleLevelDistance;
     }
 
     private void CollectViewers(ICommonSession session)

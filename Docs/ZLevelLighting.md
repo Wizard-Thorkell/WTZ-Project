@@ -1,9 +1,8 @@
 # WTZ Z-Level Lighting And FOV
 
 This document defines the rendering ownership and vertical projection contract
-established by roadmap packages P3.1 through P3.4c2. It is the baseline for
-real-client visual capture and rendering hardening in the remaining P3.4
-package.
+established by roadmap packages P3.1 through P3.4c3. It is the baseline for the
+consolidated P3 completion gate and later server-scale hardening.
 
 ## Ownership
 
@@ -36,6 +35,22 @@ viewport per floor.
 
 An entity-less or fixed eye carries an explicit world Z. Content uses that Z as
 its fallback instead of silently returning to layer zero.
+
+## Server PVS Render Dependencies
+
+The server still applies ordinary lower-floor PVS per entity column: a candidate
+behind a closed `Visibility` boundary is detached from that viewer. Point lights
+and occluders are different because either can affect an aperture away from its
+own tile. `ZLevelPvsSystem` therefore retains enabled lower-floor
+`PointLightComponent` and `OccluderComponent` inputs within the configured XY
+range and `MaxVisibleLevelDistance`, even when the boundary directly above that
+dependency is closed.
+
+This is a bounded render-dependency exception, not general visibility. The
+client still filters the native active floor by world Z and clips lower-floor
+composition through the authoritative aperture stack. Ordinary entities remain
+opening-clipped, and a dedicated integration test covers both sides of this
+contract.
 
 ## Grid-Layer Cache Contract
 
@@ -295,6 +310,40 @@ Chebyshev/VSM hard edge, and seven-sample soft edge. They retain the unshadowed
 projection's mask-space UVs, vertical height term, transmission, source color
 and energy, falloff, and curve factor.
 
+## P3.4c3 Real-Client Capture And Hardening
+
+`zlevellightingcapture` drives a deterministic client-side camera through 11
+states: shadowless baselines for Z 0 through Z 2, hard and soft shadows for all
+three floors, and hard/soft mapping preview on Z 1. Before each frame it sends
+the administrative server command `zlevelset <local-z>` and waits until the
+attached player's floor plus target-layer tiles, enabled light, and occluders
+have converged through PVS. This prevents a synthetic client eye from capturing
+inputs that the authoritative server has correctly withheld from another floor.
+
+Each PNG is measured at fixed local-grid probes. A 48 by 32 RGB signature samples
+the canonical 7 by 7 fixture after transforming local coordinates through the
+grid's current world matrix and logical viewport. Comparisons therefore ignore
+stars and UI while remaining aligned on translated or rotated grids. The 19
+checks cover capture count, nonblank output, active-floor RGB dominance, hard
+and soft shadow contrast on every floor, a normalized hard/soft difference above
+0.0004, mapping-preview differences, actual external-atlas use, and absence of
+shadow-budget fallback or exhaustion.
+
+Run the complete gate from the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\run_zlevel_visual_capture.ps1
+```
+
+The runner builds client/server unless `-SkipBuild` is supplied, starts an
+isolated local round on `ZLevelMappingStation`, captures through a real OpenGL
+client, writes PNGs plus `report.json` under
+`bin/Content.Client/user_data/ZLevelVisualCapture`, retains process logs under
+`artifacts/zlevel-visual-capture-run`, and fails if any pixel check fails. Three
+consecutive NVIDIA/OpenGL runs passed 19/19 through the completion gate; the
+final recorded atlas/lights/groups values were 289/379/379 with zero fallback
+or exhaustion.
+
 ## Shared Aperture FOV Composition
 
 Lower-floor tile composition and projected light consume the same composed
@@ -338,6 +387,11 @@ P3.4c2 adds current shadow rows, floor groups, and unshadowed fallbacks;
 per-frame row/group used and maximum values; cumulative row/group exhaustion;
 planned versus rendered rows/groups; and external atlas render counts.
 
+P3.4c3 records the same snapshots in `report.json` beside per-capture RGB probes,
+luminance, grid-aligned signatures, check results, duration, and output paths.
+The client log also inventories tiles, lights, enabled lights, and occluders per
+fixture floor while diagnosing a failed convergence.
+
 Run `zlevelrendermetrics reset` to reset cumulative Content vertical-rendering
 counters.
 Retained cache entries and native per-frame Clyde counters are not destroyed by
@@ -360,9 +414,12 @@ automatic viewports contribute to the same frame snapshot.
 | 1 | `Z1 lighting baseline (green)` | green |
 | 2 | `Z2 lighting baseline (blue)` | blue |
 
-The map also contains floor-specific walls and stairs. Its integration test
-asserts that all three light fixtures load and retain local Z values 0, 1, and
-2.
+The map also contains one floor-specific shadow blocker per floor, walls, and
+stairs. Symmetric `Visibility` apertures at `(1.5, 4.5)` and `(5.5, 4.5)` cross
+both Z 0 -> 1 and Z 1 -> 2. The left probe sits behind the blocker while the
+right probe remains clear. Its integration test asserts all lights, blockers,
+aperture markers, colors, radii, shadow settings, local Z values, and boundary
+states survive map loading.
 
 Manual baseline procedure:
 
@@ -370,9 +427,9 @@ Manual baseline procedure:
 2. Enable `zlevel.debug_overlay` in the client console.
 3. Stand near `(3.5, 1.5)` on Z 0, then traverse Z 1 and Z 2.
 4. On Z 0, confirm the red source is native. On Z 1, confirm the green source is
-   native and red light appears only through the stair opening near
-   `(2.5, 2.5)`. On Z 2, confirm the blue source is native and green light
-   appears only through the stair opening near `(4.5, 4.5)`.
+   native and red light appears only through the two openings at
+   `(1.5, 4.5)` and `(5.5, 4.5)`. On Z 2, confirm the blue source is native and
+   composed lower light remains clipped to the same aperture columns.
 5. Confirm closed floor columns do not receive the projected lower-floor color,
    and that the projected color is dimmer than its source floor.
 6. Run `zlevelrendermetrics`. The projection report should show at least one
@@ -382,6 +439,9 @@ Manual baseline procedure:
    another floor.
 8. Enter mapping mode and enable adjacent preview. The active floor remains the
    native Clyde layer; adjacent tiles are the tinted Content composition.
+9. Prefer `powershell -NoProfile -ExecutionPolicy Bypass -File
+   .\Tools\run_zlevel_visual_capture.ps1` for an automated, report-backed
+   repetition of these RGB, shadow, preview, atlas, and budget checks.
 
 Capture screenshots at Z 0, Z 1, Z 2, and adjacent preview whenever renderer or
 shader behavior changes. Headless integration tests validate state and
@@ -442,14 +502,25 @@ row/group fallback, same-frame sharing and reset, and global shadow disablement
 in 13 cases. The cumulative Content Z-level integration filter passes 228/228;
 the warmed projection allocation fixture remains green with shadow requests.
 
+## P3.4c3 Real RGB Fixture
+
+`ZLevelLightingCaptureAnalysisTest` validates RGB probes, signature comparison,
+and grid-world alignment in three unit cases. The real-client runner captures 11
+PNGs and evaluates 19 checks. Three consecutive runs passed 19/19. The final
+normalized Z 0/Z 1/Z 2 hard-soft differences were 0.000569, 0.000648, and
+0.000603 while the configured floor is 0.0004. The cumulative Content Z-level
+integration filter passes 229/229, including the server PVS render-dependency
+regression.
+
 ## Current Deliberate Limits
 
 - Projected lower-floor lights now request source-floor occluders and sample
   bounded hard or soft shadow rows. Intermediate floors clip the light through
   composed vertical apertures; they do not add a second lateral shadow pass.
-- Headless tests validate planning, shaders, atlas contracts, and fallback but
-  cannot judge actual GL depth pixels, penumbrae, tint, silhouettes, or transient
-  flashes. P3.4c3 owns canonical hard/soft screenshots and pixel checks.
+- Real OpenGL captures now validate depth pixels, hard/soft differences, RGB
+  tint, shadow silhouettes, preview composition, and nonblank transitions on the
+  local NVIDIA driver. Cross-vendor and CI hardware coverage remains a P8
+  portability target.
 - Projected light is intentionally clipped to the lower scene visible through
   open columns. Physical light spill onto opaque upper-floor tiles is a separate
   gameplay policy and is not inferred by this compositor.
@@ -465,3 +536,6 @@ the warmed projection allocation fixture remains green with shadow requests.
   its own chunk budget. Pathological counts of overlapping moving grids remain a
   P8 profiling target even though per-grid chunk, aperture, and tile work is now
   bounded.
+- PVS retains bounded lower-floor light and occluder render dependencies even
+  when their own column is closed. This fixes off-column aperture influence, but
+  P8 must profile dense structural-light scenes and overlapping viewers.

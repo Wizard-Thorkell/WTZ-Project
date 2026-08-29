@@ -171,7 +171,8 @@ public sealed class SharedZLevelInteractionSystem : EntitySystem
         EntityUid? ignoredEntity,
         ZLevelTraceBuffer traceBuffer)
     {
-        ArgumentNullException.ThrowIfNull(traceBuffer);
+        if (traceBuffer is null)
+            throw new ArgumentException("Trace buffer cannot be null.", nameof(traceBuffer));
         return CanInteract(
             user,
             target,

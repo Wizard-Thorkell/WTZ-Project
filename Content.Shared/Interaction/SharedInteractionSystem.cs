@@ -1680,8 +1680,10 @@ namespace Content.Shared.Interaction
                 entity == spatialOrigin ||
                 (predicate?.Invoke(entity) ?? false);
             Ignored? targetPredicate = null;
-            foreach (var hit in _verticalInteractionTraceBuffer.EntityHitSpan)
+            var entityHits = _verticalInteractionTraceBuffer.EntityHits;
+            for (var index = 0; index < entityHits.Count; index++)
             {
+                var hit = entityHits[index];
                 if (hit.Entity == origin.Owner ||
                     hit.Entity == spatialOrigin ||
                     hit.Entity == other.Owner ||

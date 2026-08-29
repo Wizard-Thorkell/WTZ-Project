@@ -16,6 +16,7 @@ using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using NUnit.Framework;
+using Robust.Server.GameObjects;
 using Robust.Shared;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
@@ -607,6 +608,87 @@ public sealed class ZLevelMovementTest : MovementTest
             Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.True,
                 "Closing the boundary again must evict lower-floor entities.");
         });
+    }
+
+    [Test]
+    public async Task ZLevelPvsKeepsLowerFloorLightingDependencies()
+    {
+        NetEntity plainTarget = default;
+        NetEntity lightTarget = default;
+        NetEntity occluderTarget = default;
+        EntityUid? clientPlain = default;
+        EntityUid? clientLight = default;
+        EntityUid? clientOccluder = default;
+
+        await Server.WaitPost(() => Server.CfgMan.SetCVar(CVars.NetPVS, true));
+        await Server.WaitPost(() =>
+        {
+            var coordinates = SEntMan.GetCoordinates(TargetCoords);
+            var plain = SEntMan.SpawnEntity(null, coordinates);
+            var light = SEntMan.SpawnEntity(null, coordinates);
+            var occluder = SEntMan.SpawnEntity(null, coordinates);
+            SEntMan.EnsureComponent<PointLightComponent>(light);
+            SEntMan.EnsureComponent<OccluderComponent>(occluder);
+            plainTarget = SEntMan.GetNetEntity(plain);
+            lightTarget = SEntMan.GetNetEntity(light);
+            occluderTarget = SEntMan.GetNetEntity(occluder);
+        });
+        await RunTicks(10);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(plainTarget, out clientPlain), Is.True);
+            Assert.That(CEntMan.TryGetEntity(lightTarget, out clientLight), Is.True);
+            Assert.That(CEntMan.TryGetEntity(occluderTarget, out clientOccluder), Is.True);
+        });
+
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerTile = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetCoordinates(PlayerCoords));
+            var targetTile = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetCoordinates(TargetCoords));
+
+            Assert.That(zLevels.SetZLevelPosition(SPlayer, 1), Is.True);
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(playerTile.X, playerTile.Y, 1),
+                new Tile(1));
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(targetTile.X, targetTile.Y, 1),
+                new Tile(1));
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+        await RunSeconds(0.5f);
+
+        await Client.WaitAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(IsDetached(clientPlain), Is.True,
+                    "Ordinary lower-floor entities must remain hidden behind a closed floor.");
+                Assert.That(IsDetached(clientLight), Is.False,
+                    "Lower-floor lights remain PVS inputs for aperture projection.");
+                Assert.That(IsDetached(clientOccluder), Is.False,
+                    "Lower-floor occluders remain PVS inputs for projected shadows.");
+            });
+        });
+
+        bool IsDetached(EntityUid? uid)
+        {
+            return CEntMan.GetComponent<MetaDataComponent>(uid!.Value).Flags
+                .HasFlag(MetaDataFlags.Detached);
+        }
     }
 
     [Test]

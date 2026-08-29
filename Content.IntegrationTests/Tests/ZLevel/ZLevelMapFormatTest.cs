@@ -134,6 +134,19 @@ public sealed class ZLevelMapFormatTest : GameTest
                 .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "AlwaysPoweredLightExterior" &&
                     entMan.HasComponent<PointLightComponent>(uid))
                 .ToArray();
+            var shadowBlockers = entities
+                .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityName.EndsWith(
+                    "lighting shadow blocker",
+                    StringComparison.Ordinal))
+                .OrderBy(uid => transform.GetZLevel((
+                    uid,
+                    entMan.GetComponent<TransformComponent>(uid),
+                    entMan.GetComponentOrNull<ZLevelPositionComponent>(uid))))
+                .ToArray();
+            var apertureMarkers = entities
+                .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID ==
+                    "ZLevelFloorOpeningMarker")
+                .ToArray();
 
             Assert.Multiple(() =>
             {
@@ -144,9 +157,10 @@ public sealed class ZLevelMapFormatTest : GameTest
                 Assert.That(config.DefaultBoundaryMode, Is.EqualTo(ZLevelDefaultBoundaryMode.TileAboveCloses));
                 Assert.That(mapSystem.GetExistingZLevelLayers(grid.Owner, grid.Comp),
                     Is.EquivalentTo(new[] { 0, 1, 2, 3 }));
-                Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "WallSolid"), Is.EqualTo(72));
+                Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "WallSolid"), Is.EqualTo(75));
                 Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID is
                     "ZLevelStairsUp" or "ZLevelStairsDown"), Is.EqualTo(4));
+                Assert.That(apertureMarkers, Has.Length.EqualTo(4));
                 Assert.That(lightFixtures, Has.Length.EqualTo(3));
                 Assert.That(lightFixtures.Select(uid => transform.GetZLevel((
                         uid,
@@ -160,10 +174,34 @@ public sealed class ZLevelMapFormatTest : GameTest
                         Color.FromHex("#40FF70FF"),
                         Color.FromHex("#4080FFFF"),
                     }));
+                Assert.That(lightFixtures.Select(uid => entMan.GetComponent<PointLightComponent>(uid).Radius),
+                    Is.All.EqualTo(5f));
+                Assert.That(lightFixtures.Select(uid => entMan.GetComponent<PointLightComponent>(uid).Softness),
+                    Is.All.EqualTo(0.75f));
+                Assert.That(lightFixtures.Select(uid => entMan.GetComponent<PointLightComponent>(uid).CastShadows),
+                    Is.All.True);
+                Assert.That(shadowBlockers, Has.Length.EqualTo(3));
+                Assert.That(shadowBlockers.Select(uid => transform.GetZLevel((
+                        uid,
+                        entMan.GetComponent<TransformComponent>(uid),
+                        entMan.GetComponentOrNull<ZLevelPositionComponent>(uid)))),
+                    Is.EqualTo(new[] { 0, 1, 2 }));
+                Assert.That(shadowBlockers.Select(uid => entMan.GetComponent<TransformComponent>(uid).LocalPosition),
+                    Is.All.EqualTo(new Vector2(2.5f, 2.5f)));
                 Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 1), 0, 1,
                     ZLevelBoundaryChannels.Atmosphere), Is.False);
-                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(2, 2), 0, 1,
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 5), 0, 1,
                     ZLevelBoundaryChannels.Atmosphere), Is.True);
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 4), 0, 1,
+                    ZLevelBoundaryChannels.Visibility), Is.True);
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(5, 4), 0, 1,
+                    ZLevelBoundaryChannels.Visibility), Is.True);
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 4), 1, 2,
+                    ZLevelBoundaryChannels.Visibility), Is.True);
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(5, 4), 1, 2,
+                    ZLevelBoundaryChannels.Visibility), Is.True);
+                Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(3, 4), 0, 1,
+                    ZLevelBoundaryChannels.Visibility), Is.False);
                 Assert.That(boundaries.IsOpen(grid.Owner, grid.Comp, new Vector2i(1, 1), 2, 3,
                     ZLevelBoundaryChannels.Atmosphere), Is.False);
             });

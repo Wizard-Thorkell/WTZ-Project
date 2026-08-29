@@ -79,17 +79,17 @@ public sealed class ZLevelLightingProjectionOverlay : Overlay
         ShadowResources? shadowResources = null;
         IRenderTexture? shadowAtlas = null;
         var shadowRequests = _projection.GetShadowRequests();
-        if (!shadowRequests.IsEmpty)
+        if (shadowRequests.Count > 0)
         {
             shadowResources = _resources.GetForViewport(
                 args.Viewport,
                 static _ => new ShadowResources());
-            shadowAtlas = shadowResources.EnsureAtlas(_clyde, shadowRequests.Length);
+            shadowAtlas = shadowResources.EnsureAtlas(_clyde, shadowRequests.Count);
             shadowStats = _clyde.RenderLightShadowMap(
                 shadowAtlas,
                 args.Viewport,
                 args.MapId,
-                shadowRequests);
+                CollectionsMarshal.AsSpan(shadowRequests));
         }
 
         var softShadows = _configuration.GetCVar(CVars.LightSoftShadows);
