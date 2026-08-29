@@ -80,6 +80,42 @@ public sealed partial class CCVars
             CVar.REPLICATED | CVar.SERVER);
 
     /// <summary>
+    /// Maximum adjacent floors crossed by one vertical sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxCrossings =
+        CVarDef.Create("zlevel.sound_route_max_crossings", 8, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum portal chunks inspected by one vertical sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxPortalChunks =
+        CVarDef.Create("zlevel.sound_route_max_portal_chunks", 64, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum cold portal chunks built by one vertical sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxPortalBuilds =
+        CVarDef.Create("zlevel.sound_route_max_portal_builds", 16, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum open portal candidates inspected by one vertical sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxPortalCandidates =
+        CVarDef.Create("zlevel.sound_route_max_portal_candidates", 2_048, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum candidate-to-candidate edges evaluated by one sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxEdges =
+        CVarDef.Create("zlevel.sound_route_max_edges", 32_768, CVar.SERVERONLY);
+
+    /// <summary>
+    /// Maximum unique atmosphere cells sampled by one sound route.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundRouteMaxMediumSamples =
+        CVarDef.Create("zlevel.sound_route_max_medium_samples", 4_096, CVar.SERVERONLY);
+
+    /// <summary>
     /// Maximum native point-light tree entries inspected by vertical lighting per client frame.
     /// </summary>
     public static readonly CVarDef<int> ZLevelLightingMaxEmitterCandidatesPerFrame =

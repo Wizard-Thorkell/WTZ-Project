@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/vertical-sound`.
-- Active package: `P4.2 bounded multi-portal routes and attenuation`.
+- Active branch: `zlevel/sound-routing`.
+- Active package: `P4.3 listener authorization, apparent direction, diagnostics, and hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -44,7 +44,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
-| P4 | Vertical sound propagation through cached portals | In progress (P4.1 complete) |
+| P4 | Vertical sound propagation through cached portals | In progress (P4.1-P4.2 complete) |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
@@ -55,7 +55,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P4.1 | Shared vertical sound portal contract, bounded cache, and metrics | Complete |
-| P4.2 | Bounded multi-portal routes, transmission, and attenuation | Pending |
+| P4.2 | Bounded multi-portal routes, transmission, and attenuation | Complete |
 | P4.3 | Listener authorization, apparent direction, diagnostics, and hardening | Pending |
 
 ## Phase P0 Packages
@@ -3930,6 +3930,115 @@ allocation is inside Robust physics enumeration.
   including crossing/range limits, deterministic tie-breaking, attenuation, and
   explicit sealed/vacuum behavior.
 
+## Completed Package: P4.2 Bounded Vertical Sound Routes
+
+### Scope
+
+- Define shared endpoint, options, budget, result, status, and metrics contracts
+  for one vertical acoustic route without coupling them to playback entities.
+- Add a server-authoritative solver that derives finite portal bounds from
+  endpoints and range, then chooses one monotonic adjacent-floor path.
+- Rank paths by geometric travel and cumulative transmission loss, with stable
+  equal-cost tie-breaking and current moving-frame projection.
+- Sample Z-aware atmosphere pressure on the server, block vacuum and missing
+  medium, and expose transmission plus decibel loss.
+- Add independent route budgets/CVars, explicit failure states, rollback,
+  focused tests, architecture documentation, and performance counters.
+
+### Acceptance Criteria
+
+- Same-floor queries preserve native Euclidean behavior and do not require an
+  atmosphere medium, so Z 0 and existing audio remain compatible.
+- A vertical result contains exactly one portal per adjacent boundary in travel
+  order and is identical for equal topology in either direction.
+- Search space and all expensive work are finite; every budget failure is
+  distinguishable and never leaves a partial path in caller-owned results.
+- Missing portal topology is reported before medium state. Pressurized routes
+  attenuate predictably, while vacuum or missing atmosphere blocks traversal.
+- Grid translation, rotation, and world-Z origin changes preserve local route
+  choice while returned portal world coordinates stay current.
+
+### Evidence
+
+- `ZLevelSoundRouteTest` passes 4/4. It covers lower-loss ranking, equal-cost
+  deterministic ties, upward/downward ordering, moving frames, same-floor
+  compatibility, sealed layers, vacuum, pressure attenuation, CVar clamps,
+  rollback, and all five work-budget failures.
+- The combined P4.1/P4.2 `FullyQualifiedName~ZLevelSound` matrix passes 8/8
+  with no failures or skips. The complete Content Z-level integration filter
+  passes 237/237, and Content's structural/capture-analysis filter passes 5/5.
+- The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured
+  bytes each, zero warmed boundary/gravity misses, zero PVS budget exhaustions,
+  and measured times of 6.784, 13.052, and 26.142 ms.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental -m:1`
+  succeeds with zero errors and 700 established dependency, analyzer,
+  vulnerability, and upstream-obsolescence warnings.
+- The focused route workload completes 2,026 successful queries and 28,364
+  evaluated edges in 104.139 ms total. After warmup, 1,000 repeated route
+  lookups allocate zero managed bytes on the test machine.
+
+### Decisions
+
+- Keep route policy server-side because atmosphere and listener authorization
+  are authoritative. Shared code owns only immutable contracts and portal
+  topology remains in the P4.1 shared cache.
+- Use an ordered monotonic DAG instead of a global portal graph. One route may
+  move horizontally between portals but crosses each required boundary once,
+  making cycles impossible and work straightforward to budget.
+- Compute effective distance as geometric distance plus `-ln(transmission)`
+  loss distance. Preserve the first P4.1 portal order on equal effective cost.
+- Require both endpoints to share one grid-local frame. Cross-grid routing is
+  explicitly rejected until docking or another physical connection contract
+  can define valid transitions between moving grids.
+- Preserve native same-floor sound even in vacuum. Vertical sound defaults to
+  current pressure-aware policy and retains pressure only for one lookup.
+- Report missing topology before pressure state, avoiding wasted atmosphere
+  samples and keeping sealed geometry distinct from vacuum.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to shared route contracts/CVars, one
+      server solver, focused integration tests, and P4 documentation/ledger.
+- [x] Invariant review: Z 0 compatibility, local/world frames, moving and
+      rotated grids, server authority, Sound-channel isolation, sealed topology,
+      vacuum, and caller-owned rollback were reviewed and tested.
+- [x] Automated verification: 4/4 route, 8/8 combined sound, 237/237 cumulative
+      Content integration, 5/5 Content unit/analyzer, 3/3 baseline, and a
+      zero-error clean solution build pass without skips.
+- [x] Performance evidence: finite CVar/hard clamps, per-query budgets, route
+      counters/timings, baseline metrics, and zero-byte warmed allocation are
+      recorded above and in `Docs/ZLevelSound.md`.
+- [x] Documentation: solver bounds, DAG ordering, formulas, medium policy,
+      statuses, CVars, current audio boundary, verification, and limits are
+      recorded in `Docs/ZLevelSound.md` and this entry.
+- [x] Dependency check: no engine edit is required; WTZ Engine remains clean and
+      pinned at `b6051ff8c6d7b04638be2dbbbd0020b159906771`.
+- [x] Git check: generated baselines and test results remain ignored, both
+      repository trees are inspected, and `git diff --check` is required
+      immediately before commit.
+- [x] Mini review: no blocking finding remains; playback integration and the
+      deliberately limited policies below are assigned to P4.3 or later.
+- [x] Commit: prepared as the isolated `Route vertical sound through bounded
+      portals` commit for the WTZ sound-routing branch and its remote.
+
+### Mini Review
+
+- Finding: topology, medium, and resource exhaustion now have separate explicit
+  outcomes; route failure cannot be mistaken for valid silence or leak a
+  partial portal list.
+- Finding: the hot solver reuses bounded scratch storage, resolves symmetric
+  ties deterministically, and remains stable across moving-frame reprojection.
+- Residual risk: no cross-floor audio is audible until P4.3 connects successful
+  routes to listener/PVS authorization and apparent client source placement.
+- Residual risk: per-floor segments are Euclidean, cross-grid routes are
+  rejected, and transmission is class-level rather than material/frequency
+  specific. Those limits are explicit and do not weaken route authority.
+- Residual risk: the focused timings are Debug/local results; multiplayer scale,
+  retained scratch high-water behavior, and long-running metrics belong to P8.
+- Next package: P4.3 integrates one logical Robust emission with routed listener
+  authorization, apparent direction, PVS-safe lifecycle, debug/admin metrics,
+  and end-to-end sealed/vacuum/moving-grid tests.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -3967,3 +4076,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.4c3 | `Allow safe ImageSharp pixel reads` / `Harden Z-level lighting with real visual capture` | 3 analyzer, 1 PVS, 13 shadow, 229 Content Z-level, 3 baseline, full build, 3x 19 real GL checks, diff review | Complete |
 | 2026-08-28 | P3 gate | `Close the P3 lighting and FOV phase gate` | 229 Content, 37/137 engine client, 4 serialization, 13 map/replication, 3 baseline, 19 real GL, architecture review | Complete |
 | 2026-08-28 | P4.1 | `Cache bounded vertical sound portals` | 4 focused, 233 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
+| 2026-08-28 | P4.2 | `Route vertical sound through bounded portals` | 4 route, 8 sound, 237 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
