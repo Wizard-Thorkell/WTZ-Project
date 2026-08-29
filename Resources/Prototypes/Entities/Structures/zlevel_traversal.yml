@@ -111,7 +111,9 @@
         density: 1000
         hard: false
   - type: ZLevelTraversal
+    kind: Ladder
     zOffset: 1
+    navigationCost: 5
   - type: ZLevelBoundary
     boundaryOffset: 1
     opens:

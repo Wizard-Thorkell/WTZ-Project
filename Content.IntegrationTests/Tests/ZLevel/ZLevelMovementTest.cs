@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using Content.IntegrationTests.Tests.Helpers;
 using Content.IntegrationTests.Tests.Movement;
 using Content.Server.Power.Components;
+using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.DoAfter;
 using Content.Shared.Gravity;
@@ -747,6 +748,157 @@ public sealed class ZLevelMovementTest : MovementTest
                 Assert.That(position.LocalZOffset, Is.EqualTo(0f).Within(0.001f));
                 Assert.That(kinematics.Grounded, Is.True);
                 Assert.That(SEntMan.System<SharedZLevelSystem>().IsBodyActive(player), Is.False);
+            });
+        });
+    }
+
+    [Test]
+    public async Task ZLevelTraversalGraphIndexesFloorsAndConnectedProfiles()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var map = SEntMan.System<SharedMapSystem>();
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var originCoordinates = SEntMan.GetCoordinates(PlayerCoords);
+            var originTile = map.TileIndicesFor(MapData.Grid, grid, originCoordinates);
+            var adjacentTile = originTile + new Vector2i(1, 0);
+            var ladderTile = originTile + new Vector2i(2, 0);
+            var adjacentCoordinates = map.GridTileToLocal(MapData.Grid, grid, adjacentTile);
+            var ladderCoordinates = map.GridTileToLocal(MapData.Grid, grid, ladderTile);
+
+            var origin = SEntMan.SpawnEntity(null, originCoordinates);
+            var originTraversal = SEntMan.EnsureComponent<ZLevelTraversalComponent>(origin);
+            originTraversal.ZOffset = 1;
+            graph.RefreshTraversal(origin);
+
+            var adjacent = SEntMan.SpawnEntity(null, adjacentCoordinates);
+            var adjacentTraversal = SEntMan.EnsureComponent<ZLevelTraversalComponent>(adjacent);
+            adjacentTraversal.ZOffset = 1;
+            graph.RefreshTraversal(adjacent);
+
+            var ladder = SEntMan.SpawnEntity(null, ladderCoordinates);
+            var ladderTraversal = SEntMan.EnsureComponent<ZLevelTraversalComponent>(ladder);
+            ladderTraversal.ZOffset = 1;
+            ladderTraversal.Kind = ZLevelTraversalKind.Ladder;
+            graph.RefreshTraversal(ladder);
+
+            var upper = SEntMan.SpawnEntity(null, originCoordinates);
+            var upperTraversal = SEntMan.EnsureComponent<ZLevelTraversalComponent>(upper);
+            upperTraversal.ZOffset = 1;
+            var upperPosition = SEntMan.EnsureComponent<ZLevelPositionComponent>(upper);
+            upperPosition.ZLevel = 1;
+            graph.RefreshTraversal(upper);
+
+            var results = new List<EntityUid>();
+            graph.GetTraversalsAt(MapData.Grid, originTile, 0, results);
+            Assert.That(results, Is.EquivalentTo(new[] { origin }));
+            graph.GetTraversalsAt(MapData.Grid, originTile, 1, results);
+            Assert.That(results, Is.EquivalentTo(new[] { upper }));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.TryGetConnectedTraversal(origin, adjacentTile, out var connected), Is.True);
+                Assert.That(connected, Is.EqualTo(adjacent));
+                Assert.That(graph.TryGetConnectedTraversal(origin, ladderTile, out _), Is.False,
+                    "Different traversal kinds must not share a continuation timer or navigation region.");
+                Assert.That(graph.TryGetConnectedTraversal(origin, originTile, out connected), Is.True);
+                Assert.That(connected, Is.EqualTo(origin));
+            });
+
+            for (var i = 0; i < 32; i++)
+                graph.TryGetConnectedTraversal(origin, adjacentTile, out _);
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var allConnected = true;
+            for (var i = 0; i < 256; i++)
+                allConnected &= graph.TryGetConnectedTraversal(origin, adjacentTile, out _);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.Multiple(() =>
+            {
+                Assert.That(allConnected, Is.True);
+                Assert.That(allocated, Is.LessThanOrEqualTo(256),
+                    "Warmed connected-region queries should reuse traversal buffers.");
+            });
+
+            var revision = graph.TopologyRevision;
+            transform.SetCoordinates(adjacent, ladderCoordinates);
+            graph.GetTraversalsAt(MapData.Grid, adjacentTile, 0, results);
+            Assert.Multiple(() =>
+            {
+                Assert.That(results, Is.Empty);
+                Assert.That(graph.TopologyRevision, Is.GreaterThan(revision));
+            });
+
+            SEntMan.DeleteEntity(origin);
+            Assert.That(graph.NodeCount, Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public async Task ZLevelTraversalGraphResolvesAndInvalidatesDirectedEdges()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var map = SEntMan.System<SharedMapSystem>();
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var coordinates = SEntMan.GetCoordinates(PlayerCoords);
+            var tile = map.TileIndicesFor(MapData.Grid, grid, coordinates);
+            var upper = new ZLevelTileIndices(tile.X, tile.Y, 1);
+            map.SetZLevelTile(MapData.Grid, grid, upper, new Tile(1));
+
+            var stairs = SEntMan.SpawnEntity(
+                "ZLevelStairsUp",
+                map.GridTileToLocal(MapData.Grid, grid, tile));
+            graph.RefreshTraversal(stairs);
+
+            Assert.That(graph.TryResolveEdge(stairs, out var edge), Is.EqualTo(ZLevelTraversalEdgeStatus.Valid));
+            Assert.Multiple(() =>
+            {
+                Assert.That(edge.Source.LocalZ, Is.Zero);
+                Assert.That(edge.Source.WorldZ, Is.Zero);
+                Assert.That(edge.Destination.LocalZ, Is.EqualTo(1));
+                Assert.That(edge.Destination.WorldZ, Is.EqualTo(1));
+                Assert.That(edge.ZOffset, Is.EqualTo(1));
+                Assert.That(edge.Cost, Is.EqualTo(4f));
+            });
+
+            var environmentRevision = graph.EnvironmentRevision;
+            map.SetZLevelTile(MapData.Grid, grid, upper, Tile.Empty);
+            Assert.Multiple(() =>
+            {
+                Assert.That(graph.EnvironmentRevision, Is.GreaterThan(environmentRevision));
+                Assert.That(graph.TryResolveEdge(stairs, out _),
+                    Is.EqualTo(ZLevelTraversalEdgeStatus.MissingDestinationSupport));
+            });
+
+            map.SetZLevelTile(MapData.Grid, grid, upper, new Tile(1));
+            var boundary = SEntMan.GetComponent<ZLevelBoundaryComponent>(stairs);
+            boundaries.SetBoundary(
+                (stairs, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.None,
+                ZLevelBoundaryChannels.TraversalUp);
+            Assert.That(graph.TryResolveEdge(stairs, out _),
+                Is.EqualTo(ZLevelTraversalEdgeStatus.ClosedBoundary));
+
+            boundaries.SetBoundary(
+                (stairs, boundary),
+                true,
+                1,
+                ZLevelBoundaryChannels.Traversal,
+                ZLevelBoundaryChannels.None);
+            transform.SetZLevelFrameOrigin(MapData.Grid, 6);
+            Assert.That(graph.TryResolveEdge(stairs, out edge), Is.EqualTo(ZLevelTraversalEdgeStatus.Valid));
+            Assert.Multiple(() =>
+            {
+                Assert.That(edge.Source.WorldZ, Is.EqualTo(6));
+                Assert.That(edge.Destination.WorldZ, Is.EqualTo(7));
             });
         });
     }

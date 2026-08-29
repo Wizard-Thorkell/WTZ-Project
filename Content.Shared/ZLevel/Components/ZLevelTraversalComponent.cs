@@ -14,6 +14,12 @@ namespace Content.Shared.ZLevel.Components;
 public sealed partial class ZLevelTraversalComponent : Component
 {
     /// <summary>
+    /// Content category used by navigation and connected traversal grouping.
+    /// </summary>
+    [DataField]
+    public ZLevelTraversalKind Kind = ZLevelTraversalKind.Stairs;
+
+    /// <summary>
     /// Relative floor change applied when this traversal succeeds.
     /// </summary>
     [DataField(required: true)]
@@ -30,4 +36,18 @@ public sealed partial class ZLevelTraversalComponent : Component
     /// </summary>
     [DataField]
     public TimeSpan TraversalDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Abstract route cost added by hierarchical pathfinding for this transition.
+    /// </summary>
+    [DataField]
+    public float NavigationCost = 4f;
+}
+
+public enum ZLevelTraversalKind : byte
+{
+    Stairs,
+    Ladder,
+    Shaft,
+    Elevator,
 }

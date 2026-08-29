@@ -3,6 +3,7 @@
 
 using Content.Server.Administration;
 using Content.Server.Explosion.EntitySystems;
+using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Administration;
 using Content.Shared.ZLevel.Systems;
@@ -28,6 +29,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<SharedZLevelSoundPortalSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundRouteSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
+            _entityManager.System<ZLevelTraversalGraphSystem>().ResetMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
             return;
         }
@@ -47,6 +49,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var soundPortals = _entityManager.System<SharedZLevelSoundPortalSystem>();
         var soundRoutes = _entityManager.System<ZLevelSoundRouteSystem>();
         var trace = _entityManager.System<SharedZLevelTraceSystem>();
+        var traversalGraph = _entityManager.System<ZLevelTraversalGraphSystem>();
         var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
 
         shell.WriteLine("Native Z-level metrics for this process since the last reset:");
@@ -166,6 +169,21 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{playbackMetrics.PresentationBudgetExhaustions}, parent-fail={playbackMetrics.ParentDepthFailures}, " +
             $"avg/last/max={playbackMetrics.AverageRefreshMilliseconds:0.000}/" +
             $"{playbackMetrics.LastRefreshMilliseconds:0.000}/{playbackMetrics.MaxRefreshMilliseconds:0.000}ms");
+        var traversalMetrics = traversalGraph.Snapshot();
+        shell.WriteLine(
+            $"  traversal graph: nodes/locations={traversalMetrics.Nodes}/{traversalMetrics.Locations}, " +
+            $"revision={traversalMetrics.TopologyRevision}/{traversalMetrics.EnvironmentRevision}, " +
+            $"location hit-rate={traversalMetrics.LocationHitPercent:0.00}%, " +
+            $"connected q/visits/budget={traversalMetrics.ConnectedQueries}/" +
+            $"{traversalMetrics.ConnectedVisits}/{traversalMetrics.ConnectedBudgetExhaustions}");
+        shell.WriteLine(
+            $"  traversal edges: queries/valid/closed/unsupported/invalid=" +
+            $"{traversalMetrics.EdgeQueries}/{traversalMetrics.ValidEdges}/" +
+            $"{traversalMetrics.ClosedEdges}/{traversalMetrics.UnsupportedEdges}/" +
+            $"{traversalMetrics.InvalidEdges}, avg/last/max=" +
+            $"{traversalMetrics.AverageQueryMilliseconds:0.000}/" +
+            $"{traversalMetrics.LastQueryMilliseconds:0.000}/" +
+            $"{traversalMetrics.MaxQueryMilliseconds:0.000}ms");
         shell.WriteLine(
             $"  trace budgets: vertical-crossings={trace.MaxVerticalCrossings}, " +
             $"tile-visits={trace.MaxTileVisits}, entity-hits={trace.MaxEntityHits}");

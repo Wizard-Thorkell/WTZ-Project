@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using Content.Server.Popups;
+using Content.Server.ZLevel.Navigation;
 using Content.Shared.DoAfter;
 using Content.Shared.Interaction;
 using Content.Shared.Mobs.Components;
@@ -28,9 +29,11 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
+    [Dependency] private readonly ZLevelTraversalGraphSystem _graph = default!;
 
     private readonly Dictionary<EntityUid, PendingTraversal> _pendingTraversals = new();
     private readonly HashSet<(EntityUid User, EntityUid Traversal)> _suppressedAutoTraversals = new();
+    private readonly List<EntityUid> _traversalBuffer = new();
 
     public override void Initialize()
     {
@@ -249,8 +252,8 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
     private void SuppressDestinationAutoTraversal(EntityUid user)
     {
-        var query = EntityQueryEnumerator<ZLevelTraversalComponent>();
-        while (query.MoveNext(out var traversal, out _))
+        _graph.GetTraversalsAt(user, _traversalBuffer);
+        foreach (var traversal in _traversalBuffer)
         {
             if (CanUseTraversal(traversal, user))
                 _suppressedAutoTraversals.Add((user, traversal));
@@ -259,11 +262,15 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
     private bool TryGetTraversalAtUser(EntityUid user, out Entity<ZLevelTraversalComponent> traversal)
     {
-        var query = EntityQueryEnumerator<ZLevelTraversalComponent>();
-        while (query.MoveNext(out var uid, out var component))
+        _graph.GetTraversalsAt(user, _traversalBuffer);
+        foreach (var uid in _traversalBuffer)
         {
-            if (_suppressedAutoTraversals.Contains((user, uid)) || !CanUseTraversal(uid, user))
+            if (_suppressedAutoTraversals.Contains((user, uid)) ||
+                !TryComp<ZLevelTraversalComponent>(uid, out var component) ||
+                !CanUseTraversal(uid, user))
+            {
                 continue;
+            }
 
             traversal = (uid, component);
             return true;
@@ -279,7 +286,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         out Entity<ZLevelTraversalComponent> traversal)
     {
         traversal = default;
-        if (!TryComp<TransformComponent>(user, out var userXform) ||
+        if (!TryComp(user, out TransformComponent? userXform) ||
             userXform.GridUid == null ||
             !TryComp<MapGridComponent>(userXform.GridUid.Value, out var grid))
         {
@@ -296,72 +303,21 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         out Entity<ZLevelTraversalComponent> traversal)
     {
         traversal = default;
-        if (!TryComp<TransformComponent>(origin, out var originXform) ||
-            originXform.GridUid == null ||
-            !TryComp<MapGridComponent>(originXform.GridUid.Value, out var grid))
+        if (!_graph.TryGetConnectedTraversal(origin.Owner, targetTile, out var connected) ||
+            !TryComp<ZLevelTraversalComponent>(connected, out var component))
         {
             return false;
         }
 
-        var originZ = _transform.GetZLevel((origin.Owner, originXform, CompOrNull<ZLevelPositionComponent>(origin)));
-        var originTile = _map.TileIndicesFor(originXform.GridUid.Value, grid, originXform.Coordinates);
-        var traversalsByTile = new Dictionary<Vector2i, Entity<ZLevelTraversalComponent>>();
-        var query = EntityQueryEnumerator<ZLevelTraversalComponent, TransformComponent>();
-
-        while (query.MoveNext(out var uid, out var component, out var xform))
-        {
-            if (xform.MapID != originXform.MapID ||
-                xform.GridUid != originXform.GridUid ||
-                component.ZOffset != origin.Comp.ZOffset ||
-                component.RequireDirectDestinationSupport != origin.Comp.RequireDirectDestinationSupport ||
-                _transform.GetZLevel((uid, xform, CompOrNull<ZLevelPositionComponent>(uid))) != originZ)
-            {
-                continue;
-            }
-
-            var tile = _map.TileIndicesFor(originXform.GridUid.Value, grid, xform.Coordinates);
-            traversalsByTile.TryAdd(tile, (uid, component));
-        }
-
-        if (!traversalsByTile.ContainsKey(originTile))
-            return false;
-
-        var pending = new Queue<Vector2i>();
-        var visited = new HashSet<Vector2i> { originTile };
-        pending.Enqueue(originTile);
-
-        while (pending.TryDequeue(out var tile))
-        {
-            if (tile == targetTile)
-            {
-                traversal = traversalsByTile[tile];
-                return true;
-            }
-
-            TryQueueConnectedTile(tile + new Vector2i(1, 0), traversalsByTile, visited, pending);
-            TryQueueConnectedTile(tile + new Vector2i(-1, 0), traversalsByTile, visited, pending);
-            TryQueueConnectedTile(tile + new Vector2i(0, 1), traversalsByTile, visited, pending);
-            TryQueueConnectedTile(tile + new Vector2i(0, -1), traversalsByTile, visited, pending);
-        }
-
-        return false;
-    }
-
-    private static void TryQueueConnectedTile(
-        Vector2i tile,
-        Dictionary<Vector2i, Entity<ZLevelTraversalComponent>> traversalsByTile,
-        HashSet<Vector2i> visited,
-        Queue<Vector2i> pending)
-    {
-        if (traversalsByTile.ContainsKey(tile) && visited.Add(tile))
-            pending.Enqueue(tile);
+        traversal = (connected, component);
+        return true;
     }
 
     private bool TryGetTileChange(EntityUid user, MoveEvent args, out Vector2i oldTile, out Vector2i newTile)
     {
         oldTile = default;
         newTile = default;
-        if (!TryComp<TransformComponent>(user, out var userXform) ||
+        if (!TryComp(user, out TransformComponent? userXform) ||
             userXform.GridUid == null ||
             !TryComp<MapGridComponent>(userXform.GridUid.Value, out var grid) ||
             args.OldPosition.EntityId != userXform.GridUid ||
@@ -377,8 +333,8 @@ public sealed class ZLevelTraversalSystem : EntitySystem
 
     private bool CanUseTraversal(EntityUid traversal, EntityUid user)
     {
-        if (!TryComp<TransformComponent>(traversal, out var traversalXform) ||
-            !TryComp<TransformComponent>(user, out var userXform) ||
+        if (!TryComp(traversal, out TransformComponent? traversalXform) ||
+            !TryComp(user, out TransformComponent? userXform) ||
             traversalXform.MapID != userXform.MapID ||
             traversalXform.GridUid == null ||
             traversalXform.GridUid != userXform.GridUid ||

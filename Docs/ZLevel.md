@@ -933,12 +933,18 @@ Goal: make non-player actors understand floors and traversal.
 
 Tasks:
 
-- Represent ZLevel traversal edges in navigation data.
+- [Done] Represent authored ZLevel traversal edges in an indexed, directed
+  navigation contract with local/world frames, costs, revisions, metrics, and
+  bounded connected regions.
 - Teach pathfinding about stairs, ladders, shafts, and ramps.
 - Ensure AI cannot path through sealed ceilings.
-- Add costs for vertical traversal.
+- [Done at connector-contract level] Add costs for vertical traversal.
 - Add fallback behavior when no same-floor path exists.
 - Validate mobs following players between floors.
+
+Architecture and package boundaries are documented in
+`Docs/ZLevelPathfinding.md`. The existing local polygon graph still needs the
+P5.2 floor-specific refactor before AI routing may consume these edges safely.
 
 Exit criteria:
 

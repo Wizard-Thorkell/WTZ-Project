@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/sound-playback`.
-- Active package: `P5.1 hierarchical navigation contract and baseline inventory`.
+- Active branch: `zlevel/pathfinding`.
+- Active package: `P5.2 floor-specific local navigation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -45,7 +45,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
-| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1 next) |
+| P5 | Hierarchical pathfinding with vertical transition edges | In progress (P5.1 complete; P5.2 active) |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
@@ -59,6 +59,15 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4.3a | Positional audio post-processing hook | Complete |
 | P4.3b | Bounded server authorization and per-session snapshots | Complete |
 | P4.3c | Client presentation, diagnostics, and hardening | Complete |
+
+## Phase P5 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P5.1 | Navigation inventory and indexed authored traversal-edge contract | Complete |
+| P5.2 | Floor-specific local polygon navigation | Active |
+| P5.3 | Hierarchical route search and typed route composition | Pending |
+| P5.4 | AI traversal execution, dynamic elevators, and phase hardening | Pending |
 
 ## Phase P0 Packages
 
@@ -4348,6 +4357,111 @@ allocation is inside Robust physics enumeration.
 - Next package: P5.1 inventories Robust navigation ownership and defines the
   stable vertical transition graph contract before changing AI path selection.
 
+## Completed Package: P5.1 Authored Traversal Graph Contract
+
+### Scope
+
+- Inventory Robust Content's local path graph, path requests, HTN caller, and
+  steering ownership before changing navigation behavior.
+- Define an indexed directed connector graph keyed by grid, XY tile, and local
+  Z, with explicit world projection, connector kind, cost, delay, support
+  policy, and stale-route revisions.
+- Replace the player traversal system's global connector scans and per-move BFS
+  allocations with exact-floor indexed queries and bounded connected regions.
+- Expose graph metrics and document the P5.2 through P5.4 architecture without
+  enabling unsafe cross-floor AI routes over the existing mixed-floor graph.
+
+### Acceptance Criteria
+
+- Stair, ladder, shaft, and elevator semantics are representable without
+  pretending every connector is a bidirectional 2D polygon portal.
+- Directed edges fail closed for invalid offsets, closed traversal boundaries,
+  and missing destination support when direct support is required.
+- Connector identity and topology stay grid-local while source and destination
+  world Z follow `ZLevelFrameComponent` changes.
+- Exact-floor lookup and connected-region continuation are deterministic,
+  bounded, and allocation-free after warmup within the test allowance.
+- Existing delayed player stair traversal and Z 0 behavior do not regress.
+
+### Verification Evidence
+
+- Focused graph and step-trigger integration: 3/3 pass.
+- Complete movement integration: 16/16 pass.
+- Complete Content Z-level integration: 244/244 pass.
+- Content Z-level unit/analyzer: 9/9 pass.
+- Stress baselines: 3/3 pass for 3, 6, and 10 floors; each warmed workload
+  allocates 6,336 bytes, retains 100% boundary/gravity cache hit rates, and has
+  zero PVS budget exhaustion. Measured times are 7.9334 ms, 16.4693 ms, and
+  31.7033 ms respectively.
+- The warmed connected-region loop passes 256 repeated queries with no more
+  than 256 bytes of total thread allocation.
+- A clean `SpaceStation14.slnx` build succeeds with zero errors and 708
+  established warnings. The package introduces no analyzer warning.
+
+### Decisions
+
+- Keep local polygon navigation and vertical connector topology separate. The
+  former owns walkability inside one floor; the latter owns authored transitions.
+- Do not attach vertical edges to the existing `PathPortal` skeleton yet. Its
+  endpoints are 2D and the current breadcrumb builder combines Z 0 tiles with
+  fixtures from overlapping floors, which can manufacture false routes.
+- Store connector topology in local Z and derive world Z at edge resolution so
+  moving frame origins do not force a topology rebuild.
+- Model connectors as directed edges. Content that supports travel both ways
+  must author both directions explicitly or expose a future deliberate
+  bidirectional policy.
+- Use sorted compact location buckets instead of `SortedSet`; the latter's
+  enumerator allocates an internal stack on every compatibility lookup.
+- Treat direct runtime component-field mutation as an explicit refresh contract.
+  Hot reads do not rescan ECS state, and future dynamic-connector setters must
+  call `RefreshTraversal` internally.
+- Keep live graph buffers simulation-thread owned. Future parallel route jobs
+  will receive immutable snapshots rather than query mutable collections.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to traversal metadata/indexing, player
+      traversal query migration, metrics, focused tests, and P5 documentation.
+- [x] Invariant review: Z 0 compatibility, local/world frame conversion, moving
+      frame origins, exact-floor fixture ownership, server authority, directed
+      boundary channels, and destination support were reviewed.
+- [x] Automated verification: 3/3 focused, 16/16 movement, 244/244 Content
+      integration, 9/9 Content unit/analyzer, 3/3 baselines, and the clean full
+      solution build pass.
+- [x] Performance evidence: global scans and per-move graph construction are
+      removed; graph metrics expose hit, visit, budget, status, and timing data;
+      256 warmed connected queries meet the 256-byte total allowance.
+- [x] Documentation: ownership, coordinate rules, connector validity, mutation
+      and threading contracts, remaining packages, tests, and limitations are
+      recorded here and in `Docs/ZLevelPathfinding.md`.
+- [x] Dependency check: no WTZ Engine change is required; the engine remains at
+      `3aaca280f628876939afcc10a9be920b3898902a` with a clean tree.
+- [x] Git check: generated results remain ignored, the engine tree is clean, and
+      the final parent diff/status checks are performed immediately before commit.
+- [x] Mini review: no blocking correctness or performance finding remains; the
+      current mixed-floor local polygon graph is explicitly isolated from the
+      new connector graph until P5.2.
+- [x] Commit: the isolated `Index authored Z-level traversal edges` parent
+      commit is prepared for the pushed `zlevel/pathfinding` branch.
+
+### Mini Review
+
+- Finding: P5.1 establishes a bounded, observable, frame-correct vertical
+  topology contract without exposing NPCs to the known mixed-floor navmesh.
+- Finding: normal stair gameplay now reads the same connector index that future
+  hierarchical planning will consume, while retaining the existing two-second
+  DoAfter and adjacent-equivalent-stair behavior.
+- Finding: exact location lookup is deterministic and connected lookup no longer
+  scans all traversal entities or allocates an enumerator stack per request.
+- Residual risk: runtime code can mutate public component fields without calling
+  `RefreshTraversal`; P5.4 dynamic connector APIs must encapsulate this contract.
+- Residual risk: graph methods reuse main-thread buffers and are intentionally
+  not a worker-thread API; P5.3 must publish immutable route-search snapshots.
+- Residual risk: direct-support-disabled edges carry policy but defer actor-
+  specific landing validation to hierarchical planning and execution.
+- Next package: P5.2 separates `PathPoly`, chunks, tile reads, fixture filters,
+  endpoint lookup, and dirtying by floor before any vertical route composition.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -4389,3 +4503,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P4.3a | `Expose positional audio post-processing` / `Track positional audio post-processing support` | 1 focused engine, 138 engine client integration, 37 engine client unit, client build, diff review | Complete |
 | 2026-08-29 | P4.3b | `Centralize audio recipient filtering` / `Authorize routed vertical sound per session` | 3 playback, 11 sound, 240 Content integration, 5 Content unit/analyzer, 447/1,026 engine shared, 3 baseline, clean build, allocation/diff review | Complete |
 | 2026-08-29 | P4.3c | `Allow content audio source positioning` / `Present routed vertical sound on clients` | 4 unit, 5 playback, 13 sound, 242 Content integration, 9 Content unit/analyzer, 37/138 engine client, 447/1,026 engine shared, 3 baseline, clean builds, diff review | Complete |
+| 2026-08-29 | P5.1 | `Index authored Z-level traversal edges` | 3 focused, 16 movement, 244 Content integration, 9 Content unit/analyzer, 3 baseline, clean build, allocation/diff review | Complete |
