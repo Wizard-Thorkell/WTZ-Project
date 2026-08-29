@@ -102,6 +102,36 @@
   itemDrop: PartRodMetal1
   heatCapacity: 10000
   mass: 200
+  zLevelOpenChannels:
+  - Atmosphere
+  - Visibility
+  - Weather
+  - Sound
+  - Effects
+  - Projectile
+  - Explosion
+
+- type: tile
+  id: ZLevelGrate
+  parent: BasePlating
+  name: tiles-z-level-grate
+  sprite: /Textures/Tiles/lattice.png
+  baseTurf: Plating
+  deconstructTools: [ Prying ]
+  weather: true
+  footstepSounds:
+    collection: FootstepCatwalk
+  itemDrop: FloorTileItemZLevelGrate
+  heatCapacity: 10000
+  mass: 200
+  zLevelOpenChannels:
+  - Atmosphere
+  - Visibility
+  - Weather
+  - Sound
+  - Effects
+  - Projectile
+  - Explosion
 
 - type: tile
   id: TrainLattice

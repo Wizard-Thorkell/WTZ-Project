@@ -13,14 +13,83 @@ Consumers must not infer weather access from `Atmosphere` or `Visibility`:
 
 - A solid tile on the floor above closes the boundary by the existing default
   tile-above rule.
+- A non-empty tile may open a channel subset through the boundary directly
+  below it with `ContentTileDefinition.zLevelOpenChannels`. The default is no
+  open channels, so existing solid floors retain their behavior.
 - `ZLevelFloorOpeningMarker` and `ZLevelGrateBoundaryMarker` explicitly open
   `Weather` across their authored boundary.
 - Forced-closed providers retain precedence over forced-open providers.
 - A roof on the highest floor closes the boundary from that floor to the
   otherwise empty space above the configured map range.
 
-The marker prototypes are mapping/debug providers. P7.1b owns production roof,
-grate, catwalk, and shaft prototypes and their construction lifecycle.
+Tile-authored channels establish the baseline. Anchored `ZLevelBoundary`
+providers then add forced-open channels and forced-closed channels last, so a
+close always wins. `ExplicitOnly` maps continue to open every baseline channel
+and require explicit closing providers for physical floor support.
+
+## Authored Vertical Content
+
+| Content | Open channels through floor below | Body support | Planar atmosphere | Authoring |
+| --- | --- | --- | --- | --- |
+| Ordinary solid tile | None | Yes | Tile-defined | Existing floor construction |
+| `Lattice` / `TrainLattice` | Atmosphere, Visibility, Weather, Sound, Effects, Projectile, Explosion | Yes | Map atmosphere | Metal rods; existing catwalk recipe/RCD |
+| `ZLevelGrate` | Same selective set as lattice | Yes | Interior mutable air | Fabricated `FloorTileItemZLevelGrate` stack |
+| `FloorZLevelShaft` | All | No | Interior mutable air | Fabricated `FloorTileItemZLevelShaft` stack |
+| `Catwalk` on a shaft | Shaft channels, with Body forced closed | Yes | Inherited from shaft | Existing rods recipe/RCD; cutters remove it |
+| `ZLevelRoofMarker` | All channels forced closed above | N/A | N/A | Durable, mapper-visible top-floor cap |
+
+The grate deliberately differs from lattice. Lattice remains directly exposed
+to the map atmosphere as upstream content expects; `ZLevelGrate` owns a normal
+mutable gas tile and connects rooms vertically only through the Atmosphere
+boundary channel.
+
+The shaft remains a non-empty visual tile but declares no physical support.
+Adding an anchored catwalk closes only `Body` across its boundary, making a
+removable bridge while sight, gas, sound, weather, effects, projectiles, and
+explosions continue through it. Removing the catwalk exposes the shaft again.
+
+`FloorElevatorShaft` is intentionally unchanged. Existing maps may use that
+legacy decorative tile as ordinary flooring; silently converting it into an
+opening would break Z 0 compatibility. New layered maps must use
+`FloorZLevelShaft` when they require real vertical passage.
+
+## Roof Semantics
+
+An ordinary solid tile on floor `z + 1` is the production roof/ceiling over
+floor `z`. It uses normal lattice, plating, and floor construction and therefore
+inherits established deconstruction and persistence behavior.
+
+The highest declared floor has no authorable tile above its top boundary.
+`ZLevelRoofMarker` is the durable mapping representation for that special cap;
+it closes every channel above the marker's floor and is hidden during normal
+play like other mapper markers. A player-facing top-cap construction item and
+roof presentation remain separate product work rather than an invisible item
+being introduced here.
+
+## Construction And Mapping
+
+- The mapping tile palette exposes `ZLevelGrate` and `FloorZLevelShaft`; the
+  entity palette exposes `ZLevelRoofMarker` and the existing `Catwalk`.
+- Industrial lathes can fabricate the grate and shaft tile stacks. Each item
+  first creates plating when needed and then replaces plating with its vertical
+  surface on the user's current world Z.
+- The manual catwalk recipe accepts lattice, plating, grate, and shaft. Its
+  sturdy-tile condition is relaxed only within that explicit tile allow-list.
+- Crowbar/cutter and RCD deconstruction retain the existing tile/entity paths,
+  including same-floor item drops.
+- Tile types, anchored catwalks, roof markers, provider Z positions, and channel
+  behavior survive two consecutive map save/load round trips.
+
+## Navigation Support
+
+Local navigation now distinguishes a visually non-empty shaft from a supporting
+floor. Before breadcrumb chunks build in parallel, the simulation thread fills
+a fixed per-chunk support mask from tile-authored Body policy and any indexed
+boundary provider. Catwalk placement/removal, provider Z movement, tile edits,
+and map boundary-mode changes dirty the affected floor navigation.
+
+The support array is allocated once per cached navigation chunk. Rebuilds reuse
+it, and provider-free tiles do not perform ECS boundary queries.
 
 ## Query API
 
@@ -95,23 +164,28 @@ after warm-up when it fits the configured cache.
 
 ## Current Consumer Boundary
 
-P7.1a does not change production weather rendering or gameplay. Robust's legacy
+P7.1b does not yet change production weather rendering or gameplay. Robust's legacy
 `RoofComponent`, `IsRoofComponent`, and planar weather query remain unchanged.
 They are not silently treated as Z-aware surfaces.
 
-P7.1b will add authored vertical surface content and its mapping/construction
-behavior. P7.3 will migrate weather presentation/gameplay to this query and
-define exposure policy for entities, effects, and moving grids. Atmosphere,
-visibility, sound, projectiles, interaction, and traversal continue to use their
-own boundary channels and specialized systems.
+The new content is already consumed by atmosphere, visibility, sound,
+projectiles, explosions, effects, falling, support, and navigation through their
+existing specialized boundary channels. P7.3 will migrate weather presentation
+and gameplay to the sky query and define exposure policy for entities, effects,
+and moving grids. Interaction and authored traversal remain closed on grates;
+shafts open them only when their content explicitly requests all channels.
 
 ## Verification
 
-- Focused sky, budget, and metrics matrix: 15/15 passed.
-- Complete Content Z-level matrix: all 285 cases have passing evidence; one
-  pooled aperture-cache skip passed 1/1 in isolation.
+- P7.1b content/construction cases: 6/6 passed, including real floor-item use on
+  Z 1, channel policy, catwalk support lifecycle, navigation invalidation, and
+  double save/load round trips.
+- Complete pathfinding plus vertical-content matrix: 27/27 passed. Atmosphere,
+  sky, mapping, and movement consumers passed 38/38.
+- Complete Content Z-level/placement matrix: 290 passed with one pooled skip;
+  the skipped concurrent-NPC case passed 1/1 in isolation. All 291 cases have
+  passing evidence.
 - Content Z-level unit/analyzer matrix: 9/9 passed.
-- Stress baseline: 3/3 passed with 6,336 measured bytes, 100% warm sky hits, and
-  zero measured sky misses, evictions, or budget exhaustions at every depth.
-- Hot repeated-query coverage permits at most 512 bytes across 1,000 lookups and
-  confirms no per-query allocation.
+- Stress baseline: 3/3 passed at 10.5917, 15.9291, and 22.8443 ms for 3, 6, and
+  10 floors, with 6,336 measured bytes, 100% warm boundary/sky hits, and zero
+  measured boundary or sky evictions at every depth.

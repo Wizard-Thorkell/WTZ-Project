@@ -41,7 +41,7 @@
   id: ZLevelGrateBoundaryMarker
   parent: MarkerBase
   name: Z-level grate boundary
-  description: Allows atmosphere, visibility, weather, sound, and effects while blocking free vertical movement.
+  description: Allows atmosphere, visibility, weather, sound, effects, projectiles, and explosions while blocking free vertical movement.
   components:
   - type: Sprite
     layers:
@@ -55,6 +55,8 @@
     - Weather
     - Sound
     - Effects
+    - Projectile
+    - Explosion
     closes:
     - Body
 
@@ -71,3 +73,9 @@
   - type: ZLevelBoundary
     boundaryOffset: 1
     closes: All
+
+- type: entity
+  id: ZLevelRoofMarker
+  parent: ZLevelSealedBoundaryMarker
+  name: Z-level roof
+  description: A durable mapping roof that seals the boundary above the highest authored floor.

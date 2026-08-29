@@ -19,6 +19,10 @@
     state: catwalk_preview
   - type: Transform
     anchored: true
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    closes:
+    - Body
   - type: IconSmooth
     key: catwalk
     base: catwalk_

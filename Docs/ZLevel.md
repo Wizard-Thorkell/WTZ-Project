@@ -543,7 +543,9 @@ Major unfinished areas:
   with vertical attenuation, frame budgets, fail-soft degradation, lower-floor
   source shadows, and real visual capture coverage. See
   `Docs/ZLevelLighting.md`.
-- Pathfinding and AI do not understand multi-floor navigation.
+- Pathfinding and AI use floor-specific local navmeshes plus a hierarchical
+  graph of authored stairs, ladders, and dynamic traversal. Floor support now
+  also follows tile-authored shafts and catwalk boundary providers.
 - Positional sound now routes through bounded same-grid vertical portals with
   pressure-aware server authorization, exact-viewer PVS, apparent portal
   direction, route attenuation, and client fail-closed safety. Cross-grid and
@@ -563,9 +565,9 @@ Major unfinished areas:
   that grid's local frame correctly, but physically overlapping grids at the
   same XY need an explicit world-Z-aware grid-selection contract.
 - Wall/cutaway rendering is prototype quality.
-- Special vertical structures are missing: holes, shafts, open floor tiles,
-  catwalks, grates, ramps, elevators, and climbable structures beyond simple
-  stairs/ladders.
+- Production lattice, interior grates, shafts, catwalk bridges, ordinary
+  inter-floor roofs, and mapper-authored top caps are available. Ramps,
+  elevators, player-built top caps, and flight content remain pending.
 - Many anchored entities and construction systems still assume one tile stack.
 - FTL docking aligns grid frames, but arbitrary transit-map entry, planet
   landing, frame-authoring UI, and conflict policy for already-docked grid
@@ -759,11 +761,10 @@ vertical boundary semantics.
 Tasks:
 
 - [Done] Define a shared vertical boundary API.
-- [Partial] Add components/prototypes for open floor, hole, shaft, grate, catwalk, ladder
-  shaft, stairwell, and ramp concepts.
-- [Partial] Decide which concepts are tile definitions and which are anchored
-  entities. Explicit providers are anchored entities; final gameplay structures
-  and tile-definition integration remain to be selected per concept.
+- [Done except ramps] Add components/prototypes for open floors, shafts, grates,
+  catwalks, ladders, and stairwells. Ramps remain future content.
+- [Done for current content] Solid/partial/open surfaces are tile definitions;
+  catwalks and exceptional boundary overrides are anchored providers.
 - [Done] Add a way for traversal content to open or override the boundary between two
   adjacent floors.
 - [Done] Add support for one-way or restricted traversal through separate
@@ -771,9 +772,9 @@ Tasks:
 - [Done] Make atmos, visibility, falling, and traversal all use the same boundary
   decision.
 - [Done] Add mapper-visible markers for openings.
-- [Partial] Add tests for each opening type. Channel conflicts, free-fall holes,
-  stairs, and atmosphere lifecycle are covered; final ramp/catwalk gameplay
-  entities still need dedicated tests.
+- [Covered except ramps] Channel conflicts, free-fall holes, shafts, grates,
+  catwalk support, stairs, atmosphere, construction, navigation, and persistence
+  have dedicated coverage.
 
 Design notes:
 
@@ -786,8 +787,9 @@ Exit criteria:
 
 - [Covered] Players can fall through a mapped hole.
 - [Covered] Atmos can leak through an explicit opening.
-- [Covered at boundary level] A grate/catwalk can allow visibility or gas based on chosen design rules while
-  still supporting movement.
+- [Covered] A grate/catwalk allows selected channels while supporting movement;
+  a catwalk over a shaft restores Body support without sealing the other
+  channels.
 - [Covered] Stairs/ladders no longer need special hacks for the basic boundary rule.
 
 ### Phase 3: Interaction And Targeting Polish
@@ -813,7 +815,8 @@ Tasks:
   stealing normal same-floor clicks.
 - [Done] Ensure verbs only appear for valid floor contexts and revalidate their
   physical authority at execution.
-- Ensure construction/deconstruction interactions target active floor surfaces.
+- [Done] Ensure construction/deconstruction interactions target active floor
+  surfaces, including grate and shaft stacks on non-zero floors.
 - [Done] Add tests for same-XY entities on different floors.
 
 Exit criteria:
@@ -944,15 +947,17 @@ Tasks:
 - [Done] Represent authored ZLevel traversal edges in an indexed, directed
   navigation contract with local/world frames, costs, revisions, metrics, and
   bounded connected regions.
-- Teach pathfinding about stairs, ladders, shafts, and ramps.
-- Ensure AI cannot path through sealed ceilings.
+- [Done except ramps] Teach pathfinding about stairs, ladders, shafts, catwalk
+  bridges, and elevators' future traversal contract. Ramps remain pending.
+- [Done] Ensure AI cannot path through sealed ceilings or unsupported shafts.
 - [Done at connector-contract level] Add costs for vertical traversal.
-- Add fallback behavior when no same-floor path exists.
-- Validate mobs following players between floors.
+- [Done] Add hierarchical fallback behavior when no same-floor path exists.
+- [Done] Validate follow/hostile mobs and concurrent NPCs between floors.
 
 Architecture and package boundaries are documented in
-`Docs/ZLevelPathfinding.md`. The existing local polygon graph still needs the
-P5.2 floor-specific refactor before AI routing may consume these edges safely.
+`Docs/ZLevelPathfinding.md`. Local polygon graphs are floor-specific, route
+search is hierarchical and budgeted, and vertical-content changes invalidate
+only their affected floor chunks.
 
 Exit criteria:
 

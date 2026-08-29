@@ -688,6 +688,19 @@
   itemDrop: FloorTileItemElevatorShaft
 
 - type: tile
+  id: FloorZLevelShaft
+  parent: BaseStationTile
+  name: tiles-z-level-shaft
+  sprite: /Textures/Tiles/elevator_shaft.png
+  isSubfloor: true
+  sturdy: false
+  weather: true
+  footstepSounds:
+    collection: FootstepHull
+  itemDrop: FloorTileItemZLevelShaft
+  zLevelOpenChannels: All
+
+- type: tile
   id: FloorMetalDiamond
   parent: BaseStationTile
   name: tiles-diamond-plate-floor

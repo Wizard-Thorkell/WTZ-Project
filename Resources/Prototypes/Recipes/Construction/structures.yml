@@ -659,10 +659,13 @@
   conditions:
     - !type:TileNotBlocked
       failIfSpace: false
+      failIfNotSturdy: false
     - !type:TileType
       targets:
         - Lattice
         - Plating
+        - ZLevelGrate
+        - FloorZLevelShaft
   objectType: Structure
   placementMode: SnapgridCenter
   canBuildInImpassable: false

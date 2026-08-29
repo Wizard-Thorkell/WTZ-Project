@@ -31,12 +31,14 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Prototypes;
 using Robust.UnitTesting.Pool;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
 public sealed class ZLevelPathfindingTest : GameTest
 {
+    private static readonly ProtoId<ContentTileDefinition> ShaftTile = "FloorZLevelShaft";
     private const int AllocationWarmupIterations = 64;
     private const int AllocationMeasuredIterations = 4_096;
     private const long MaxWarmedBreadcrumbBuildAllocatedBytes = 58_000;
@@ -168,6 +170,82 @@ public sealed class ZLevelPathfindingTest : GameTest
                     .DifferentFloorRouteRejections,
                 Is.EqualTo(1));
         });
+    }
+
+    [Test]
+    public async Task ShaftAndCatwalkUpdateFloorSupport()
+    {
+        var testMap = await Pair.CreateTestMap();
+        var tileDefinitions = Server.ResolveDependency<IPrototypeManager>();
+        var shaft = tileDefinitions.Index(ShaftTile);
+        EntityUid catwalk = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            map.SetZLevelTile(
+                testMap.Grid,
+                grid,
+                new ZLevelTileIndices(1, 0, 1),
+                new Tile(shaft.TileId));
+        });
+        await Pair.RunTicksSync(40);
+
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.NoPath),
+            "A non-empty shaft tile must not be treated as walkable floor.");
+
+        await Server.WaitAssertion(() =>
+        {
+            catwalk = SEntMan.SpawnEntity("Catwalk", Coordinates(testMap, 1.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(catwalk, 1), Is.True);
+        });
+        await Pair.RunTicksSync(40);
+
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.Path),
+            "An anchored catwalk must close Body and restore support over the shaft.");
+
+        await Server.WaitAssertion(() => SEntMan.DeleteEntity(catwalk));
+        await Pair.RunTicksSync(40);
+
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.NoPath),
+            "Removing the catwalk must invalidate navigation and reopen the shaft.");
+    }
+
+    [Test]
+    public async Task BoundaryModeChangesRebuildExistingFloorSupport()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() => ConfigureCorridors(testMap));
+        await Pair.RunTicksSync(40);
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.Path));
+
+        await Server.WaitAssertion(() =>
+        {
+            SEntMan.System<SharedZLevelMapSystem>().Configure(
+                testMap.MapUid,
+                0,
+                1,
+                0,
+                ZLevelDefaultBoundaryMode.ExplicitOnly);
+        });
+        await Pair.RunTicksSync(40);
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.NoPath),
+            "Explicit-only floors require an authored Body-closing provider.");
+
+        await Server.WaitAssertion(() =>
+        {
+            SEntMan.System<SharedZLevelMapSystem>().Configure(
+                testMap.MapUid,
+                0,
+                1,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+        });
+        await Pair.RunTicksSync(40);
+        Assert.That(await RequestPath(testMap, 1, 1), Is.EqualTo(PathResult.Path));
     }
 
     [Test]

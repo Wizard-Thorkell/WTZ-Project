@@ -17,6 +17,65 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 [TestFixture]
 public sealed class ZLevelTileInteractionTest : InteractionTest
 {
+    [TestCase("FloorTileItemZLevelGrate", "ZLevelGrate")]
+    [TestCase("FloorTileItemZLevelShaft", "FloorZLevelShaft")]
+    public async Task VerticalSurfaceFloorItemsPlaceOnTheUsersZLevel(
+        string itemPrototype,
+        string expectedTile)
+    {
+        var targetCoordinates = SEntMan.GetCoordinates(TargetCoords);
+        Vector2i targetIndices = default;
+        Tile lowerTile = default;
+
+        await Server.WaitPost(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerIndices = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetComponent<TransformComponent>(SPlayer).Coordinates);
+            targetIndices = map.TileIndicesFor(MapData.Grid, grid, targetCoordinates);
+            var plating = (ContentTileDefinition) TileMan[Plating];
+            var steel = (ContentTileDefinition) TileMan[Floor];
+            lowerTile = new Tile(steel.TileId);
+
+            map.SetTile(MapData.Grid, grid, targetIndices, lowerTile);
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(playerIndices.X, playerIndices.Y, 1),
+                new Tile(plating.TileId));
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(targetIndices.X, targetIndices.Y, 1),
+                new Tile(plating.TileId));
+            Assert.That(zLevel.SetZLevelPosition(SPlayer, 1), Is.True);
+        });
+        await RunTicks(3);
+
+        await PlaceInHands(itemPrototype);
+        await Interact(null, TargetCoords);
+
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var upper = map.GetZLevelTileRef(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(targetIndices.X, targetIndices.Y, 1));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(map.GetTileRef(MapData.Grid, grid, targetIndices).Tile, Is.EqualTo(lowerTile));
+                Assert.That(((ContentTileDefinition) TileMan[upper.Tile.TypeId]).ID, Is.EqualTo(expectedTile));
+            });
+        });
+    }
+
     [Test]
     public async Task SupportedChemicalTileReactionsUseTheExplicitZLevel()
     {

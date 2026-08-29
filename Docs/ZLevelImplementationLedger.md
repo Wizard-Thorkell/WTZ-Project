@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.1b roofs, grates, catwalks, and shafts`.
+- Active package: `P7.2a elevator cabins, stops, controls, power, and traversal lifecycle`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.1b active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.2a active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -90,8 +90,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P7.1a | Shared vertical-surface/sky-column contract, bounded cache, and metrics | Complete |
-| P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Active |
-| P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Pending |
+| P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Complete |
+| P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Active |
 | P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Pending |
 | P7.3 | Z-aware sky exposure and weather presentation/gameplay | Pending |
 | P7.4a | Flight movement, gravity, and collision contract | Pending |
@@ -6198,10 +6198,125 @@ allocation is inside Robust physics enumeration.
   construction/destruction, mapping prototypes, save/load coverage, and a demo
   topology built on the Weather and existing boundary channels.
 
+## Completed Package: P7.1b Authored Vertical Surfaces
+
+### Scope
+
+- Let non-empty tile definitions open a channel subset through the vertical
+  boundary directly below them without weakening the default solid-floor rule.
+- Add production lattice, interior grate, shaft, catwalk-bridge, and top-roof
+  semantics using existing specialized boundary consumers.
+- Wire grate and shaft stacks into floor interaction, fabrication, mapping,
+  construction, deconstruction, and double save/load round trips.
+- Make local navigation distinguish visual shaft tiles from supporting floors
+  and react to catwalk/provider, tile, Z-position, and boundary-mode changes.
+- Preserve legacy `FloorElevatorShaft`, unconfigured Z 0 maps, and Robust's
+  planar roof/weather behavior.
+
+### Acceptance Criteria
+
+- Existing non-empty tiles open no vertical channels unless their definition
+  opts in; empty tiles and `ExplicitOnly` policy retain their prior defaults.
+- Grates/lattice support bodies while admitting the selected atmosphere,
+  visibility, weather, sound, effects, projectile, and explosion channels.
+- A shaft is visibly non-empty but admits every boundary channel and provides no
+  support; a catwalk over it restores only Body support and is removable.
+- AI treats an uncovered shaft as space, a catwalk-covered shaft as floor, and
+  rebuilds after content or map-policy changes without querying ECS in parallel.
+- Grate and shaft floor items modify only the user's world Z, and every authored
+  tile/entity/provider remains equivalent after two save/load cycles.
+- A normal solid floor above acts as a constructible roof; a durable hidden
+  mapper marker can seal the otherwise unrepresentable top boundary.
+
+### Verification Evidence
+
+- The six package-specific content and construction cases pass 6/6. They cover
+  channel subsets, forced-close support, provider Z relocation, actor support,
+  real grate/shaft item placement on Z 1, unchanged Z 0 tiles, navigation
+  invalidation, and double map round trips.
+- The complete pathfinding plus vertical-content matrix passes 27/27. The
+  atmosphere, sky, mapping-format, and movement consumer matrix passes 38/38.
+- The broad Content Z-level/placement filter passes 290 cases with one pooled
+  concurrent-NPC skip; that exact case passes 1/1 in isolation. All 291 cases
+  therefore have passing evidence and none failed.
+- Content's Z-level unit/analyzer filter passes 9/9. A targeted warning rebuild
+  reports no analyzer warning in the new or modified package files.
+- A non-incremental full solution build completes in 1m32s with zero errors and
+  the established 706 package, dependency, obsolescence, and analyzer warnings;
+  no package warning remains in the diff.
+- The schema-version 4 baseline passes 3/3. Measured 3/6/10-floor times are
+  10.5917, 15.9291, and 22.8443 ms with 6,336 bytes at every depth, 100% warm
+  boundary/sky hits, and zero measured boundary or sky evictions.
+
+### Decisions
+
+- `ContentTileDefinition.zLevelOpenChannels` describes the boundary immediately
+  below that non-empty tile. Tile policy is the baseline; forced opens apply
+  next and forced closes retain final precedence.
+- `Lattice` remains map-atmosphere content for upstream compatibility.
+  `ZLevelGrate` is separate so an interior grate owns mutable air and connects
+  rooms vertically without venting directly to the map atmosphere.
+- `FloorZLevelShaft` is separate from legacy `FloorElevatorShaft`. Existing maps
+  may use the old tile decoratively, so changing its support semantics would be
+  an unacceptable Z 0 regression.
+- Catwalk is an anchored Body-closing provider. This works over lattice/plating
+  unchanged and turns a shaft into a real removable bridge without blocking
+  light, gas, sound, weather, effects, shots, or explosions.
+- Pathfinding owns a fixed 256-entry support mask per cached chunk. The main
+  thread prepares exact tile/provider support, then the existing breadcrumb
+  geometry remains parallel. Provider-free tiles avoid ECS boundary queries.
+- Ordinary upper floors are production roofs. `ZLevelRoofMarker` exists only
+  for the highest boundary, where no upper-floor tile can be authored inside
+  the declared map range. A player-facing top-cap item is intentionally deferred.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to tile/boundary semantics, vertical
+      content and recipes, navigation support, focused tests, and documentation.
+- [x] Invariant review: Z 0, legacy elevator tiles, local/world Z construction,
+      moving-frame reuse, shared boundary precedence, server-authoritative
+      placement, and parallel-nav safety were explicitly reviewed.
+- [x] Automated verification: 6/6 package cases, 27/27 path/content, 38/38
+      consumers, passing evidence for all 291 broad cases, 9/9 unit/analyzer,
+      3/3 baseline, and a zero-error full build complete.
+- [x] Performance evidence: support storage is fixed per cached nav chunk and
+      reused; 3/6/10-floor captures retain 6,336 measured bytes, hot caches, no
+      measured eviction, and healthy local timings.
+- [x] Documentation: channel tables, construction/mapping workflow, roof model,
+      legacy split, persistence, navigation behavior, and limitations are
+      recorded here and in `Docs/ZLevelVerticalContent.md`.
+- [x] Dependency check: P7.1b requires no WTZ Engine change; the clean engine
+      remains pinned to published revision `7cbd778024`.
+- [x] Git check: generated round-trip/baseline artifacts remain ignored;
+      whitespace checks pass with only repository checkout line-ending notices.
+- [x] Mini review: explicit-only invalidation and literal-ID analyzer warnings
+      were found during the gate and corrected; no open correctness finding
+      remains in the declared package.
+- [x] Commit: prepared as isolated `Add authored Z-level vertical surfaces`
+      commit on `zlevel/vertical-content`; remote verification follows it.
+
+### Mini Review
+
+- Finding: the tile baseline removes the need for persistent invisible opening
+  entities while preserving providers for dynamic structures such as catwalks.
+- Finding: interior grate and lattice now have intentionally distinct
+  atmosphere ownership despite sharing visual/channel behavior.
+- Finding: navigation derives support from the same Body contract used by
+  falling, so non-empty shaft art can no longer masquerade as walkable floor.
+- Residual risk: `ZLevelRoofMarker` is mapper-only and P7.3 has not yet migrated
+  weather rendering/gameplay from Robust's planar roof query.
+- Residual risk: the fixed support array adds a small amount of memory per
+  cached nav chunk; large public-server profiles remain part of P8.
+- Residual risk: ramps, elevators, and flight each need their own movement and
+  lifecycle contracts rather than being represented as special shaft cases.
+- Next package: P7.2a implements powered elevator cabins, mapped stops,
+  controls, deterministic travel, and dynamic traversal lifecycle.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P7.1b | `Add authored Z-level vertical surfaces` | 6 focused, 27 path/content, 38 consumers, 291 cases covered, 9 unit, 3 baseline, full build, analyzer/diff review | Complete |
 | 2026-08-29 | P7.1a | `Add bounded Z-level sky exposure` | 15 focused, 285 cases covered, 9 unit, 3 baseline, full build, allocation/LRU/diff review | Complete |
 | 2026-08-29 | P6 gate | `Close Z-level persistence phase` | 1 engine filter, 5 engine atomic, 11 persistence, 17 unit, 3 baseline, architecture/diff review | Complete |
 | 2026-08-29 | P6.3b2 | `Autosave initialized mapping snapshots` | 1 autosave, 4 persistence, 11 mapping, 4 writer, 17 unit, 279 cases covered, 3 baseline, full build, diff review | Complete |

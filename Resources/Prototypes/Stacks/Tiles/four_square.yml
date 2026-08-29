@@ -89,6 +89,18 @@
 
 - type: stack
   parent: BaseTileStack
+  id: FloorTileZLevelGrate
+  name: stack-z-level-grate-tile
+  spawn: FloorTileItemZLevelGrate
+
+- type: stack
+  parent: BaseTileStack
+  id: FloorTileZLevelShaft
+  name: stack-z-level-shaft-tile
+  spawn: FloorTileItemZLevelShaft
+
+- type: stack
+  parent: BaseTileStack
   id: FloorTileRockVault
   name: stack-rock-vault-tile
   spawn: FloorTileItemRockVault

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Content.Shared.NPC;
 using Content.Shared.Physics;
+using Content.Shared.ZLevel;
 using Robust.Shared.Collections;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -46,6 +47,8 @@ public sealed partial class PathfindingSystem
         SubscribeLocalEvent<PhysicsBodyTypeChangedEvent>(OnBodyTypeChange);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChange);
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChange);
+        SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnZLevelBoundaryChanged);
+        SubscribeLocalEvent<ZLevelMapConfigurationChangedEvent>(OnZLevelMapConfigurationChanged);
         SubscribeLocalEvent<FixturesComponent, ZLevelPositionChangedEvent>(OnFixtureZLevelChange);
         SubscribeLocalEvent<ZLevelFrameChangedEvent>(OnZLevelFrameChanged);
         _transform.OnGlobalMoveEvent += OnMoveEvent;
@@ -55,7 +58,9 @@ public sealed partial class PathfindingSystem
     {
         foreach (var change in ev.Changes)
         {
-            if (change.OldTile.IsEmpty == change.NewTile.IsEmpty)
+            if (change.OldTile.IsEmpty == change.NewTile.IsEmpty &&
+                HasDefaultFloorSupport(ev.Entity.Owner, change.OldTile) ==
+                HasDefaultFloorSupport(ev.Entity.Owner, change.NewTile))
                 continue;
 
             DirtyChunk(ev.Entity, _maps.GridTileToLocal(ev.Entity, ev.Entity.Comp, change.GridIndices), 0);
@@ -66,7 +71,9 @@ public sealed partial class PathfindingSystem
     {
         foreach (var change in ev.Changes)
         {
-            if (change.OldTile.IsEmpty == change.NewTile.IsEmpty)
+            if (change.OldTile.IsEmpty == change.NewTile.IsEmpty &&
+                HasDefaultFloorSupport(ev.Entity.Owner, change.OldTile) ==
+                HasDefaultFloorSupport(ev.Entity.Owner, change.NewTile))
                 continue;
 
             DirtyChunk(
@@ -77,6 +84,38 @@ public sealed partial class PathfindingSystem
                     new Vector2i(change.GridIndices.X, change.GridIndices.Y)),
                 change.GridIndices.Z);
         }
+    }
+
+    private void OnZLevelBoundaryChanged(ref ZLevelBoundaryChangedEvent ev)
+    {
+        DirtyChunk(
+            ev.Grid.Owner,
+            _maps.GridTileToLocal(ev.Grid.Owner, ev.Grid.Comp, ev.Tile),
+            ev.LowerZ + 1);
+    }
+
+    private void OnZLevelMapConfigurationChanged(ref ZLevelMapConfigurationChangedEvent ev)
+    {
+        var query = EntityQueryEnumerator<GridPathfindingComponent, MapGridComponent, TransformComponent>();
+        while (query.MoveNext(out var uid, out var pathfinding, out var grid, out var transform))
+        {
+            if (transform.MapUid != ev.MapUid)
+                continue;
+
+            foreach (var key in pathfinding.Chunks.Keys)
+            {
+                DirtyChunk(
+                    uid,
+                    _maps.GridTileToLocal(uid, grid, key.Origin * ChunkSize),
+                    key.LocalZ);
+            }
+        }
+    }
+
+    private bool HasDefaultFloorSupport(EntityUid gridUid, Tile tile)
+    {
+        return !tile.IsEmpty &&
+               (_zLevelBoundaries.GetDefaultOpenChannels(gridUid, tile) & ZLevelBoundaryChannels.Body) == 0;
     }
 
 
@@ -134,6 +173,11 @@ public sealed partial class PathfindingSystem
                 var chunk = GetChunk(key, uid, pathfinding);
                 dirt[idx] = chunk;
                 idx++;
+            }
+
+            foreach (var chunk in dirt)
+            {
+                PrepareFloorSupport(chunk, (uid, mapGridComp));
             }
 
             // We force clear portals in a single-threaded context to be safe
@@ -500,6 +544,35 @@ public sealed partial class PathfindingSystem
         return new Vector2i((int) Math.Floor(localPos.X / ChunkSize), (int) Math.Floor(localPos.Y / ChunkSize));
     }
 
+    private void PrepareFloorSupport(GridPathfindingChunk chunk, Entity<MapGridComponent> grid)
+    {
+        var gridOrigin = chunk.Origin * ChunkSize;
+        for (var x = 0; x < ChunkSize; x++)
+        {
+            for (var y = 0; y < ChunkSize; y++)
+            {
+                var tile = new Vector2i(x, y) + gridOrigin;
+                var floor = _maps.GetZLevelTileRef(
+                    grid.Owner,
+                    grid.Comp,
+                    new ZLevelTileIndices(tile.X, tile.Y, chunk.LocalZ)).Tile;
+                var index = x * ChunkSize + y;
+                if (floor.IsEmpty)
+                {
+                    chunk.FloorSupport[index] = false;
+                    continue;
+                }
+
+                var lowerZ = chunk.LocalZ - 1;
+                var bodyPasses = _zLevelBoundaries.HasBoundaryProvider(grid.Owner, tile, lowerZ)
+                    ? _zLevelBoundaries.CanBodyPass(grid.Owner, grid.Comp, tile, chunk.LocalZ, lowerZ)
+                    : (_zLevelBoundaries.GetDefaultOpenChannels(grid.Owner, floor) &
+                       ZLevelBoundaryChannels.Body) != 0;
+                chunk.FloorSupport[index] = !bodyPasses;
+            }
+        }
+    }
+
     private void BuildBreadcrumbs(GridPathfindingChunk chunk, Entity<MapGridComponent> grid)
     {
         var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
@@ -530,13 +603,9 @@ public sealed partial class PathfindingSystem
                 var tilePos = new Vector2i(x, y) + gridOrigin;
                 tilePolys.Clear();
 
-                var floorTile = _maps.GetZLevelTileRef(
-                    grid.Owner,
-                    grid.Comp,
-                    new ZLevelTileIndices(tilePos.X, tilePos.Y, chunk.LocalZ));
-                var flags = floorTile.Tile.IsEmpty
-                    ? PathfindingBreadcrumbFlag.Space
-                    : PathfindingBreadcrumbFlag.None;
+                var flags = chunk.FloorSupport[x * ChunkSize + y]
+                    ? PathfindingBreadcrumbFlag.None
+                    : PathfindingBreadcrumbFlag.Space;
                 // var isBorder = x < 0 || y < 0 || x == ChunkSize - 1 || y == ChunkSize - 1;
 
                 tileEntities.Clear();

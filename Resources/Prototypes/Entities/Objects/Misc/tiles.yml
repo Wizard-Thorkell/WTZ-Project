@@ -766,6 +766,38 @@
     stackType: FloorTileElevatorShaft
 
 - type: entity
+  name: Z-level grate tile
+  parent: FloorTileItemBase
+  id: FloorTileItemZLevelGrate
+  components:
+  - type: Sprite
+    state: dark
+  - type: Item
+    heldPrefix: dark
+  - type: FloorTile
+    outputs:
+      - Plating
+      - ZLevelGrate
+  - type: Stack
+    stackType: FloorTileZLevelGrate
+
+- type: entity
+  name: Z-level shaft tile
+  parent: FloorTileItemBase
+  id: FloorTileItemZLevelShaft
+  components:
+  - type: Sprite
+    state: dark
+  - type: Item
+    heldPrefix: dark
+  - type: FloorTile
+    outputs:
+      - Plating
+      - FloorZLevelShaft
+  - type: Stack
+    stackType: FloorTileZLevelShaft
+
+- type: entity
   name: rock vault tile
   parent: FloorTileItemBase
   id: FloorTileItemRockVault

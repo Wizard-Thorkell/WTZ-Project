@@ -10,6 +10,13 @@ public sealed class GridPathfindingChunk
         (SharedPathfindingSystem.ChunkSize) * SharedPathfindingSystem.SubStep,
         (SharedPathfindingSystem.ChunkSize) * SharedPathfindingSystem.SubStep];
 
+    /// <summary>
+    /// Exact body-support state prepared on the simulation thread before the
+    /// breadcrumb builder runs in parallel.
+    /// </summary>
+    internal readonly bool[] FloorSupport = new bool[
+        SharedPathfindingSystem.ChunkSize * SharedPathfindingSystem.ChunkSize];
+
     [ViewVariables]
     public Vector2i Origin;
 

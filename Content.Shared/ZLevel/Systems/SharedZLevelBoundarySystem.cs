@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using Content.Shared.CCVar;
+using Content.Shared.Maps;
 using Content.Shared.ZLevel.Components;
 using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
@@ -25,6 +26,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     public const int MaximumBoundaryCacheCapacity = 131072;
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
+    [Dependency] private readonly ITileDefinitionManager _tileDefinitions = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedZLevelMetricsSystem _metrics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
@@ -33,6 +35,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<TransformComponent> _transformQuery;
     private readonly Dictionary<EntityUid, BoundaryRegistration> _registrations = new();
+    private readonly Dictionary<BoundaryCacheKey, int> _providerCounts = new();
     private readonly Dictionary<BoundaryCacheKey, BoundaryCacheEntry> _boundaryCache = new();
     private readonly Queue<BoundaryCacheToken> _boundaryCacheOrder = new();
     private int _boundaryCacheCapacity = DefaultBoundaryCacheCapacity;
@@ -53,6 +56,7 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         SubscribeLocalEvent<ZLevelBoundaryComponent, MoveEvent>(OnMoved);
         SubscribeLocalEvent<ZLevelBoundaryComponent, AnchorStateChangedEvent>(OnAnchorChanged);
         SubscribeLocalEvent<ZLevelBoundaryComponent, AfterAutoHandleStateEvent>(OnAfterState);
+        SubscribeLocalEvent<ZLevelBoundaryComponent, ZLevelPositionChangedEvent>(OnZLevelChanged);
         SubscribeLocalEvent<ZLevelBoundaryComponent, ZLevelBoundaryQueryEvent>(OnQuery);
         SubscribeLocalEvent<PlacementEntityEvent>(OnPlacement);
         SubscribeLocalEvent<TileChangedEvent>(OnTileChanged);
@@ -92,12 +96,9 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
 
         var lower = new ZLevelTileIndices(tile.X, tile.Y, lowerZ);
         var upper = new ZLevelTileIndices(tile.X, tile.Y, lowerZ + 1);
-        var defaultOpen = !_map.IsZLevelVerticalPassageBlocked(gridUid, grid, tile, lowerZ);
-        if (_zLevelMap.TryGetConfig(gridUid, out var mapConfig) &&
-            mapConfig.Comp.DefaultBoundaryMode == ZLevelDefaultBoundaryMode.ExplicitOnly)
-        {
-            defaultOpen = true;
-        }
+        var upperTile = _map.GetZLevelTileRef(gridUid, grid, upper).Tile;
+        var openChannels = GetDefaultOpenChannels(gridUid, upperTile);
+        var defaultOpen = openChannels == ZLevelBoundaryChannels.All;
         var query = new ZLevelBoundaryQueryEvent((gridUid, grid), tile, lowerZ);
 
         var anchored = _map.GetAnchoredEntitiesEnumerator(gridUid, grid, tile);
@@ -106,7 +107,6 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
             RaiseLocalEvent(entity.Value, ref query);
         }
 
-        var openChannels = defaultOpen ? ZLevelBoundaryChannels.All : ZLevelBoundaryChannels.None;
         openChannels |= query.ForcedOpen;
         openChannels &= ~query.ForcedClosed;
         boundary = new ZLevelBoundaryState(
@@ -130,6 +130,33 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     {
         return TryGetBoundary(gridUid, grid, tile, firstZ, secondZ, out var boundary) &&
                boundary.IsOpen(channels);
+    }
+
+    /// <summary>
+    /// Returns channels opened by map policy and the upper tile before explicit
+    /// boundary providers are applied.
+    /// </summary>
+    public ZLevelBoundaryChannels GetDefaultOpenChannels(EntityUid gridUid, Tile upperTile)
+    {
+        if (_zLevelMap.TryGetConfig(gridUid, out var mapConfig) &&
+            mapConfig.Comp.DefaultBoundaryMode == ZLevelDefaultBoundaryMode.ExplicitOnly)
+        {
+            return ZLevelBoundaryChannels.All;
+        }
+
+        if (upperTile.IsEmpty)
+            return ZLevelBoundaryChannels.All;
+
+        return ((ContentTileDefinition) _tileDefinitions[upperTile.TypeId]).ZLevelOpenChannels;
+    }
+
+    /// <summary>
+    /// Returns whether an anchored content provider contributes to this exact
+    /// boundary. This does not imply that any particular channel is open.
+    /// </summary>
+    public bool HasBoundaryProvider(EntityUid gridUid, Vector2i tile, int lowerZ)
+    {
+        return _providerCounts.ContainsKey(new BoundaryCacheKey(gridUid, tile, lowerZ));
     }
 
     public bool CanBodyPass(
@@ -239,6 +266,11 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         RefreshRegistration(entity);
     }
 
+    private void OnZLevelChanged(Entity<ZLevelBoundaryComponent> entity, ref ZLevelPositionChangedEvent args)
+    {
+        RefreshRegistration(entity);
+    }
+
     private void OnPlacement(PlacementEntityEvent args)
     {
         if (args.PlacementEventAction == PlacementEventAction.Create)
@@ -278,6 +310,18 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
 
         if (remove.Count > 0)
             _metrics.RecordBoundaryInvalidatedEntries(remove.Count);
+
+        remove.Clear();
+        foreach (var key in _providerCounts.Keys)
+        {
+            if (key.GridUid == entity.Owner)
+                remove.Add(key);
+        }
+
+        foreach (var key in remove)
+        {
+            _providerCounts.Remove(key);
+        }
     }
 
     private void OnMapConfigurationChanged(ref ZLevelMapConfigurationChangedEvent args)
@@ -328,13 +372,21 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
             return;
 
         if (hasOldRegistration)
+        {
+            if (!hasNewRegistration || oldRegistration.Key != newRegistration.Key)
+                RemoveProvider(oldRegistration.Key);
+
             RaiseChanged(oldRegistration);
+        }
 
         if (!hasNewRegistration)
         {
             _registrations.Remove(entity.Owner);
             return;
         }
+
+        if (!hasOldRegistration || oldRegistration.Key != newRegistration.Key)
+            AddProvider(newRegistration.Key);
 
         _registrations[entity.Owner] = newRegistration;
         RaiseChanged(newRegistration);
@@ -345,7 +397,25 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         if (!_registrations.Remove(uid, out var registration))
             return;
 
+        RemoveProvider(registration.Key);
         RaiseChanged(registration);
+    }
+
+    private void AddProvider(BoundaryCacheKey key)
+    {
+        _providerCounts.TryGetValue(key, out var count);
+        _providerCounts[key] = count + 1;
+    }
+
+    private void RemoveProvider(BoundaryCacheKey key)
+    {
+        if (!_providerCounts.TryGetValue(key, out var count))
+            return;
+
+        if (count <= 1)
+            _providerCounts.Remove(key);
+        else
+            _providerCounts[key] = count - 1;
     }
 
     private bool TryGetRegistration(Entity<ZLevelBoundaryComponent> entity, out BoundaryRegistration registration)
@@ -447,7 +517,10 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
         int LowerZ,
         bool Enabled,
         ZLevelBoundaryChannels Opens,
-        ZLevelBoundaryChannels Closes);
+        ZLevelBoundaryChannels Closes)
+    {
+        public BoundaryCacheKey Key => new(GridUid, Tile, LowerZ);
+    }
 
     private readonly record struct BoundaryCacheKey(EntityUid GridUid, Vector2i Tile, int LowerZ);
     private readonly record struct BoundaryCacheEntry(ZLevelBoundaryState State, long Sequence);

@@ -386,6 +386,16 @@
 
 - type: latheRecipe
   parent: BaseIndustrialTileRecipe
+  id: FloorTileItemZLevelGrate
+  result: FloorTileItemZLevelGrate
+
+- type: latheRecipe
+  parent: BaseIndustrialTileRecipe
+  id: FloorTileItemZLevelShaft
+  result: FloorTileItemZLevelShaft
+
+- type: latheRecipe
+  parent: BaseIndustrialTileRecipe
   id: FloorTileItemRockVault
   result: FloorTileItemRockVault
 

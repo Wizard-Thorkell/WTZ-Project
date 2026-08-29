@@ -2,6 +2,7 @@ using Content.Shared.Atmos;
 using Content.Shared.Light.Components;
 using Content.Shared.Movement.Systems;
 using Content.Shared.Tools;
+using Content.Shared.ZLevel;
 using Robust.Shared.Audio;
 using Robust.Shared.Map;
 using Robust.Shared.Prototypes;
@@ -123,6 +124,13 @@ namespace Content.Shared.Maps
         /// Can weather affect this tile.
         /// </summary>
         [DataField("weather")] public bool Weather = false;
+
+        /// <summary>
+        /// Vertical boundary channels opened through the boundary directly below
+        /// this non-empty tile. Empty tiles continue to open every channel.
+        /// </summary>
+        [DataField("zLevelOpenChannels")]
+        public ZLevelBoundaryChannels ZLevelOpenChannels = ZLevelBoundaryChannels.None;
 
         /// <summary>
         /// Is this tile immune to RCD deconstruct.

@@ -66,6 +66,8 @@
   - FloorTileItemMiningDark
   - FloorTileItemMiningLight
   - FloorTileItemElevatorShaft
+  - FloorTileItemZLevelGrate
+  - FloorTileItemZLevelShaft
   - FloorTileItemRockVault
   - FloorTileItemMetalDiamond
   - FloorTileItemFreezer
