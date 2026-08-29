@@ -71,6 +71,15 @@ public sealed partial class CCVars
             CVar.CLIENTONLY | CVar.ARCHIVE);
 
     /// <summary>
+    /// Maximum number of retained vertical sound-portal chunks in each process.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSoundPortalCacheCapacity =
+        CVarDef.Create(
+            "zlevel.sound_portal_cache_capacity",
+            4_096,
+            CVar.REPLICATED | CVar.SERVER);
+
+    /// <summary>
     /// Maximum native point-light tree entries inspected by vertical lighting per client frame.
     /// </summary>
     public static readonly CVarDef<int> ZLevelLightingMaxEmitterCandidatesPerFrame =

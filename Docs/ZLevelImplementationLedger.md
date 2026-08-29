@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/lighting-hardening`.
-- Active package: `P4.1 vertical sound contract and portal cache`.
+- Active branch: `zlevel/vertical-sound`.
+- Active package: `P4.2 bounded multi-portal routes and attenuation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -44,11 +44,19 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P1 | Shared geometric `ZLevelTrace` primitive and boundary crossings | Complete |
 | P2 | Hitscan, projectiles, throws, explosions, effects, and interactions | Complete |
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
-| P4 | Vertical sound propagation through cached portals | Pending |
+| P4 | Vertical sound propagation through cached portals | In progress (P4.1 complete) |
 | P5 | Hierarchical pathfinding with vertical transition edges | Pending |
 | P6 | Safe initialized-map save/load and automated round trips | Pending |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
+
+## Phase P4 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P4.1 | Shared vertical sound portal contract, bounded cache, and metrics | Complete |
+| P4.2 | Bounded multi-portal routes, transmission, and attenuation | Pending |
+| P4.3 | Listener authorization, apparent direction, diagnostics, and hardening | Pending |
 
 ## Phase P0 Packages
 
@@ -3826,6 +3834,102 @@ allocation is inside Robust physics enumeration.
   first, followed by fire/heat propagation and generated-effect presentation,
   all as specialized consumers of `ZLevelTrace` and boundary channels.
 
+## Completed Package: P4.1 Vertical Sound Portal Foundation
+
+### Scope
+
+- Define a shared vertical sound-portal record with stable grid-local identity,
+  explicit/default classification, and current world projection.
+- Cache `Sound` boundary decisions by grid, 16x16 chunk, and lower local Z in
+  compact open/explicit bit masks, without changing audio playback behavior.
+- Expose deterministic bounded queries with independent chunk, cold-build, and
+  open-candidate budgets. Any failure rolls back only this call's appended data.
+- Add targeted tile, provider, map-policy, and grid-lifecycle invalidation,
+  bounded FIFO retention, process-local metrics, tests, and architecture docs.
+
+### Acceptance Criteria
+
+- Cache construction consults only the authoritative `Sound` boundary channel;
+  forced Sound policy cannot alter Visibility, Projectile, or another channel.
+- Queries retain deterministic layer/chunk/tile order across Z 0, negative chunk
+  coordinates, authored openings, and translated or rotated Z-level frames.
+- A budget failure is distinguishable from an empty successful result and never
+  leaks a partial portal set into a caller-owned result list.
+- Moving a frame reprojects world coordinates without rebuilding local topology;
+  topology edits invalidate the smallest applicable retained region.
+- Retention is finite and hot single-portal queries do not grow allocations.
+
+### Evidence
+
+- The focused `ZLevelSoundPortalCacheTest` matrix passes 4/4 with no skips. It
+  covers default/explicit classification, channel independence, server/client
+  parity, Z 0, negative chunks, deterministic ordering, all three budget
+  failures and rollback, capacity-one eviction, exact invalidation, grid
+  termination, moving-frame reprojection, and hot allocation.
+- The complete Content `FullyQualifiedName~ZLevel` integration filter passes
+  233/233 with no failures or skips. Content's structural and visual-analysis
+  `ZLevel` unit filter passes 5/5.
+- The 3-, 6-, and 10-floor generated stress baselines pass 3/3 with 6,336
+  measured bytes each, 100% warmed boundary/gravity cache hits, and no budget
+  exhaustion. Measured times were 12.171, 13.834, and 25.692 ms.
+- `dotnet build SpaceStation14.slnx --no-restore --no-incremental -m:1`
+  succeeds with zero errors and 700 established dependency, analyzer,
+  vulnerability, and upstream-obsolescence warnings.
+- The focused cache run builds one 256-boundary chunk in 0.394 ms, performs
+  3,050 queries with a rounded 100% hit rate after warmup, and allocates zero
+  bytes across 1,000 repeated hot queries.
+
+### Decisions
+
+- Keep sound topology in a specialized shared cache. `ZLevelTrace` remains the
+  geometry primitive, while sound route choice, transmission, listeners, and
+  playback retain their own policy and metrics.
+- Never enumerate a global portal graph: default-open empty space is unbounded.
+  P4.2 must derive finite search bounds from endpoints, range, and route budgets.
+- Store default and explicitly forced openings separately so authored grates,
+  vents, and shafts can receive later transmission policy without re-resolving
+  providers. Forced close remains authoritative.
+- Cache only local topology. World XY and world Z are resolved at query time so
+  moving, rotated, and frame-origin-shifted grids do not churn retained chunks.
+- Preserve one logical Robust `AudioComponent` per PVS emission. Later listener
+  reachability and apparent direction must not duplicate playback entities.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to the shared portal contract/cache,
+      one CVar, focused integration coverage, and P4 documentation/ledger.
+- [x] Invariant review: Z 0, negative coordinates, local/world frame conversion,
+      moving grids, server/client parity, authority, and channel isolation pass.
+- [x] Automated verification: 4/4 focused, 233/233 cumulative integration, 5/5
+      Content unit/analyzer, 3/3 stress baseline, and a zero-error clean build.
+- [x] Performance evidence: cold build duration, hot hit rate/allocation, finite
+      FIFO capacity, queue compaction, and existing stress metrics are recorded.
+- [x] Documentation: ownership, query semantics, coordinates, invalidation,
+      metrics, commands, current audio boundary, and limitations are recorded in
+      `Docs/ZLevelSound.md` and this entry.
+- [x] Dependency check: no engine edit is required; WTZ Engine remains clean and
+      pinned at `b6051ff8c6d7b04638be2dbbbd0020b159906771`.
+- [x] Git check: generated baselines remain ignored, both repository trees were
+      inspected, and `git diff --check` is required immediately before commit.
+- [x] Mini review: no blocking finding remains; the residual work below is owned
+      by P4.2/P4.3 rather than hidden inside the cache foundation.
+- [x] Commit: prepared as the isolated `Cache bounded vertical sound portals`
+      commit for the WTZ vertical-sound branch and its remote.
+
+### Mini Review
+
+- Finding: client and server derive identical portal topology from replicated
+  Sound boundary authority, and moving-grid transforms do not invalidate it.
+- Finding: independent caller-owned budgets make exhaustion explicit and retain
+  previously supplied result entries; cache eviction changes cost, not behavior.
+- Residual risk: no sound is audible across floors yet. Routing, attenuation,
+  listener/PVS authorization, apparent direction, and diagnostics are P4.2/P4.3.
+- Residual risk: acoustic-medium and vacuum behavior, cross-grid connectivity,
+  and multiplayer-scale profiling remain intentionally undefined.
+- Next package: P4.2 bounded multi-portal route selection and transmission,
+  including crossing/range limits, deterministic tie-breaking, attenuation, and
+  explicit sealed/vacuum behavior.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -3862,3 +3966,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-28 | P3.4c2 | `Render bounded lower-floor light shadows` | 13 package, 228 Content Z-level, 2 unit, 3 baseline, full build, allocation, diff check | Complete |
 | 2026-08-28 | P3.4c3 | `Allow safe ImageSharp pixel reads` / `Harden Z-level lighting with real visual capture` | 3 analyzer, 1 PVS, 13 shadow, 229 Content Z-level, 3 baseline, full build, 3x 19 real GL checks, diff review | Complete |
 | 2026-08-28 | P3 gate | `Close the P3 lighting and FOV phase gate` | 229 Content, 37/137 engine client, 4 serialization, 13 map/replication, 3 baseline, 19 real GL, architecture review | Complete |
+| 2026-08-28 | P4.1 | `Cache bounded vertical sound portals` | 4 focused, 233 Content integration, 5 Content unit/analyzer, 3 baseline, allocation, full build, diff review | Complete |
