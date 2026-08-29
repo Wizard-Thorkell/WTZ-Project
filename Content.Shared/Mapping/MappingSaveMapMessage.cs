@@ -9,11 +9,15 @@ public sealed class MappingSaveMapMessage : NetMessage
     public override MsgGroups MsgGroup => MsgGroups.Command;
     public override NetDeliveryMethod DeliveryMethod => NetDeliveryMethod.ReliableUnordered;
 
+    public uint RequestId;
+
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
+        RequestId = buffer.ReadUInt32();
     }
 
     public override void WriteToBuffer(NetOutgoingMessage buffer, IRobustSerializer serializer)
     {
+        buffer.Write(RequestId);
     }
 }

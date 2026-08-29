@@ -1,8 +1,10 @@
-﻿using System.IO;
+using System;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Content.Shared.Mapping;
 using Robust.Client.UserInterface;
+using Robust.Shared.Localization;
 using Robust.Shared.Network;
 
 namespace Content.Client.Mapping;
@@ -10,10 +12,13 @@ namespace Content.Client.Mapping;
 public sealed class MappingManager : IPostInjectInit
 {
     [Dependency] private readonly IFileDialogManager _file = default!;
+    [Dependency] private readonly ILocalizationManager _loc = default!;
     [Dependency] private readonly IClientNetManager _net = default!;
+    [Dependency] private readonly IUserInterfaceManager _ui = default!;
 
-    private Stream? _saveStream;
-    private MappingMapDataMessage? _mapData;
+    internal static readonly TimeSpan SaveRequestTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly MappingSaveRequestTracker _requests = new();
 
     public void PostInject()
     {
@@ -24,46 +29,90 @@ public sealed class MappingManager : IPostInjectInit
 
     private void OnSaveError(MappingSaveMapErrorMessage message)
     {
-        _saveStream?.DisposeAsync();
-        _saveStream = null;
+        _requests.TryCompleteError(message.RequestId, message.Error);
     }
 
-    private async void OnMapData(MappingMapDataMessage message)
+    private void OnMapData(MappingMapDataMessage message)
     {
-        if (_saveStream == null)
+        _requests.TryCompleteData(message.RequestId, message.Yml);
+    }
+
+    public async Task<MappingSaveResult> SaveMap()
+    {
+        if (!_requests.TryBegin(out var requestId, out var responseTask))
         {
-            _mapData = message;
-            return;
+            ShowError(_loc.GetString("mapping-save-busy"));
+            return MappingSaveResult.Busy;
         }
 
-        await _saveStream.WriteAsync(Encoding.ASCII.GetBytes(message.Yml));
-        await _saveStream.DisposeAsync();
-
-        _saveStream = null;
-        _mapData = null;
-    }
-
-    public async Task SaveMap()
-    {
-        if (_saveStream != null)
-            await _saveStream.DisposeAsync();
-
-        var request = new MappingSaveMapMessage();
-        _net.ClientSendMessage(request);
-
-        var path = await _file.SaveFile();
-        if (path is not { fileStream: var stream })
-            return;
-
-        if (_mapData != null)
+        try
         {
-            await stream.WriteAsync(Encoding.ASCII.GetBytes(_mapData.Yml));
-            _mapData = null;
-            await stream.FlushAsync();
-            await stream.DisposeAsync();
-            return;
-        }
+            _net.ClientSendMessage(new MappingSaveMapMessage { RequestId = requestId });
 
-        _saveStream = stream;
+            var timedOut = false;
+            using var timeoutCancellation = new CancellationTokenSource();
+            var timeoutTask = Task.Delay(SaveRequestTimeout, timeoutCancellation.Token);
+            if (await Task.WhenAny(responseTask, timeoutTask) != responseTask)
+            {
+                timedOut = _requests.TryCompleteError(
+                    requestId,
+                    _loc.GetString("mapping-save-timeout"));
+            }
+            else
+            {
+                timeoutCancellation.Cancel();
+            }
+
+            var response = await responseTask;
+            if (response.Error != null)
+            {
+                ShowError(response.Error);
+                return timedOut ? MappingSaveResult.TimedOut : MappingSaveResult.ServerRejected;
+            }
+
+            if (response.Yml == null)
+            {
+                ShowError(_loc.GetString("mapping-save-invalid-response"));
+                return MappingSaveResult.ServerRejected;
+            }
+
+            var path = await _file.SaveFile();
+            if (path is not { fileStream: var stream })
+                return MappingSaveResult.Cancelled;
+
+            await using (stream)
+            {
+                await stream.WriteAsync(Encoding.ASCII.GetBytes(response.Yml));
+                await stream.FlushAsync();
+            }
+
+            return MappingSaveResult.Saved;
+        }
+        catch (Exception exception)
+        {
+            ShowError(_loc.GetString("mapping-save-client-error", ("reason", exception.Message)));
+            return MappingSaveResult.ClientError;
+        }
+        finally
+        {
+            _requests.TryEnd(requestId);
+        }
     }
+
+    private void ShowError(string error)
+    {
+        _ui.DeferAction(() => _ui.Popup(
+            error,
+            _loc.GetString("mapping-save-error-title")));
+    }
+}
+
+public enum MappingSaveResult : byte
+{
+    Saved,
+    Cancelled,
+    Busy,
+    TimedOut,
+    ServerRejected,
+    ClientError,
 }

@@ -11,8 +11,8 @@ sessions, and transient round state do not.
 | --- | --- | --- |
 | P6.1 | Read-only initialized-map snapshot and transient filtering | Complete |
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
-| P6.2b | Correlated request/response and validation before transfer | Active |
-| P6.2c | UTF-8 temporary output and atomic destination replacement | Pending |
+| P6.2b | Correlated request/response and validation before transfer | Complete |
+| P6.2c | UTF-8 temporary output and atomic destination replacement | Active |
 | P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Snapshot Flow
@@ -44,6 +44,29 @@ new initialized map; it does not replace the source map.
 deserializer consumes component mappings while reading them, so validating the
 same node instance directly would corrupt the representation later transferred
 to the mapper.
+
+## Correlated Save Protocol
+
+Every manual mapping save now uses one non-zero `uint` request identifier across
+`MappingSaveMapMessage`, `MappingMapDataMessage`, and
+`MappingSaveMapErrorMessage`:
+
+1. The client reserves one pending slot and sends its next request ID. A second
+   save remains local and reports that another operation is active.
+2. The server resolves the session, checks active Host authority, resolves the
+   attached map, creates and validates the normalized snapshot, and formats the
+   YAML before returning data.
+3. Session, permission, map, validation, and unexpected server failures all send
+   an error carrying the original request ID instead of silently returning.
+4. The client accepts only the response matching its pending ID. Stale,
+   mismatched, and duplicate responses cannot complete or replace the operation.
+5. A 30-second timeout completes the same pending response task. A simultaneous
+   server response and timeout therefore has one deterministic winner.
+6. Only validated map data opens the destination dialog. The pending slot stays
+   occupied through dialog cancellation or writing and is released in `finally`.
+
+The messages remain reliable-unordered. Ordering is no longer an implicit
+correctness requirement because every terminal response is correlated.
 
 ## Persistent Boundary
 
@@ -118,11 +141,8 @@ The P6.1 integration fixture proves the following properties:
 
 ## Current Limitations
 
-P6.2a does not claim atomic file persistence or live-round restoration.
+P6.2b does not claim atomic file persistence or live-round restoration.
 
-- The mapping request has no correlation identifier, timeout, or guaranteed
-  server response. P6.2b will permit one explicit pending operation, correlate
-  every response, and finish validation before opening a destination dialog.
 - The mapping client still writes YAML directly to its selected stream. P6.2c
   will encode UTF-8 to a same-directory temporary file, flush it, and replace the
   destination only after a successful write.
@@ -137,13 +157,14 @@ P6.2a does not claim atomic file persistence or live-round restoration.
 
 ## Verification
 
-P6.2a closes with 19/19 WTZ Engine entity-serialization tests, the focused
-snapshot test, 7/7 Z-level map-format/snapshot tests, 2/2 traditional mapping
-regressions, and 9/9 Content unit/analyzer tests passing. The broad 275-case
-Z-level run passed 274 and reported one harness skip; that cache case passed in
-the 259-case namespace run and again in a focused rerun. The full solution builds
-with zero errors and its established 708-warning baseline.
+P6.2b closes with 3/3 deterministic request-tracker tests, 1/1 real
+client/server protocol test, 10/10 combined mapping/format/snapshot/protocol
+tests, 276/276 Content Z-level integration tests, and 12/12 relevant Content
+unit/analyzer tests passing without skips. The integrated flow covers an
+unauthorized request, server-side invalid-Z rejection, a concurrent duplicate,
+and a valid response reaching the headless dialog. The full solution builds with
+zero errors and its established 708-warning baseline.
 
 The generated 3-, 6-, and 10-floor baselines pass 3/3 with 6,336 measured bytes,
 100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
-fail-open candidates. Measured local times are 7.0326, 12.9732, and 21.7031 ms.
+fail-open candidates. Measured local times are 12.8096, 17.7008, and 25.2127 ms.

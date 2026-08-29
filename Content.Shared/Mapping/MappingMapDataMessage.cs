@@ -12,12 +12,14 @@ public sealed class MappingMapDataMessage : NetMessage
     public override NetDeliveryMethod DeliveryMethod => NetDeliveryMethod.ReliableUnordered;
 
     public ZStdCompressionContext Context = default!;
+    public uint RequestId;
     public string Yml = default!;
 
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
         MsgSize = buffer.LengthBytes;
 
+        RequestId = buffer.ReadUInt32();
         var uncompressedLength = buffer.ReadVariableInt32();
         var compressedLength = buffer.ReadVariableInt32();
         var stream = new MemoryStream(compressedLength);
@@ -32,6 +34,7 @@ public sealed class MappingMapDataMessage : NetMessage
 
     public override void WriteToBuffer(NetOutgoingMessage buffer, IRobustSerializer serializer)
     {
+        buffer.Write(RequestId);
         var stream = new MemoryStream();
         serializer.SerializeDirect(stream, Yml);
         buffer.WriteVariableInt32((int) stream.Length);

@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/save-load`.
-- Active package: `P6.2b correlated mapping-save protocol and pre-transfer validation`.
+- Active package: `P6.2c UTF-8 temporary output and atomic destination replacement`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -46,7 +46,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P3 | Z-aware lighting and FOV with bounded caches and budgets | Complete |
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
-| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2b active) |
+| P6 | Safe initialized-map save/load and automated round trips | In progress (P6.2c active) |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Pending |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
@@ -78,8 +78,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P6.1 | Initialized mapping snapshot contract and transient-state filtering | Complete |
 | P6.2a | Structured reference diagnostics and detached normalization | Complete |
-| P6.2b | Correlated save protocol and validation before transfer | Active |
-| P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Pending |
+| P6.2b | Correlated save protocol and validation before transfer | Complete |
+| P6.2c | UTF-8 temporary write, flush, and atomic destination replacement | Active |
 | P6.3 | Automated double round trips and explicit live-round boundary | Pending |
 
 ## Phase P0 Packages
@@ -5388,6 +5388,122 @@ allocation is inside Robust physics enumeration.
   only one pending operation, validates before opening the file dialog, and
   guarantees an explicit server result for every authorized request.
 
+## Completed Package: P6.2b Correlated Mapping Save Protocol
+
+### Scope
+
+- Carry a non-zero request ID through mapping save requests, map-data responses,
+  and explicit error responses while retaining reliable-unordered delivery.
+- Replace the client's response/stream race with one pending request tracker,
+  deterministic stale-response rejection, and a 30-second timeout.
+- Make every server-side session, authority, attached-map, snapshot-validation,
+  and exception path return a correlated terminal result.
+- Open the native destination dialog only after normalized YAML has passed all
+  server validation and reached the matching client request.
+- Present busy, timeout, malformed-response, server, and local-write failures to
+  the mapper while returning a typed operation result to callers and tests.
+
+### Acceptance Criteria
+
+- A second save cannot replace, cancel, or share state with an active save.
+- Stale, mismatched, and duplicate responses cannot complete the current task.
+- A pending slot remains occupied after data arrival until dialog/write cleanup
+  completes, and every exit releases it in `finally`.
+- Unauthorized and invalid-map requests receive explicit errors with the exact
+  request ID instead of waiting forever.
+- Validated YAML arrives before the destination dialog is opened; a timeout and
+  simultaneous late response have a single winner.
+
+### Verification Evidence
+
+- Three deterministic tracker tests pass 3/3. They cover monotonically assigned
+  IDs, one pending operation, explicit end, duplicate completion, stale data and
+  errors, mismatched cleanup, timeout winning over late data, and reuse.
+- The real client/server mapping protocol test passes 1/1. It temporarily
+  deadmins the host and receives `ServerRejected`, restores Host authority and
+  receives an invalid-Z snapshot rejection, blocks a concurrent second request
+  as `Busy`, then proves valid YAML reaches the headless file dialog as
+  `Cancelled` rather than timing out.
+- The combined map-format, initialized-snapshot, correlated-protocol,
+  traditional mapping, and editor matrix passes 10/10 without skips.
+- The complete Content Z-level integration matrix passes 276/276 and the
+  relevant Content unit/analyzer matrix passes 12/12 without failures or skips.
+- Generated 3-, 6-, and 10-floor baselines pass 3/3 at 6,336 measured bytes,
+  100% warm boundary/gravity cache hits, and zero PVS budget exhaustion or
+  fail-open candidates. Local measured times are 12.8096, 17.7008, and 25.2127
+  ms respectively.
+- A clean `SpaceStation14.slnx` build passes with zero errors and the checkout's
+  established 708 dependency, vulnerability, analyzer, and obsolescence
+  warnings; no warning identifies this package.
+
+### Decisions
+
+- Keep reliable-unordered delivery and make correlation explicit instead of
+  depending on packet order. `uint` IDs skip zero after wrap and are scoped to
+  the client process.
+- Keep the request pending after its response completes. The operation owns the
+  slot through the native dialog and write, preventing a second command from
+  racing the same user workflow.
+- Complete timeout through the same tracker method as server errors. The task
+  completion source arbitrates timeout/data races and rejects the loser.
+- Return a typed `MappingSaveResult` while preserving the existing UI command's
+  ability to ignore the value. Tests can distinguish busy, rejection, timeout,
+  cancellation, successful write, and local failure without inspecting UI.
+- Defer error popups through `IUserInterfaceManager` so network and timeout
+  continuations do not directly mutate UI controls from an unsafe context.
+- Keep encoding and destination replacement unchanged in this package. Opening
+  the dialog after transfer removes the protocol race; P6.2c owns filesystem
+  durability and Unicode fidelity.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to mapping protocol messages, client and
+      server managers, one tracker, localized errors, focused tests, and P6
+      documentation.
+- [x] Invariant review: snapshot Z validation remains server-authoritative and
+      precedes transfer; Z 0, native tiles, moving frames, and boundary behavior
+      are unchanged and pass the complete Z-level matrix.
+- [x] Automated verification: 3/3 tracker, 1/1 protocol, 10/10 mapping,
+      276/276 Z-level integration, 12/12 unit/analyzer, 3/3 baselines, and a
+      zero-error clean solution build pass without skips.
+- [x] Performance evidence: save requests are mapper-triggered rather than
+      tick/frame work; warmed gameplay remains at 6,336 bytes, 100% relevant
+      cache hits, and zero PVS exhaustion at all stress depths.
+- [x] Documentation: message flow, concurrency contract, timeout arbitration,
+      tests, limits, and the next package are recorded here and in
+      `Docs/ZLevelMapSaveLoad.md`.
+- [x] Dependency check: this package requires no WTZ Engine change. The parent
+      continues to pin pushed engine revision `a90b854ce9`.
+- [x] Git check: `git diff --check` passes with only expected Windows line-ending
+      notices; generated baselines remain ignored and the engine worktree is
+      clean.
+- [x] Mini review: authorization, invalid representation, valid data, duplicate,
+      stale, timeout, cancellation, and cleanup paths are covered at the tracker
+      or real-network level.
+- [x] Commit: the isolated parent commit is prepared for the pushed
+      `zlevel/save-load` branch.
+
+### Mini Review
+
+- Finding: the destination can no longer be opened or truncated while the server
+  is still producing or validating YAML. The client first receives the exact
+  matching terminal response.
+- Finding: server failures that previously returned silently now complete the
+  request explicitly, and malformed or stale responses cannot commandeer a
+  newer save.
+- Finding: request state is held through the whole user operation and released
+  in one `finally`, replacing the two nullable fields whose timing depended on
+  whether network data or the file dialog won first.
+- Residual risk: after selection, the current engine dialog API still opens and
+  truncates the destination directly, and Content still encodes YAML as ASCII.
+  A crash or write failure can therefore damage an existing file.
+- Residual risk: the server does not maintain a separate rate limit for a
+  modified client, but snapshot requests require active Host authority and are
+  not a public-player endpoint.
+- Next package: P6.2c adds an engine-owned UTF-8 atomic write API, same-directory
+  temporary files, physical flush, failure cleanup, destination preservation,
+  and Content integration after the validated response.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
@@ -5438,3 +5554,4 @@ allocation is inside Robust physics enumeration.
 | 2026-08-29 | P5.4b2 | `Harden hierarchical Z-level pathfinding` | 11 focused, 40 movement/pathfinding, 274 Content integration, 9 Content unit/analyzer, 3 baseline, full build, 8-NPC/512-mutation/cache/diff review | Complete |
 | 2026-08-29 | P6.1 | `Allow read-only filtered entity snapshots` / `Filter initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 8 mapping, 275 Content integration, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.2a | `Report invalid entity references during map loads` / `Normalize initialized mapping snapshots` | 1 engine, 19 serialization, 1 snapshot, 7 format/snapshot, 2 mapping, all 275 Content cases covered, 9 unit/analyzer, 3 baseline, full build, diff review | Complete |
+| 2026-08-29 | P6.2b | `Correlate initialized mapping saves` | 3 tracker, 1 real protocol, 10 mapping, 276 Content integration, 12 unit/analyzer, 3 baseline, clean full build, diff review | Complete |

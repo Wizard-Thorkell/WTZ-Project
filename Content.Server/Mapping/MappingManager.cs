@@ -42,18 +42,33 @@ public sealed class MappingManager : IPostInjectInit
 #if !FULL_RELEASE
         try
         {
-            if (!_players.TryGetSessionByChannel(message.MsgChannel, out var session) ||
-                !_admin.IsAdmin(session, true) ||
-                !_admin.HasAdminFlag(session, AdminFlags.Host) ||
-                !_ent.TryGetComponent(session.AttachedEntity, out TransformComponent? xform) ||
-                xform.MapUid is not {} mapUid)
+            if (!_players.TryGetSessionByChannel(message.MsgChannel, out var session))
             {
+                SendError(message, "The server could not resolve the requesting session.");
+                return;
+            }
+
+            if (!_admin.IsAdmin(session, true) || !_admin.HasAdminFlag(session, AdminFlags.Host))
+            {
+                _sawmill.Warning($"Rejected mapping snapshot request {message.RequestId} from {session.Name}: " +
+                                 "host permission is required.");
+                SendError(message, "Host permission is required to save a mapping snapshot.");
+                return;
+            }
+
+            if (!_ent.TryGetComponent(session.AttachedEntity, out TransformComponent? xform) ||
+                xform.MapUid is not { } mapUid)
+            {
+                SendError(message, "The attached entity is not on a map that can be saved.");
                 return;
             }
 
             var snapshots = _systems.GetEntitySystem<MappingSnapshotSystem>();
             if (!snapshots.TryCreateMapSnapshot(mapUid, out var data, out var report, out var error))
-                throw new InvalidOperationException(error);
+            {
+                SendError(message, error);
+                return;
+            }
 
             _sawmill.Info(
                 $"Created mapping snapshot for {mapUid}; excluded {report.ExcludedRoots} transient roots " +
@@ -69,6 +84,7 @@ public sealed class MappingManager : IPostInjectInit
             var msg = new MappingMapDataMessage()
             {
                 Context = _zstd,
+                RequestId = message.RequestId,
                 Yml = writer.ToString()
             };
             _net.ServerSendMessage(msg, message.MsgChannel);
@@ -76,9 +92,19 @@ public sealed class MappingManager : IPostInjectInit
         catch (Exception e)
         {
             _sawmill.Error($"Error saving map in mapping mode:\n{e}");
-            var msg = new MappingSaveMapErrorMessage();
-            _net.ServerSendMessage(msg, message.MsgChannel);
+            SendError(message, "The server failed to prepare the mapping snapshot.");
         }
 #endif
     }
+
+#if !FULL_RELEASE
+    private void SendError(MappingSaveMapMessage request, string error)
+    {
+        _net.ServerSendMessage(new MappingSaveMapErrorMessage
+        {
+            RequestId = request.RequestId,
+            Error = error,
+        }, request.MsgChannel);
+    }
+#endif
 }

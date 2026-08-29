@@ -20,3 +20,9 @@ mapping-z-brush-opening-below = Opening below
 mapping-z-brush-shaft-above = Shaft above
 mapping-z-brush-grate-below = Grate below
 mapping-z-brush-seal-above = Seal above
+
+mapping-save-error-title = Map save failed
+mapping-save-busy = A map save is already in progress.
+mapping-save-timeout = The server did not respond to the map save request in time.
+mapping-save-invalid-response = The server returned an invalid map save response.
+mapping-save-client-error = The map could not be written: {$reason}
