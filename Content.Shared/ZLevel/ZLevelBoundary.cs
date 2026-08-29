@@ -23,6 +23,7 @@ public enum ZLevelBoundaryChannels : ushort
     Effects = 1 << 7,
     Projectile = 1 << 8,
     Explosion = 1 << 9,
+    Weather = 1 << 10,
     Traversal = TraversalUp | TraversalDown,
     All = ushort.MaxValue,
 }

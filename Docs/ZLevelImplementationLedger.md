@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/save-load`.
-- Active package: `P7.1a vertical surface contract and sky-column cache`.
+- Active branch: `zlevel/vertical-content`.
+- Active package: `P7.1b roofs, grates, catwalks, and shafts`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.1a active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.1b active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -89,8 +89,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P7.1a | Shared vertical-surface/sky-column contract, bounded cache, and metrics | Active |
-| P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Pending |
+| P7.1a | Shared vertical-surface/sky-column contract, bounded cache, and metrics | Complete |
+| P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Active |
 | P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Pending |
 | P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Pending |
 | P7.3 | Z-aware sky exposure and weather presentation/gameplay | Pending |
@@ -6088,10 +6088,121 @@ allocation is inside Robust physics enumeration.
   Z-aware vertical-surface and sky-column query contract with bounded caching,
   invalidation, metrics, mapping semantics, and focused Z 0/moving-grid tests.
 
+## Completed Package: P7.1a Sky-Column Contract And Cache
+
+### Scope
+
+- Give vertical surfaces an independent `Weather` boundary channel instead of
+  borrowing atmosphere or visibility policy.
+- Resolve whether a grid-local tile and floor have an open boundary chain to
+  the boundary above the map's declared maximum floor.
+- Bound repeated queries with a process-local LRU cache, per-column revisions,
+  a maximum boundary-check budget, metrics, and administrative presentation.
+- Preserve legacy Z 0 maps, moving-grid local geometry, and deterministic shared
+  client/server results.
+- Define the contract consumed by authored roofs and later weather gameplay
+  without migrating either consumer prematurely.
+
+### Acceptance Criteria
+
+- A query checks every adjacent `Weather` boundary from its local origin through
+  the top boundary and returns a typed termination reason.
+- Invalid grids, levels, configurations, failed boundary resolution, and budget
+  exhaustion never report exposed sky.
+- The cache is bounded, uses real least-recently-used eviction, recomputes
+  without changing results, and performs allocation-free hot lookups.
+- Tile, non-zero tile, boundary, map-configuration, grid-lifecycle, and budget
+  changes cannot leave a valid stale result.
+- Empty-column reads do not allocate Robust map chunks.
+- Z 0 maps default to one local floor; moving frame origins change world-floor
+  projection without invalidating or duplicating local cached geometry.
+
+### Verification Evidence
+
+- A non-incremental full solution build completes in 1m49s with zero errors.
+  Its 706 package-vulnerability, dependency-pruning, analyzer, and obsolescence
+  warnings are the established repository warning set.
+- The focused sky, budget, and metrics matrix passes 15/15. This includes top
+  boundaries, tile and provider invalidation, forced-close precedence, Z 0,
+  moving frames, shared determinism, clamps, fail-closed budgeting, true LRU
+  eviction, chunk non-allocation, metric reset, and hot allocation coverage.
+- The complete Content `FullyQualifiedName~ZLevel` filter passes 284 cases with
+  one pooled skip; the skipped pre-existing aperture-cache case passes 1/1 in
+  isolation. All 285 cases therefore have passing evidence and none failed.
+- Content's Z-level unit/analyzer filter passes 9/9. The generated 3-, 6-, and
+  10-floor baseline passes 3/3.
+- The confirming Debug baseline records 6,336 measured bytes at every depth,
+  100% warm boundary and sky-cache hits, zero sky misses, evictions, or budget
+  exhaustions, and local times of 12.2895, 18.6039, and 37.3581 ms. Timings are
+  comparison evidence, not release thresholds.
+
+### Decisions
+
+- `Weather` is independent from `Atmosphere`, `Visibility`, and traversal. A
+  grate may admit rain and sight while retaining unrelated channel policy.
+- The map's existing tile-above rule remains the default vertical surface. An
+  explicit provider may open that boundary, while a roof provider on the
+  highest floor may close the otherwise open top boundary.
+- Cache keys contain grid UID and local `ZLevelTileIndices`. World-Z overloads
+  convert through the grid's current frame origin before lookup, so translated,
+  rotated, and vertically displaced moving grids reuse local geometry.
+- Per-column revisions exist only while that column owns cached entries. Edit
+  invalidation increments a scalar and never scans vertical geometry; stale
+  entries are rebuilt lazily.
+- Cache capacity defaults to 4,096 and clamps from 64 through 65,536. Boundary
+  checks default to 64 and clamp from 1 through 4,096. Exhausting checks fails
+  closed rather than claiming exposure from a partial column.
+- Keep Robust's legacy `RoofComponent`, `IsRoofComponent`, and planar weather
+  query unchanged in this package. P7.1b authors real vertical content, and P7.3
+  migrates weather presentation/gameplay to this shared contract.
+
+### Completion Gate
+
+- [x] Scope check: only the shared sky contract, Weather channel, cache/budgets,
+      metrics/presentation, marker semantics, tests, and documentation changed.
+- [x] Invariant review: Z 0, sparse reads, local/world frames, moving grids,
+      shared determinism, boundary precedence, and conservative failure were
+      explicitly covered.
+- [x] Automated verification: 15/15 focused, passing evidence for all 285 broad
+      integration cases, 9/9 unit/analyzer, 3/3 baseline, and zero-error project
+      builds complete.
+- [x] Performance evidence: hot lookup allocation coverage and schema-version 4
+      3/6/10-floor captures show bounded caches, 100% warm hits, and stable
+      measured allocation.
+- [x] Documentation: API semantics, effective CVar clamps, invalidation,
+      observability, consumer boundary, limitations, and evidence are recorded
+      here and in `Docs/ZLevelVerticalContent.md`.
+- [x] Dependency check: P7.1a requires no WTZ Engine change; the clean engine
+      remains pinned to published revision `7cbd778024`.
+- [x] Git check: generated baselines remain ignored; declared source and docs
+      pass whitespace checks, with only checkout line-ending notices.
+- [x] Mini review: FIFO ordering was identified and replaced with tested LRU;
+      no unresolved correctness or cache-lifecycle finding remains.
+- [x] Commit: prepared as isolated `Add bounded Z-level sky exposure` commit on
+      `zlevel/vertical-content`; remote verification follows the commit.
+
+### Mini Review
+
+- Finding: a single typed shared query now answers vertical sky exposure without
+  coupling weather, rendering, roofs, or atmosphere into one monolithic system.
+- Finding: the hot path performs a dictionary lookup plus a no-allocation LRU
+  node move; edits invalidate only the affected XY column.
+- Finding: top-floor roofs are representable because the top boundary is part of
+  the query even though there is no authored floor above it.
+- Residual risk: no production weather or roof consumer calls this query yet;
+  the package intentionally establishes infrastructure rather than claiming
+  visible weather behavior.
+- Residual risk: local Debug timings include pooled test and machine noise and
+  must not be treated as production throughput guarantees.
+- Next package: P7.1b adds authored roofs, grates, catwalks, and shafts with
+  construction/destruction, mapping prototypes, save/load coverage, and a demo
+  topology built on the Weather and existing boundary channels.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P7.1a | `Add bounded Z-level sky exposure` | 15 focused, 285 cases covered, 9 unit, 3 baseline, full build, allocation/LRU/diff review | Complete |
 | 2026-08-29 | P6 gate | `Close Z-level persistence phase` | 1 engine filter, 5 engine atomic, 11 persistence, 17 unit, 3 baseline, architecture/diff review | Complete |
 | 2026-08-29 | P6.3b2 | `Autosave initialized mapping snapshots` | 1 autosave, 4 persistence, 11 mapping, 4 writer, 17 unit, 279 cases covered, 3 baseline, full build, diff review | Complete |
 | 2026-08-29 | P6.3b1 | `Enable initialized Z-level floor mutations` | 1 connected, 10 mapping, 278 broad, 13 unit, 3 baseline, full build, diff review | Complete |

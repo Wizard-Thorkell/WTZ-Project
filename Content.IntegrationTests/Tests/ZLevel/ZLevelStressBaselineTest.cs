@@ -64,6 +64,14 @@ public sealed class ZLevelStressBaselineTest : GameTest
             SharedZLevelBoundarySystem.DefaultBoundaryCacheCapacity);
         await OverrideCVar(
             Side.Server,
+            CCVars.ZLevelSkyExposureCacheCapacity,
+            SharedZLevelSkyExposureSystem.DefaultCacheCapacity);
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelSkyExposureMaxBoundaryChecks,
+            SharedZLevelSkyExposureSystem.DefaultMaxBoundaryChecks);
+        await OverrideCVar(
+            Side.Server,
             CCVars.ZLevelVisibilityMaxLevelDistance,
             SharedZLevelVisibilitySystem.DefaultMaxVisibleLevelDistance);
         await OverrideCVar(
@@ -137,16 +145,24 @@ public sealed class ZLevelStressBaselineTest : GameTest
                 var warmup = CaptureRun(SEntMan, session, stressFixture, WarmupIterations, moveGrid: false);
                 var measured = CaptureRun(SEntMan, session, stressFixture, MeasuredIterations, moveGrid: true);
                 var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+                var skyExposure = SEntMan.System<SharedZLevelSkyExposureSystem>();
                 var visibility = SEntMan.System<SharedZLevelVisibilitySystem>();
                 var pvs = SEntMan.System<ZLevelPvsSystem>();
 
-                AssertRunCoverage(stressFixture, boundaries.BoundaryCacheCapacity, warmup, measured);
+                AssertRunCoverage(
+                    stressFixture,
+                    boundaries.BoundaryCacheCapacity,
+                    skyExposure.CacheCapacity,
+                    warmup,
+                    measured);
                 Assert.That(transform.GetWorldPosition(stressFixture.MovingGridUid), Is.Not.EqualTo(movingGridStart));
 
                 baseline = new ZLevelStressBaseline(
-                    3,
+                    4,
                     new ZLevelStressBudgetSnapshot(
                         boundaries.BoundaryCacheCapacity,
+                        skyExposure.CacheCapacity,
+                        skyExposure.MaxBoundaryChecks,
                         visibility.MaxVisibleLevelDistance,
                         pvs.VisibilityCheckBudget),
                     CreateFixtureSnapshot(stressFixture),
@@ -154,6 +170,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
                         WarmupIterations,
                         MeasuredIterations,
                         stressFixture.BoundarySamples.Count,
+                        stressFixture.GravitySamples.Count,
                         stressFixture.GravitySamples.Count),
                     warmup,
                     measured);
@@ -174,6 +191,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
         var boundaries = entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = entityManager.System<SharedZLevelGravitySystem>();
         var metrics = entityManager.System<SharedZLevelMetricsSystem>();
+        var skyExposure = entityManager.System<SharedZLevelSkyExposureSystem>();
 
         foreach (var sample in fixture.GravitySamples
                      .GroupBy(sample => sample.GridUid)
@@ -194,6 +212,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
 
         gravity.InvalidateGrid(fixture.StationGridUid);
         gravity.InvalidateGrid(fixture.MovingGridUid);
+        skyExposure.InvalidateAll();
         metrics.ResetCounters();
     }
 
@@ -208,6 +227,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
         var gravity = entityManager.System<SharedZLevelGravitySystem>();
         var metrics = entityManager.System<SharedZLevelMetricsSystem>();
         var pvs = entityManager.System<ZLevelPvsSystem>();
+        var skyExposure = entityManager.System<SharedZLevelSkyExposureSystem>();
         var transform = entityManager.System<SharedTransformSystem>();
         var visibility = entityManager.System<SharedZLevelVisibilitySystem>();
         var grids = new Dictionary<EntityUid, MapGridComponent>
@@ -243,6 +263,9 @@ public sealed class ZLevelStressBaselineTest : GameTest
 
             foreach (var sample in fixture.GravitySamples)
             {
+                skyExposure.GetExposure(
+                    (sample.GridUid, grids[sample.GridUid]),
+                    new ZLevelTileIndices(sample.Tile.X, sample.Tile.Y, 0));
                 gravity.TryGetGravityTarget(
                     sample.GridUid,
                     grids[sample.GridUid],
@@ -316,6 +339,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
     private static void AssertRunCoverage(
         ZLevelStressFixture fixture,
         int boundaryCacheCapacity,
+        int skyExposureCacheCapacity,
         ZLevelStressRunSnapshot warmup,
         ZLevelStressRunSnapshot measured)
     {
@@ -329,6 +353,12 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(warmupMetrics.BoundaryQueries, Is.GreaterThan(fixture.BoundarySamples.Count));
             Assert.That(warmupMetrics.BoundaryCacheHits, Is.GreaterThan(0));
             Assert.That(warmupMetrics.BoundaryCacheMisses, Is.GreaterThan(0));
+            Assert.That(warmupMetrics.SkyExposureQueries, Is.EqualTo(fixture.GravitySamples.Count));
+            Assert.That(warmupMetrics.SkyExposureCacheMisses, Is.GreaterThan(0));
+            Assert.That(warmupMetrics.SkyExposureBoundaryChecks, Is.GreaterThan(0));
+            Assert.That(warmupMetrics.SkyExposureBudgetExhaustions, Is.Zero);
+            Assert.That(warmupMetrics.SkyExposureExposed + warmupMetrics.SkyExposureBlocked,
+                Is.EqualTo(warmupMetrics.SkyExposureQueries));
             Assert.That(warmupMetrics.VisibilityTileQueries, Is.GreaterThanOrEqualTo(fixture.BoundarySamples.Count));
             Assert.That(warmupMetrics.VisibilityBoundaryChecks, Is.GreaterThan(0));
             Assert.That(warmupMetrics.GravityQueries, Is.EqualTo(fixture.GravitySamples.Count));
@@ -346,6 +376,13 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(measured.ElapsedMilliseconds, Is.GreaterThanOrEqualTo(0d));
             Assert.That(measured.AllocatedBytes, Is.GreaterThanOrEqualTo(0));
             Assert.That(measuredMetrics.BoundaryCacheHits, Is.GreaterThan(0));
+            Assert.That(measuredMetrics.SkyExposureQueries,
+                Is.EqualTo(fixture.GravitySamples.Count * MeasuredIterations));
+            Assert.That(measuredMetrics.SkyExposureCacheHits,
+                Is.EqualTo(measuredMetrics.SkyExposureQueries));
+            Assert.That(measuredMetrics.SkyExposureCacheMisses, Is.Zero);
+            Assert.That(measuredMetrics.SkyExposureBoundaryChecks, Is.Zero);
+            Assert.That(measuredMetrics.SkyExposureBudgetExhaustions, Is.Zero);
             Assert.That(measuredMetrics.GravityBuilds, Is.Zero);
             Assert.That(measuredMetrics.GravityCacheMisses, Is.Zero);
             Assert.That(measuredMetrics.GravityCacheHits,
@@ -370,6 +407,9 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(warmupMetrics.BoundaryEvictions, Is.Zero);
             Assert.That(measuredMetrics.BoundaryCacheMisses, Is.Zero,
                 "A workload that fits the configured cache must be fully hot after warm-up.");
+            Assert.That(fixture.GravitySamples.Count, Is.LessThanOrEqualTo(skyExposureCacheCapacity));
+            Assert.That(warmupMetrics.SkyExposureEvictions, Is.Zero);
+            Assert.That(measuredMetrics.SkyExposureEvictions, Is.Zero);
         });
     }
 
@@ -425,6 +465,8 @@ internal sealed record ZLevelStressBaseline(
 
 internal sealed record ZLevelStressBudgetSnapshot(
     int BoundaryCacheCapacity,
+    int SkyExposureCacheCapacity,
+    int SkyExposureMaxBoundaryChecks,
     int VisibilityMaxLevelDistance,
     int PvsVisibilityCheckBudget);
 
@@ -445,6 +487,7 @@ internal sealed record ZLevelStressWorkloadSnapshot(
     int WarmupIterations,
     int MeasuredIterations,
     int BoundarySamplesPerIteration,
+    int SkyExposureSamplesPerIteration,
     int GravitySamplesPerIteration);
 
 internal sealed record ZLevelStressRunSnapshot(

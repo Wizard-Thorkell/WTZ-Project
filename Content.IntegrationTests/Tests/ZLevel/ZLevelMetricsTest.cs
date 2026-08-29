@@ -99,6 +99,18 @@ public sealed class ZLevelMetricsTest : GameTest
             Assert.Multiple(() =>
             {
                 Assert.That(resetSnapshot.BoundaryQueries, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureQueries, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureCacheHits, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureCacheMisses, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureBoundaryChecks, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureExposed, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureBlocked, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureInvalidQueries, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureBoundaryFailures, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureBudgetExhaustions, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureInvalidations, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureInvalidatedEntries, Is.Zero);
+                Assert.That(resetSnapshot.SkyExposureEvictions, Is.Zero);
                 Assert.That(resetSnapshot.VisibilityTileQueries, Is.Zero);
                 Assert.That(resetSnapshot.GravityQueries, Is.Zero);
                 Assert.That(resetSnapshot.PvsRefreshes, Is.Zero);

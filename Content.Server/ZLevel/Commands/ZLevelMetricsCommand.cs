@@ -53,6 +53,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var soundPlayback = _entityManager.System<ZLevelSoundPlaybackSystem>();
         var soundPortals = _entityManager.System<SharedZLevelSoundPortalSystem>();
         var soundRoutes = _entityManager.System<ZLevelSoundRouteSystem>();
+        var skyExposure = _entityManager.System<SharedZLevelSkyExposureSystem>();
         var trace = _entityManager.System<SharedZLevelTraceSystem>();
         var traversalGraph = _entityManager.System<ZLevelTraversalGraphSystem>();
         var visibility = _entityManager.System<SharedZLevelVisibilitySystem>();
@@ -63,6 +64,16 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"misses={metrics.BoundaryCacheMisses}, hit-rate={metrics.BoundaryCacheHitPercent:0.00}%, " +
             $"cache={boundaries.CachedBoundaryCount}/{boundaries.BoundaryCacheCapacity}, " +
             $"invalidations={metrics.BoundaryInvalidations}, evictions={metrics.BoundaryEvictions}");
+        shell.WriteLine(
+            $"  sky exposure: queries={metrics.SkyExposureQueries}, " +
+            $"exposed/blocked={metrics.SkyExposureExposed}/{metrics.SkyExposureBlocked}, " +
+            $"checks={metrics.SkyExposureBoundaryChecks}, " +
+            $"hit-rate={metrics.SkyExposureCacheHitPercent:0.00}%, " +
+            $"cache={skyExposure.CachedExposureCount}/{skyExposure.CacheCapacity}, " +
+            $"invalid/boundary/budget={metrics.SkyExposureInvalidQueries}/" +
+            $"{metrics.SkyExposureBoundaryFailures}/{metrics.SkyExposureBudgetExhaustions}, " +
+            $"invalidated/evicted={metrics.SkyExposureInvalidatedEntries}/" +
+            $"{metrics.SkyExposureEvictions}, max-checks={skyExposure.MaxBoundaryChecks}");
         shell.WriteLine(
             $"  visibility: entity={metrics.VisibilityEntityQueries}, tile={metrics.VisibilityTileQueries}, " +
             $"same-level={metrics.VisibilitySameLevel}, boundary-checks={metrics.VisibilityBoundaryChecks}, " +

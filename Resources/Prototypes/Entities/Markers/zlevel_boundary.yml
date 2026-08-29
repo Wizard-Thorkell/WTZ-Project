@@ -4,7 +4,7 @@
   id: ZLevelFloorOpeningMarker
   parent: MarkerBase
   name: Z-level floor opening
-  description: Opens free movement, atmosphere, visibility, sound, interaction, effects, projectiles, and explosions through the boundary below.
+  description: Opens free movement, atmosphere, visibility, weather, sound, interaction, effects, projectiles, and explosions through the boundary below.
   components:
   - type: Sprite
     layers:
@@ -16,6 +16,7 @@
     - Body
     - Atmosphere
     - Visibility
+    - Weather
     - Interaction
     - Sound
     - Effects
@@ -40,7 +41,7 @@
   id: ZLevelGrateBoundaryMarker
   parent: MarkerBase
   name: Z-level grate boundary
-  description: Allows atmosphere, visibility, sound, and effects while blocking free vertical movement.
+  description: Allows atmosphere, visibility, weather, sound, and effects while blocking free vertical movement.
   components:
   - type: Sprite
     layers:
@@ -51,6 +52,7 @@
     opens:
     - Atmosphere
     - Visibility
+    - Weather
     - Sound
     - Effects
     closes:

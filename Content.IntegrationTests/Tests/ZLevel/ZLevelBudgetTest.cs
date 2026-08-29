@@ -8,6 +8,7 @@ using Content.Server.ZLevel.Systems;
 using Content.Shared.CCVar;
 using Content.Shared.Physics;
 using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Shared;
 using Robust.Shared.Enums;
@@ -66,6 +67,134 @@ public sealed class ZLevelBudgetTest : GameTest
                 Assert.That(snapshot.BoundaryEvictions, Is.GreaterThan(0));
                 Assert.That(grid.ChunkCount, Is.EqualTo(chunkCount),
                     "Cache misses over empty space must not allocate map chunks.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task SkyExposureCacheCapacityIsClampedAndFailsSoftByRecomputation()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelSkyExposureCacheCapacity, 1);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var sky = SEntMan.System<SharedZLevelSkyExposureSystem>();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            var first = new ZLevelTileIndices(900_000, 900_000, 0);
+            var chunkCount = grid.ChunkCount;
+
+            Assert.That(sky.CacheCapacity,
+                Is.EqualTo(SharedZLevelSkyExposureSystem.MinimumCacheCapacity));
+
+            sky.InvalidateAll();
+            metrics.ResetCounters();
+            var initial = sky.GetExposure((testMap.Grid, grid), first);
+            Assert.That(initial.IsExposed, Is.True);
+
+            for (var i = 0; i < sky.CacheCapacity + 32; i++)
+            {
+                var result = sky.GetExposure(
+                    (testMap.Grid, grid),
+                    new ZLevelTileIndices(first.X + i + 1, first.Y, 0));
+                Assert.That(result.IsExposed, Is.True);
+            }
+
+            var recomputed = sky.GetExposure((testMap.Grid, grid), first);
+            var snapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(recomputed, Is.EqualTo(initial));
+                Assert.That(sky.CachedExposureCount, Is.LessThanOrEqualTo(sky.CacheCapacity));
+                Assert.That(snapshot.SkyExposureCacheMisses, Is.EqualTo(sky.CacheCapacity + 34));
+                Assert.That(snapshot.SkyExposureEvictions, Is.GreaterThan(0));
+                Assert.That(grid.ChunkCount, Is.EqualTo(chunkCount),
+                    "Sky cache misses over empty columns must not allocate map chunks.");
+            });
+        });
+    }
+
+    [Test]
+    public async Task SkyExposureCacheEvictsLeastRecentlyUsedColumn()
+    {
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelSkyExposureCacheCapacity,
+            SharedZLevelSkyExposureSystem.MinimumCacheCapacity);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var sky = SEntMan.System<SharedZLevelSkyExposureSystem>();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            var first = new ZLevelTileIndices(1_000_000, 1_000_000, 0);
+            var second = new ZLevelTileIndices(first.X + 1, first.Y, 0);
+
+            sky.InvalidateAll();
+            for (var i = 0; i < sky.CacheCapacity; i++)
+            {
+                sky.GetExposure(
+                    (testMap.Grid, grid),
+                    new ZLevelTileIndices(first.X + i, first.Y, 0));
+            }
+
+            metrics.ResetCounters();
+            sky.GetExposure((testMap.Grid, grid), first);
+            sky.GetExposure(
+                (testMap.Grid, grid),
+                new ZLevelTileIndices(first.X + sky.CacheCapacity, first.Y, 0));
+            sky.GetExposure((testMap.Grid, grid), first);
+            sky.GetExposure((testMap.Grid, grid), second);
+            var snapshot = metrics.Snapshot();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(snapshot.SkyExposureCacheHits, Is.EqualTo(2),
+                    "Touching the oldest entry must protect it from the next eviction.");
+                Assert.That(snapshot.SkyExposureCacheMisses, Is.EqualTo(2));
+                Assert.That(snapshot.SkyExposureEvictions, Is.EqualTo(2));
+                Assert.That(sky.CachedExposureCount, Is.EqualTo(sky.CacheCapacity));
+            });
+        });
+    }
+
+    [Test]
+    public async Task SkyExposureBoundaryBudgetIsClampedAndFailsClosed()
+    {
+        await OverrideCVar(Side.Server, CCVars.ZLevelSkyExposureMaxBoundaryChecks, 0);
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var sky = SEntMan.System<SharedZLevelSkyExposureSystem>();
+            var zLevelMaps = SEntMan.System<SharedZLevelMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            zLevelMaps.Configure(
+                testMap.MapUid,
+                0,
+                2,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+
+            Assert.That(sky.MaxBoundaryChecks,
+                Is.EqualTo(SharedZLevelSkyExposureSystem.MinimumMaxBoundaryChecks));
+            sky.InvalidateAll();
+            metrics.ResetCounters();
+            var result = sky.GetExposure(
+                (testMap.Grid, grid),
+                new ZLevelTileIndices(0, 0, 0));
+            var snapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Termination,
+                    Is.EqualTo(ZLevelSkyExposureTermination.BoundaryBudgetExceeded));
+                Assert.That(result.IsExposed, Is.False);
+                Assert.That(result.BoundaryChecks, Is.EqualTo(1));
+                Assert.That(snapshot.SkyExposureBudgetExhaustions, Is.EqualTo(1));
+                Assert.That(snapshot.SkyExposureBoundaryChecks, Is.EqualTo(1));
             });
         });
     }

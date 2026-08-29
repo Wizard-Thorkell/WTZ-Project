@@ -30,6 +30,19 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _boundaryInvalidatedEntries;
     private long _boundaryEvictions;
 
+    private long _skyExposureQueries;
+    private long _skyExposureCacheHits;
+    private long _skyExposureCacheMisses;
+    private long _skyExposureBoundaryChecks;
+    private long _skyExposureExposed;
+    private long _skyExposureBlocked;
+    private long _skyExposureInvalidQueries;
+    private long _skyExposureBoundaryFailures;
+    private long _skyExposureBudgetExhaustions;
+    private long _skyExposureInvalidations;
+    private long _skyExposureInvalidatedEntries;
+    private long _skyExposureEvictions;
+
     private long _visibilityEntityQueries;
     private long _visibilityTileQueries;
     private long _visibilitySameLevel;
@@ -149,6 +162,51 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     public void RecordBoundaryEviction()
     {
         _boundaryEvictions++;
+    }
+
+    public void RecordSkyExposureQuery(
+        ZLevelSkyExposureTermination termination,
+        bool? cacheHit,
+        int boundaryChecks)
+    {
+        _skyExposureQueries++;
+        if (cacheHit == true)
+            _skyExposureCacheHits++;
+        else if (cacheHit == false)
+            _skyExposureCacheMisses++;
+
+        _skyExposureBoundaryChecks += boundaryChecks;
+        switch (termination)
+        {
+            case ZLevelSkyExposureTermination.Exposed:
+                _skyExposureExposed++;
+                break;
+            case ZLevelSkyExposureTermination.ClosedBoundary:
+                _skyExposureBlocked++;
+                break;
+            case ZLevelSkyExposureTermination.BoundaryResolutionFailed:
+                _skyExposureBoundaryFailures++;
+                break;
+            case ZLevelSkyExposureTermination.BoundaryBudgetExceeded:
+                _skyExposureBudgetExhaustions++;
+                break;
+            case ZLevelSkyExposureTermination.InvalidGrid:
+            case ZLevelSkyExposureTermination.InvalidLevel:
+            case ZLevelSkyExposureTermination.InvalidConfiguration:
+                _skyExposureInvalidQueries++;
+                break;
+        }
+    }
+
+    public void RecordSkyExposureInvalidation(int invalidatedEntries)
+    {
+        _skyExposureInvalidations++;
+        _skyExposureInvalidatedEntries += invalidatedEntries;
+    }
+
+    public void RecordSkyExposureEviction()
+    {
+        _skyExposureEvictions++;
     }
 
     public void RecordVisibilityEntityQuery()
@@ -422,6 +480,18 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _boundaryInvalidations,
             _boundaryInvalidatedEntries,
             _boundaryEvictions,
+            _skyExposureQueries,
+            _skyExposureCacheHits,
+            _skyExposureCacheMisses,
+            _skyExposureBoundaryChecks,
+            _skyExposureExposed,
+            _skyExposureBlocked,
+            _skyExposureInvalidQueries,
+            _skyExposureBoundaryFailures,
+            _skyExposureBudgetExhaustions,
+            _skyExposureInvalidations,
+            _skyExposureInvalidatedEntries,
+            _skyExposureEvictions,
             _visibilityEntityQueries,
             _visibilityTileQueries,
             _visibilitySameLevel,
@@ -518,6 +588,18 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _boundaryInvalidations = 0;
         _boundaryInvalidatedEntries = 0;
         _boundaryEvictions = 0;
+        _skyExposureQueries = 0;
+        _skyExposureCacheHits = 0;
+        _skyExposureCacheMisses = 0;
+        _skyExposureBoundaryChecks = 0;
+        _skyExposureExposed = 0;
+        _skyExposureBlocked = 0;
+        _skyExposureInvalidQueries = 0;
+        _skyExposureBoundaryFailures = 0;
+        _skyExposureBudgetExhaustions = 0;
+        _skyExposureInvalidations = 0;
+        _skyExposureInvalidatedEntries = 0;
+        _skyExposureEvictions = 0;
         _visibilityEntityQueries = 0;
         _visibilityTileQueries = 0;
         _visibilitySameLevel = 0;
@@ -619,6 +701,18 @@ public readonly record struct ZLevelMetricsSnapshot(
     long BoundaryInvalidations,
     long BoundaryInvalidatedEntries,
     long BoundaryEvictions,
+    long SkyExposureQueries,
+    long SkyExposureCacheHits,
+    long SkyExposureCacheMisses,
+    long SkyExposureBoundaryChecks,
+    long SkyExposureExposed,
+    long SkyExposureBlocked,
+    long SkyExposureInvalidQueries,
+    long SkyExposureBoundaryFailures,
+    long SkyExposureBudgetExhaustions,
+    long SkyExposureInvalidations,
+    long SkyExposureInvalidatedEntries,
+    long SkyExposureEvictions,
     long VisibilityEntityQueries,
     long VisibilityTileQueries,
     long VisibilitySameLevel,
@@ -707,6 +801,9 @@ public readonly record struct ZLevelMetricsSnapshot(
     double AtmosOverlayMaxMilliseconds)
 {
     public double BoundaryCacheHitPercent => Percentage(BoundaryCacheHits, BoundaryQueries);
+    public double SkyExposureCacheHitPercent => Percentage(
+        SkyExposureCacheHits,
+        SkyExposureCacheHits + SkyExposureCacheMisses);
     public double GravityCacheHitPercent => Percentage(GravityCacheHits, GravityCacheHits + GravityCacheMisses);
     public double GravityAverageBuildMilliseconds => Average(GravityBuildMilliseconds, GravityBuilds);
     public double PvsAverageRefreshMilliseconds => Average(PvsRefreshMilliseconds, PvsRefreshes);

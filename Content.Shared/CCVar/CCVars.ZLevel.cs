@@ -17,6 +17,24 @@ public sealed partial class CCVars
             CVar.REPLICATED | CVar.SERVER);
 
     /// <summary>
+    /// Maximum number of resolved Z-level sky exposure queries cached by each process.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSkyExposureCacheCapacity =
+        CVarDef.Create(
+            "zlevel.sky_exposure_cache_capacity",
+            4096,
+            CVar.REPLICATED | CVar.SERVER);
+
+    /// <summary>
+    /// Maximum adjacent vertical boundaries inspected by one sky exposure query.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelSkyExposureMaxBoundaryChecks =
+        CVarDef.Create(
+            "zlevel.sky_exposure_max_boundary_checks",
+            64,
+            CVar.REPLICATED | CVar.SERVER);
+
+    /// <summary>
     /// Maximum world-Z distance considered by normal visibility and PVS.
     /// </summary>
     public static readonly CVarDef<int> ZLevelVisibilityMaxLevelDistance =

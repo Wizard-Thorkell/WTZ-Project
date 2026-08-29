@@ -16,6 +16,7 @@ Official repositories:
 - Trace benchmark report: [ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md)
 - Z-aware hitscan: [ZLevelHitscan.md](ZLevelHitscan.md)
 - Z-aware projectile lifecycle: [ZLevelProjectiles.md](ZLevelProjectiles.md)
+- Vertical surfaces and sky exposure: [ZLevelVerticalContent.md](ZLevelVerticalContent.md)
 
 ## Product Goal
 
@@ -92,6 +93,9 @@ Implemented movement and gameplay basics:
 - Unsupported entities can fall to lower support layers.
 - Explicit body openings can remove support from an otherwise non-empty floor
   tile without affecting unrelated boundary channels.
+- `SharedZLevelSkyExposureSystem` resolves a bounded local column through the
+  independent `Weather` boundary channel, including the boundary above the
+  highest authored floor, with a bounded LRU cache and fail-closed budget.
 - Vertical movement updates `PhysicsComponent.BodyStatus`.
 - Collisions between entities on different Z levels are prevented.
 - Tile friction and footstep lookup can use the support floor.

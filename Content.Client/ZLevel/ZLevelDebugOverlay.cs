@@ -37,6 +37,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedZLevelBoundarySystem _boundarySystem;
     private readonly SharedZLevelGravitySystem _gravitySystem;
     private readonly SharedZLevelMetricsSystem _metricsSystem;
+    private readonly SharedZLevelSkyExposureSystem _skyExposureSystem;
     private readonly SharedZLevelTraceSystem _traceSystem;
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
@@ -62,6 +63,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _boundarySystem = _entityManager.System<SharedZLevelBoundarySystem>();
         _gravitySystem = _entityManager.System<SharedZLevelGravitySystem>();
         _metricsSystem = _entityManager.System<SharedZLevelMetricsSystem>();
+        _skyExposureSystem = _entityManager.System<SharedZLevelSkyExposureSystem>();
         _traceSystem = _entityManager.System<SharedZLevelTraceSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
@@ -259,6 +261,15 @@ public sealed class ZLevelDebugOverlay : Overlay
             metricsPosition + new Vector2(0f, 252f),
             $"vertical sound processed auth/mute:{sound.ProcessedAuthorized}/{sound.ProcessedMuted} " +
             $"build avg/max:{sound.AverageBuildMilliseconds:0.000}/{sound.MaxBuildMilliseconds:0.000}ms",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 266f),
+            $"sky q:{metrics.SkyExposureQueries} exposed/blocked:" +
+            $"{metrics.SkyExposureExposed}/{metrics.SkyExposureBlocked} " +
+            $"hit:{metrics.SkyExposureCacheHitPercent:0.0}% " +
+            $"cache:{_skyExposureSystem.CachedExposureCount}/{_skyExposureSystem.CacheCapacity} " +
+            $"budget:{metrics.SkyExposureBudgetExhaustions}",
             metricsColor);
     }
 
