@@ -17,6 +17,7 @@ Official repositories:
 - Z-aware hitscan: [ZLevelHitscan.md](ZLevelHitscan.md)
 - Z-aware projectile lifecycle: [ZLevelProjectiles.md](ZLevelProjectiles.md)
 - Vertical surfaces and sky exposure: [ZLevelVerticalContent.md](ZLevelVerticalContent.md)
+- Powered physical elevators: [ZLevelElevators.md](ZLevelElevators.md)
 
 ## Product Goal
 
@@ -123,6 +124,9 @@ Implemented connected artificial gravity:
 Implemented traversal and debug tooling:
 
 - `ZLevelTraversalComponent`.
+- Powered physical elevator cabins, mapper-authored landing controls, bounded
+  authoritative travel, rider capture, APC load changes, and cancellation on
+  power or topology loss. Mapping persistence and AI integration remain P7.2b.
 - `ZLevelStairsUp`, `ZLevelStairsDown`, and `ZLevelLadder` prototypes.
 - Interaction verbs for using traversal objects.
 - Step-trigger traversal support.
@@ -566,8 +570,9 @@ Major unfinished areas:
   same XY need an explicit world-Z-aware grid-selection contract.
 - Wall/cutaway rendering is prototype quality.
 - Production lattice, interior grates, shafts, catwalk bridges, ordinary
-  inter-floor roofs, and mapper-authored top caps are available. Ramps,
-  elevators, player-built top caps, and flight content remain pending.
+  inter-floor roofs, mapper-authored top caps, and first-pass powered elevators
+  are available. Elevator mapping/pathfinding hardening, ramps, player-built top
+  caps, and flight content remain pending.
 - Many anchored entities and construction systems still assume one tile stack.
 - FTL docking aligns grid frames, but arbitrary transit-map entry, planet
   landing, frame-authoring UI, and conflict policy for already-docked grid
@@ -947,8 +952,9 @@ Tasks:
 - [Done] Represent authored ZLevel traversal edges in an indexed, directed
   navigation contract with local/world frames, costs, revisions, metrics, and
   bounded connected regions.
-- [Done except ramps] Teach pathfinding about stairs, ladders, shafts, catwalk
-  bridges, and elevators' future traversal contract. Ramps remain pending.
+- [Done except ramps and physical elevators] Teach pathfinding about stairs,
+  ladders, shafts, catwalk bridges, and dynamic traversal. P7.2b binds the new
+  physical cabins into that contract; ramps remain pending.
 - [Done] Ensure AI cannot path through sealed ceilings or unsupported shafts.
 - [Done at connector-contract level] Add costs for vertical traversal.
 - [Done] Add hierarchical fallback behavior when no same-floor path exists.

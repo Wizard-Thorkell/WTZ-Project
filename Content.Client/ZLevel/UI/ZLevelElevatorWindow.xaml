@@ -1,0 +1,28 @@
+<controls:FancyWindow xmlns="https://spacestation14.io"
+                      xmlns:controls="clr-namespace:Content.Client.UserInterface.Controls"
+                      Title="{Loc 'zlevel-elevator-window-title'}"
+                      MinSize="320 260"
+                      SetSize="320 360">
+    <BoxContainer Orientation="Vertical" Margin="8">
+        <BoxContainer Orientation="Horizontal" MinHeight="28">
+            <Label Text="{Loc 'zlevel-elevator-status-label'}"
+                   VerticalAlignment="Center"
+                   MinWidth="72" />
+            <Label Name="StatusLabel"
+                   HorizontalExpand="True"
+                   VerticalAlignment="Center" />
+        </BoxContainer>
+        <ProgressBar Name="TravelProgress"
+                     Visible="False"
+                     MinValue="0"
+                     MaxValue="1"
+                     MinHeight="12"
+                     Margin="0 4 0 8" />
+        <controls:HLine Color="#404040" Thickness="1" Margin="0 0 0 8" />
+        <ScrollContainer VerticalExpand="True" HorizontalExpand="True" HScrollEnabled="False">
+            <BoxContainer Name="FloorContainer"
+                          Orientation="Vertical"
+                          HorizontalExpand="True" />
+        </ScrollContainer>
+    </BoxContainer>
+</controls:FancyWindow>

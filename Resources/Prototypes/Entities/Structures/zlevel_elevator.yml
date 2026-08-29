@@ -1,0 +1,112 @@
+- type: entity
+  id: ZLevelElevatorCabin
+  parent: BaseStructure
+  name: Z-level elevator cabin
+  description: A powered cabin that carries its contents between mapped Z-level stops.
+  suffix: Z-Level, Elevator
+  placement:
+    mode: SnapgridCenter
+  components:
+  - type: Transform
+    anchored: true
+    noRot: true
+  - type: Sprite
+    sprite: Structures/cargo_telepad.rsi
+    drawdepth: HighFloorObjects
+    layers:
+    - state: idle
+      map: ["enum.ZLevelElevatorVisualLayers.Main"]
+  - type: GenericVisualizer
+    visuals:
+      enum.ZLevelElevatorVisuals.State:
+        enum.ZLevelElevatorVisualLayers.Main:
+          Idle: { state: idle }
+          Moving: { state: beam }
+          Unpowered: { state: offline }
+          Invalid: { state: offline }
+  - type: Appearance
+  - type: InteractionOutline
+  - type: Physics
+    bodyType: Static
+    canCollide: false
+  - type: Fixtures
+    fixtures:
+      cabin:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.46,-0.46,0.46,0.46"
+        hard: false
+        mask:
+        - ItemMask
+  - type: ApcPowerReceiver
+    powerLoad: 100
+  - type: ZLevelElevatorCabin
+    shaftId: main
+    travelTimePerLevel: 2
+    idlePowerDraw: 100
+    travelPowerDraw: 2500
+    maxTravelLevels: 16
+    passengerLimit: 32
+  - type: ZLevelElevatorControl
+    mode: Cabin
+  - type: ActivatableUI
+    key: enum.ZLevelElevatorUiKey.Key
+  - type: UserInterface
+    interfaces:
+      enum.ZLevelElevatorUiKey.Key:
+        type: ZLevelElevatorBoundUserInterface
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    closes:
+    - Body
+
+- type: entity
+  id: ZLevelElevatorStop
+  parent: BaseStructure
+  name: Z-level elevator call panel
+  description: A mapped landing and call control for a Z-level elevator shaft.
+  suffix: Z-Level, Elevator
+  placement:
+    mode: SnapgridCenter
+  components:
+  - type: Transform
+    anchored: true
+    noRot: true
+  - type: Sprite
+    sprite: Structures/Wallmounts/switch.rsi
+    drawdepth: WallMountedItems
+    layers:
+    - state: dead
+      map: ["enum.ZLevelElevatorVisualLayers.Main"]
+  - type: GenericVisualizer
+    visuals:
+      enum.ZLevelElevatorVisuals.State:
+        enum.ZLevelElevatorVisualLayers.Main:
+          Idle: { state: on }
+          Moving: { state: on }
+          Unpowered: { state: dead }
+          Invalid: { state: dead }
+  - type: Appearance
+  - type: InteractionOutline
+  - type: Physics
+    bodyType: Static
+    canCollide: false
+  - type: Fixtures
+    fixtures:
+      panel:
+        shape:
+          !type:PhysShapeAabb
+          bounds: "-0.18,-0.18,0.18,0.18"
+        hard: false
+        mask:
+        - ItemMask
+  - type: ZLevelElevatorStop
+    shaftId: main
+  - type: ZLevelElevatorControl
+    mode: Landing
+  - type: ActivatableUI
+    key: enum.ZLevelElevatorUiKey.Key
+  - type: UserInterface
+    interfaces:
+      enum.ZLevelElevatorUiKey.Key:
+        type: ZLevelElevatorBoundUserInterface

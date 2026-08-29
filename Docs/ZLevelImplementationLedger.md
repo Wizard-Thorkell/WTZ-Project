@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.2a elevator cabins, stops, controls, power, and traversal lifecycle`.
+- Active package: `P7.2b elevator mapping, save/load, pathfinding, and hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.2a active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.2b active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -91,8 +91,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P7.1a | Shared vertical-surface/sky-column contract, bounded cache, and metrics | Complete |
 | P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Complete |
-| P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Active |
-| P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Pending |
+| P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Complete |
+| P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Active |
 | P7.3 | Z-aware sky exposure and weather presentation/gameplay | Pending |
 | P7.4a | Flight movement, gravity, and collision contract | Pending |
 | P7.4b | Flight trace, projectile, AI, content, and mapping integration | Pending |
@@ -6312,10 +6312,115 @@ allocation is inside Robust physics enumeration.
 - Next package: P7.2a implements powered elevator cabins, mapped stops,
   controls, deterministic travel, and dynamic traversal lifecycle.
 
+## Completed Package: P7.2a Powered Physical Elevators
+
+### Scope
+
+- Add one authoritative physical cabin per same-grid, same-tile, mapper-named
+  shaft network, with unique served-floor stops and cabin/landing controls.
+- Validate actor floor, destination, source stop, power, travel distance,
+  configuration, complete directed shaft geometry, and rider capacity before
+  starting a server-timed request.
+- Move the cabin and only its captured riders that remain aboard at arrival;
+  cancel safely on power, cabin transform, stop topology, or geometry failure.
+- Add compact BUI state/progress, APC idle/travel load, appearance states,
+  bounded metrics, prototypes, locale, focused tests, and mapping documentation.
+- Keep initialized-map round trips, mapping mutation tools, pathfinding/AI
+  execution, doors, queues, construction, and product polish in P7.2b.
+
+### Implementation
+
+- A network key is `(grid UID, local shaft tile XY, trimmed shaft ID)`. The grid
+  and local tile remain stable when a moving grid changes world XY or frame
+  origin, while unrelated columns can reuse the same ID.
+- Cabins, stops, and controls are indexed by network. Control refresh no longer
+  scans every elevator on the server, avoiding quadratic map-start behavior.
+- Requests fail closed for duplicate cabins/stops, missing source/target stops,
+  cross-floor actors, forged landing destinations, unavailable power, busy
+  cabins, closed directed traversal stacks, excessive riders, and malformed or
+  out-of-range mapper values.
+- Travel time is derived from local-floor distance and globally capped. The UI
+  receives the authoritative timestamp only for presentation.
+- Rider capture is exact-grid, exact-tile, exact-local-Z, unanchored physics
+  content. Capacity exits before sorting an oversized rider set. Arrival
+  rechecks that each captured entity still occupies the source cabin tile.
+- The cabin authors only a `Body` close below its current floor. The surrounding
+  shaft continues to use the existing independent atmosphere, visibility,
+  sound, interaction, effects, projectile, explosion, and traversal channels.
+- Runtime movement state and captured riders are not data fields. Mapper-owned
+  configuration and the completed cabin floor remain the persistence boundary.
+- `zlevelmetrics` and its reset path now include elevator registrations, active
+  travel, outcomes, rejection categories, riders, and effective hard limits.
+
+### Verification
+
+- Focused elevator integration: 6/6 passed for authoritative delayed movement,
+  cabin/player/item transport, same-floor authority, landing spoof rejection,
+  power cancellation, duplicate stops, closed shafts, malformed limits,
+  capacity, and riders leaving before arrival.
+- Complete Content Z-level integration matrix: 297/297 passed on the final diff.
+- Content Z-level unit/analyzer matrix: 9/9 passed.
+- Stress baseline: 3/3 passed at 10.5840, 16.0735, and 24.4104 ms for 3, 6,
+  and 10 floors. Every depth retained 6,336 measured bytes, 100% warm
+  boundary/sky cache hits, and zero measured boundary/sky evictions.
+- `SpaceStation14.slnx` built with zero errors and 27 established warnings. No
+  analyzer warning originates from the elevator package.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to physical elevator runtime/UI/content,
+      observability, tests, and the roadmap documentation it changes.
+- [x] Invariant review: unconfigured Z 0 maps remain opt-in and unchanged;
+      local/world frames, moving grids, server authority, anchoring, sparse
+      tiles, and independent boundary channels were reviewed.
+- [x] Automated verification: 6 focused, 297 broad integration, 9 unit/analyzer,
+      3 baseline cases, and a full solution build pass on the final diff.
+- [x] Performance evidence: controls are network-indexed; rider movement and
+      configuration are bounded; process-local counters are exposed; final
+      3/6/10-floor timings and allocations remain healthy.
+- [x] Documentation: architecture, mapper workflow, authority, limits,
+      persistence boundary, current product limits, commands, and test evidence
+      are recorded here and in `Docs/ZLevelElevators.md`.
+- [x] Dependency check: P7.2a requires no engine change; the clean WTZ Engine
+      remains pinned to published revision `7cbd778024`.
+- [x] Git check: `git diff --check` passes with only checkout line-ending
+      notices; generated baseline/test output remains ignored.
+- [x] Mini review: coordinate parenting, power-fixture drift, process-local test
+      metrics, global control scanning, and clamped malformed limits were found
+      and corrected before the final matrix.
+- [x] Commit: prepared as isolated `Add powered Z-level elevator cabins` commit
+      on `zlevel/vertical-content`; remote hash verification follows it.
+
+### Mini Review
+
+- Finding: a cabin can be a physical support surface without pretending to be a
+  new tile layer; its one `Body` provider composes with the shaft's other open
+  channels and follows the cabin's local Z.
+- Finding: capturing riders at departure and revalidating them at arrival gives
+  deterministic server behavior without parenting arbitrary gameplay entities
+  to a synthetic moving container.
+- Finding: process-local metrics intentionally survive map recycling. Tests now
+  reset only when they assert local deltas instead of depending on test order.
+- Finding: strict global configuration limits are safer and easier to diagnose
+  than silently clamping malformed mapping values.
+- Residual risk: the engine broadphase must still enumerate every entity
+  intersecting an extremely dense cabin tile before the server can enforce the
+  128-rider cap; P8 scale profiling should include deliberate item piles.
+- Residual risk: P7.2a does not yet prove double save/load round trips or
+  initialized-floor mutation for cabins/stops, and never resumes live in-flight
+  requests. Those are explicit P7.2b persistence tasks.
+- Residual risk: AI cannot yet wait for, call, enter, or execute the physical
+  cabin, and player calls are not queued. Doors, emergency controls,
+  construction, animation, and cross-grid shafts remain product work.
+- Next package: P7.2b binds cabins into dynamic traversal/pathfinding, adds
+  initialized-map round trips and mapping mutations, and hardens malformed and
+  lifecycle cases before elevator content is mapper-complete.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P7.2a | `Add powered Z-level elevator cabins` | 6 focused, 297 broad, 9 unit, 3 baseline, full build, authority/performance/diff review | Complete |
 | 2026-08-29 | P7.1b | `Add authored Z-level vertical surfaces` | 6 focused, 27 path/content, 38 consumers, 291 cases covered, 9 unit, 3 baseline, full build, analyzer/diff review | Complete |
 | 2026-08-29 | P7.1a | `Add bounded Z-level sky exposure` | 15 focused, 285 cases covered, 9 unit, 3 baseline, full build, allocation/LRU/diff review | Complete |
 | 2026-08-29 | P6 gate | `Close Z-level persistence phase` | 1 engine filter, 5 engine atomic, 11 persistence, 17 unit, 3 baseline, architecture/diff review | Complete |

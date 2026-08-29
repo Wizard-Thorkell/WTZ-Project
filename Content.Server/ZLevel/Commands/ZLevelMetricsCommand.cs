@@ -32,6 +32,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<ZLevelSoundRouteSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
             _entityManager.System<ZLevelTraversalGraphSystem>().ResetMetrics();
+            _entityManager.System<ZLevelElevatorSystem>().ResetMetrics();
             _entityManager.System<PathfindingSystem>().ResetZLevelMetrics();
             _entityManager.System<NPCSteeringSystem>().ResetZLevelMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
@@ -48,6 +49,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var boundaries = _entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
         var explosion = _entityManager.System<ExplosionSystem>();
+        var elevators = _entityManager.System<ZLevelElevatorSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
         var pathfinding = _entityManager.System<PathfindingSystem>();
         var soundPlayback = _entityManager.System<ZLevelSoundPlaybackSystem>();
@@ -206,6 +208,21 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{traversalMetrics.DisabledEdges}/{traversalMetrics.UnavailableEdges}/" +
             $"{traversalMetrics.UnpoweredEdges}, state/destination changes=" +
             $"{traversalMetrics.DynamicStateChanges}/{traversalMetrics.DestinationChanges}");
+        var elevatorMetrics = elevators.Snapshot();
+        shell.WriteLine(
+            $"  elevators: cabins/stops/active={elevatorMetrics.Cabins}/" +
+            $"{elevatorMetrics.Stops}/{elevatorMetrics.ActiveTravels}, " +
+            $"requests/started/completed/cancelled/rejected={elevatorMetrics.Requests}/" +
+            $"{elevatorMetrics.Started}/{elevatorMetrics.Completed}/" +
+            $"{elevatorMetrics.Cancelled}/{elevatorMetrics.Rejected}");
+        shell.WriteLine(
+            $"  elevator details: unpowered/busy rejects=" +
+            $"{elevatorMetrics.UnpoweredRejections}/{elevatorMetrics.BusyRejections}, " +
+            $"passengers captured/moved={elevatorMetrics.PassengersCaptured}/" +
+            $"{elevatorMetrics.PassengersMoved}, limits stops/travel/passengers=" +
+            $"{ZLevelElevatorSystem.MaximumStopsPerNetwork}/" +
+            $"{ZLevelElevatorSystem.MaximumTravelLevels}/" +
+            $"{ZLevelElevatorSystem.MaximumPassengers}");
         shell.WriteLine(
             $"  traversal snapshots: cached={traversalMetrics.CachedSnapshots}, " +
             $"requests/hits/builds/edges={traversalMetrics.SnapshotRequests}/" +
