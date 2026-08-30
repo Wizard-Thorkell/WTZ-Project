@@ -1,0 +1,582 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "WTZ-PORT-1",
+  "project": {
+    "minimumRevision": "bd6ce6d1e20087ebe689a9b5e782bea28dae8d10",
+    "submodulePath": "RobustToolbox",
+    "submoduleUrl": "https://github.com/Wizard-Thorkell/WTZ-Engine.git"
+  },
+  "engine": {
+    "upstreamBase": {
+      "revision": "3136118b5338ef2d9580178caf5c723e65eb76e7",
+      "tag": "v275.2.0",
+      "title": "Version: 275.2.0"
+    },
+    "officialRevision": "7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2",
+    "officialRemote": "https://github.com/Wizard-Thorkell/WTZ-Engine.git",
+    "commits": [
+      {
+        "revision": "b138a3fa31527d08231c97fecbbcd594205467ca",
+        "title": "Add native Z-level engine foundation",
+        "capability": "engine-foundation"
+      },
+      {
+        "revision": "f23464319bb28f553d7a50552ca9dbe40f3c941f",
+        "title": "Stabilize Z-level chunk lifecycle replication",
+        "capability": "chunk-replication"
+      },
+      {
+        "revision": "383c5428ccada3239bcfdc8910c208e6478399b0",
+        "title": "Add per-session PVS culling and sprite render hooks",
+        "capability": "pvs-render-hooks"
+      },
+      {
+        "revision": "e111a6c8dd98efd0ac517e8e916b6b56d0009f16",
+        "title": "Add sparse Z-level tile enumeration",
+        "capability": "sparse-tile-enumeration"
+      },
+      {
+        "revision": "40b4b723daf7de65621d90113e4fb435cda71334",
+        "title": "Add Z-level tile index serialization",
+        "capability": "tile-index-serialization"
+      },
+      {
+        "revision": "4e582a810c0ad053874bef3cee47385cedeb8032",
+        "title": "Add moving-grid Z-level frames",
+        "capability": "moving-grid-frames"
+      },
+      {
+        "revision": "558689ba9a17e63d33ee1b59057a5895d70b99de",
+        "title": "Expose serialized entity YAML identifiers",
+        "capability": "serialized-yaml-identifiers"
+      },
+      {
+        "revision": "b768b2ac33d01d13dbc9ca7c0a0d092c345410ea",
+        "title": "Add deterministic physics contact flush API",
+        "capability": "physics-contact-flush"
+      },
+      {
+        "revision": "ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c",
+        "title": "Carry coordinate layers through pointer input",
+        "capability": "pointer-coordinate-layer"
+      },
+      {
+        "revision": "17f6c8f8d763c2b6afa8d136cbb87c88934f0372",
+        "title": "Render active grid layers by world Z",
+        "capability": "world-z-rendering"
+      },
+      {
+        "revision": "dca90bdf1f9e93539a03078186eb72922257054d",
+        "title": "Add reusable component-tree query buffers",
+        "capability": "reusable-tree-queries"
+      },
+      {
+        "revision": "9d63eec79515c766a875f0d32803250298ddbcde",
+        "title": "Add native light blend mode",
+        "capability": "light-add-blend"
+      },
+      {
+        "revision": "32f197aee162589f73ae158c3de24154cce365eb",
+        "title": "Expose external point-light shadow atlases",
+        "capability": "external-shadow-atlases"
+      },
+      {
+        "revision": "b6051ff8c6d7b04638be2dbbbd0020b159906771",
+        "title": "Allow safe ImageSharp pixel reads",
+        "capability": "imagesharp-pixel-read"
+      },
+      {
+        "revision": "3794b33b6c0e9fa5bca7feeaba5edfcd11f0ddfb",
+        "title": "Expose positional audio post-processing",
+        "capability": "audio-post-processing"
+      },
+      {
+        "revision": "87e2732606b5df3f1c035d0089d053cdf333eb77",
+        "title": "Centralize audio recipient filtering",
+        "capability": "audio-recipient-filtering"
+      },
+      {
+        "revision": "3aaca280f628876939afcc10a9be920b3898902a",
+        "title": "Allow content audio source positioning",
+        "capability": "audio-source-position"
+      },
+      {
+        "revision": "f2ae5853f6ebbebe158951d90686d2d67e243537",
+        "title": "Allow read-only filtered entity snapshots",
+        "capability": "filtered-entity-snapshots"
+      },
+      {
+        "revision": "a90b854ce97c3a77cc1a8851446d7f13762d31ab",
+        "title": "Report invalid entity references during map loads",
+        "capability": "invalid-reference-reporting"
+      },
+      {
+        "revision": "7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2",
+        "title": "Add atomic file dialog writes",
+        "capability": "atomic-file-writes"
+      }
+    ]
+  },
+  "buildProjects": [
+    {
+      "repository": "engine",
+      "path": "Robust.Server.IntegrationTests/Robust.Server.IntegrationTests.csproj"
+    },
+    {
+      "repository": "project",
+      "path": "Content.IntegrationTests/Content.IntegrationTests.csproj"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "engine-foundation",
+      "phase": "foundation",
+      "engineCommit": "b138a3fa31527d08231c97fecbbcd594205467ca",
+      "summary": "Sparse Z-level tile coordinates, map APIs, entity positions, physics filtering, placement, replication, and serialization.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Map/ZLevelTileIndices.cs",
+          "pattern": "public readonly record struct ZLevelTileIndices\\(int X, int Y, int Z\\)",
+          "description": "Typed three-dimensional tile index contract"
+        },
+        {
+          "path": "Robust.Shared/GameObjects/Systems/SharedMapSystem.ZLevel.cs",
+          "pattern": "public void SetZLevelTile\\(",
+          "description": "Native sparse layer mutation API"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Shared/ZLevel/ZLevelTrace.cs",
+          "pattern": "ZLevelTileIndices Tile",
+          "description": "Content geometric contracts consume native tile indices"
+        }
+      ]
+    },
+    {
+      "id": "chunk-replication",
+      "phase": "foundation",
+      "engineCommit": "f23464319bb28f553d7a50552ca9dbe40f3c941f",
+      "summary": "Creation, update, and deletion of chunks containing only non-zero sparse layers replicate deterministically.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/GameStates/GameStateMapData.cs",
+          "pattern": "Dictionary<int, Tile\\[\\]>\\? ZLevelTileData",
+          "description": "Replicated chunk payload carries sparse layers"
+        },
+        {
+          "path": "Robust.Shared/Map/MapChunk.cs",
+          "pattern": "CopyNonZeroLayerData\\(",
+          "description": "Chunk lifecycle exposes detached sparse layer data"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.IntegrationTests/Tests/ZLevel/ZLevelMapFormatTest.cs",
+          "pattern": "SetZLevelTile\\(",
+          "description": "Content integration exercises native sparse chunk state"
+        }
+      ]
+    },
+    {
+      "id": "pvs-render-hooks",
+      "phase": "foundation",
+      "engineCommit": "383c5428ccada3239bcfdc8910c208e6478399b0",
+      "summary": "Server sessions can cull cross-floor entities and Content can adjust or cancel individual sprite draws.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/GameStates/SharedPvsOverrideSystem.cs",
+          "pattern": "public virtual void ReplaceSessionCulling\\(",
+          "description": "Per-session PVS exclusion API"
+        },
+        {
+          "path": "Robust.Client/GameObjects/EntitySystems/SpriteSystem.cs",
+          "pattern": "public struct BeforeSpriteRenderEvent",
+          "description": "Per-sprite render policy hook"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/ZLevel/Systems/ZLevelPvsSystem.cs",
+          "pattern": "_pvs\\.ReplaceSessionCulling\\(",
+          "description": "Z-level server visibility installs session exclusions"
+        },
+        {
+          "path": "Content.Client/ZLevel/ZLevelSpriteVisibilitySystem.cs",
+          "pattern": "BeforeSpriteRenderEvent",
+          "description": "Z-level client visibility consumes the sprite hook"
+        }
+      ]
+    },
+    {
+      "id": "sparse-tile-enumeration",
+      "phase": "foundation",
+      "engineCommit": "e111a6c8dd98efd0ac517e8e916b6b56d0009f16",
+      "summary": "Callers can enumerate authored sparse tiles without allocating empty layers.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/GameObjects/Systems/SharedMapSystem.ZLevel.cs",
+          "pattern": "public IEnumerable<ZLevelTileRef> GetAllNonEmptyZLevelTiles\\(",
+          "description": "Sparse non-empty tile enumeration API"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/ZLevel/Structural/ZLevelStructuralSystem.cs",
+          "pattern": "GetAllNonEmptyZLevelTiles\\(",
+          "description": "Structural topology enumerates only authored tiles"
+        }
+      ]
+    },
+    {
+      "id": "tile-index-serialization",
+      "phase": "foundation",
+      "engineCommit": "40b4b723daf7de65621d90113e4fb435cda71334",
+      "summary": "Z-level tile indices have a native serialization manager contract.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Serialization/TypeSerializers/Implementations/ZLevelTileIndicesSerializer.cs",
+          "pattern": "public sealed class ZLevelTileIndicesSerializer",
+          "description": "Native serializer registration target"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Shared/Atmos/Serialization/ZLevelTileAtmosCollectionSerializer.cs",
+          "pattern": "Dictionary<ZLevelTileIndices, TileAtmosphere>",
+          "description": "Authored atmosphere state keys use serializable tile indices"
+        }
+      ]
+    },
+    {
+      "id": "moving-grid-frames",
+      "phase": "foundation",
+      "engineCommit": "4e582a810c0ad053874bef3cee47385cedeb8032",
+      "summary": "Each moving grid can translate local floors into stable world Z levels.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Map/Components/ZLevelFrameComponent.cs",
+          "pattern": "public sealed partial class ZLevelFrameComponent",
+          "description": "Serialized grid-local world-Z frame origin"
+        },
+        {
+          "path": "Robust.Shared/GameObjects/Systems/SharedTransformSystem.ZLevel.cs",
+          "pattern": "public int LocalToWorldZLevel\\(",
+          "description": "Local-to-world floor conversion API"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Shared/ZLevel/Systems/SharedZLevelSystem.cs",
+          "pattern": "GetZLevelFrameOrigin\\(",
+          "description": "Content stamps entities through the structural frame"
+        }
+      ]
+    },
+    {
+      "id": "serialized-yaml-identifiers",
+      "phase": "P6",
+      "engineCommit": "558689ba9a17e63d33ee1b59057a5895d70b99de",
+      "summary": "In-memory map duplication can correlate source entities with their serialized YAML IDs.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/EntitySerialization/Systems/MapLoaderSystem.Save.cs",
+          "pattern": "out IReadOnlyDictionary<EntityUid, int> yamlIds",
+          "description": "Serialization overload returns stable YAML identifiers"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/ZLevel/Systems/ZLevelMappingSystem.cs",
+          "pattern": "SerializeEntitiesRecursive\\(sourceRoots, out yamlIds",
+          "description": "Initialized floor copying correlates serialized entities"
+        }
+      ]
+    },
+    {
+      "id": "physics-contact-flush",
+      "phase": "P2",
+      "engineCommit": "b768b2ac33d01d13dbc9ca7c0a0d092c345410ea",
+      "summary": "Ballistic simulation can deterministically flush pending broadphase contacts after vertical movement.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Physics/Systems/SharedPhysicsSystem.Contacts.cs",
+          "pattern": "public void FlushPendingContacts\\(\\)",
+          "description": "Explicit deterministic contact flush API"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Shared/ZLevel/Systems/SharedZLevelBallisticSystem.cs",
+          "pattern": "PhysicsSystem\\.FlushPendingContacts\\(\\)",
+          "description": "Cross-floor trajectories synchronize collision state"
+        }
+      ]
+    },
+    {
+      "id": "pointer-coordinate-layer",
+      "phase": "P2",
+      "engineCommit": "ecae4d1959ecae7b681e6e96fbc05ca4577e0d2c",
+      "summary": "Network pointer commands preserve the authoritative world layer selected by the client.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Input/InputCmdMessage.cs",
+          "pattern": "public int\\? CoordinateLayer \\{ get; init; \\}",
+          "description": "Network input payload carries an optional coordinate layer"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Shared/Interaction/SharedInteractionSystem.cs",
+          "pattern": "args\\.CoordinateLayer",
+          "description": "Server interaction authority consumes the networked layer"
+        }
+      ]
+    },
+    {
+      "id": "world-z-rendering",
+      "phase": "P3",
+      "engineCommit": "17f6c8f8d763c2b6afa8d136cbb87c88934f0372",
+      "summary": "Eye, grid, light, occluder, and render statistics operate on an active world Z layer.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Graphics/Eye.cs",
+          "pattern": "public int WorldZLevel \\{ get; set; \\}",
+          "description": "Camera contract selects a world floor"
+        },
+        {
+          "path": "Robust.Client/Graphics/IClyde.cs",
+          "pattern": "ZLevelRenderStats ZLevelRenderStats",
+          "description": "Renderer exposes bounded Z-level work counters"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelViewContextSystem.cs",
+          "pattern": "WorldZLevel",
+          "description": "Content view context drives the engine eye floor"
+        },
+        {
+          "path": "Content.Client/ZLevel/ZLevelDebugOverlay.cs",
+          "pattern": "ZLevelRenderStats",
+          "description": "Content diagnostics consume renderer statistics"
+        }
+      ]
+    },
+    {
+      "id": "reusable-tree-queries",
+      "phase": "P3",
+      "engineCommit": "dca90bdf1f9e93539a03078186eb72922257054d",
+      "summary": "Lighting can query component trees with caller-owned buffers instead of allocating per request.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/ComponentTrees/ComponentTreeSystem.cs",
+          "pattern": "public void QueryAabb<TState>\\(",
+          "description": "Stateful caller-buffer component-tree query"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelLightingCacheSystem.cs",
+          "pattern": "_lightTree\\.QueryAabb\\(",
+          "description": "Lighting cache reuses its tree query workspace"
+        }
+      ]
+    },
+    {
+      "id": "light-add-blend",
+      "phase": "P3",
+      "engineCommit": "9d63eec79515c766a875f0d32803250298ddbcde",
+      "summary": "Projected lower-floor light can blend into the native light buffer without replacing it.",
+      "engineProbes": [
+        {
+          "path": "Robust.Client/Graphics/Shaders/ShaderParser.cs",
+          "pattern": "t\\.Word == \"light_add\" => ShaderBlendMode\\.LightAdd",
+          "description": "Shader parser accepts the native light-add blend mode"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Resources/Textures/Shaders/zlevel_light_projection.swsl",
+          "pattern": "blend_mode light_add;",
+          "description": "Projected Z-level light requests native additive lighting"
+        }
+      ]
+    },
+    {
+      "id": "external-shadow-atlases",
+      "phase": "P3",
+      "engineCommit": "32f197aee162589f73ae158c3de24154cce365eb",
+      "summary": "Content can allocate and render a bounded point-light shadow atlas for projected floors.",
+      "engineProbes": [
+        {
+          "path": "Robust.Client/Graphics/IClyde.cs",
+          "pattern": "IRenderTexture CreateLightShadowMap\\(",
+          "description": "External shadow atlas allocation API"
+        },
+        {
+          "path": "Robust.Client/Graphics/IClyde.cs",
+          "pattern": "LightShadowMapRenderStats RenderLightShadowMap\\(",
+          "description": "External shadow atlas render API"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelLightingProjectionOverlay.cs",
+          "pattern": "_clyde\\.RenderLightShadowMap\\(",
+          "description": "Projected lighting renders its bounded atlas"
+        }
+      ]
+    },
+    {
+      "id": "imagesharp-pixel-read",
+      "phase": "P3",
+      "engineCommit": "b6051ff8c6d7b04638be2dbbbd0020b159906771",
+      "summary": "Sandboxed Content can read ImageSharp pixels for deterministic visual capture analysis.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/ContentPack/Sandbox.yml",
+          "pattern": "get_Item\\(int, int\\)",
+          "description": "Sandbox permits Image<TPixel> indexed reads"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelLightingCaptureAnalysis.cs",
+          "pattern": "var pixel = image\\[",
+          "description": "Visual analysis reads captured pixels"
+        }
+      ]
+    },
+    {
+      "id": "audio-post-processing",
+      "phase": "P4",
+      "engineCommit": "3794b33b6c0e9fa5bca7feeaba5edfcd11f0ddfb",
+      "summary": "Client Content can reposition a stream after native attenuation and early-mute processing.",
+      "engineProbes": [
+        {
+          "path": "Robust.Client/Audio/AudioSystem.cs",
+          "pattern": "public event Action<EntityUid, AudioComponent, TransformComponent, MapCoordinates>\\? StreamProcessed",
+          "description": "Single-consumer positional audio post-processing hook"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelSoundPresentationSystem.cs",
+          "pattern": "_audio\\.StreamProcessed \\+= OnStreamProcessed",
+          "description": "Vertical sound presentation subscribes to the hook"
+        }
+      ]
+    },
+    {
+      "id": "audio-recipient-filtering",
+      "phase": "P4",
+      "engineCommit": "87e2732606b5df3f1c035d0089d053cdf333eb77",
+      "summary": "Server routing and native audio playback share one recipient filter policy.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Audio/Systems/SharedAudioSystem.cs",
+          "pattern": "public static bool IsAudioTargetAllowed\\(",
+          "description": "Shared authoritative audio-recipient predicate"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/ZLevel/Systems/ZLevelSoundPlaybackSystem.cs",
+          "pattern": "SharedAudioSystem\\.IsAudioTargetAllowed\\(",
+          "description": "Vertical sound authorization reuses native filtering"
+        }
+      ]
+    },
+    {
+      "id": "audio-source-position",
+      "phase": "P4",
+      "engineCommit": "3aaca280f628876939afcc10a9be920b3898902a",
+      "summary": "Sandboxed Content can assign the apparent source position of a routed sound.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/Audio/Components/AudioComponent.cs",
+          "pattern": "Access\\(Other = AccessPermissions\\.ReadWriteExecute\\)",
+          "description": "Audio source position is writable from Content"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/ZLevel/ZLevelSoundPresentationSystem.cs",
+          "pattern": "component\\.Position = policy\\.Position",
+          "description": "Routed sound applies its apparent source position"
+        }
+      ]
+    },
+    {
+      "id": "filtered-entity-snapshots",
+      "phase": "P6",
+      "engineCommit": "f2ae5853f6ebbebe158951d90686d2d67e243537",
+      "summary": "Map serialization can include only authored persistent entities without mutating the live map.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/EntitySerialization/Options.cs",
+          "pattern": "public EntitySerializationFilter\\? EntityFilter;",
+          "description": "Operation-local entity inclusion filter"
+        },
+        {
+          "path": "Robust.Shared/EntitySerialization/Options.cs",
+          "pattern": "public bool SuppressMapSerializationEvents;",
+          "description": "Read-only snapshot event suppression"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/Mapping/MappingSnapshotSystem.cs",
+          "pattern": "EntityFilter = Filter",
+          "description": "Initialized mapping snapshots exclude transient state"
+        }
+      ]
+    },
+    {
+      "id": "invalid-reference-reporting",
+      "phase": "P6",
+      "engineCommit": "a90b854ce97c3a77cc1a8851446d7f13762d31ab",
+      "summary": "Map loads return structured invalid-reference diagnostics before an atomic save is accepted.",
+      "engineProbes": [
+        {
+          "path": "Robust.Shared/EntitySerialization/LoadResult.cs",
+          "pattern": "List<EntityReferenceError> InvalidEntityReferences",
+          "description": "Structured load-result reference diagnostics"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Server/Mapping/MappingSnapshotSystem.cs",
+          "pattern": "result\\.InvalidEntityReferences\\.Count",
+          "description": "Snapshot validation rejects broken references"
+        }
+      ]
+    },
+    {
+      "id": "atomic-file-writes",
+      "phase": "P6",
+      "engineCommit": "7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2",
+      "summary": "Client mapping writes use a flushed temporary file and atomic destination replacement.",
+      "engineProbes": [
+        {
+          "path": "Robust.Client/UserInterface/IFileDialogManager.cs",
+          "pattern": "Task<bool> SaveFileAtomic\\(",
+          "description": "Atomic save-dialog contract"
+        },
+        {
+          "path": "Robust.Client/UserInterface/AtomicFileWriter.cs",
+          "pattern": "internal static async Task WriteAsync\\(",
+          "description": "Temporary write and replacement implementation"
+        }
+      ],
+      "projectProbes": [
+        {
+          "path": "Content.Client/Mapping/MappingManager.cs",
+          "pattern": "_file\\.SaveFileAtomic\\(",
+          "description": "Mapping save uses the atomic engine contract"
+        }
+      ]
+    }
+  ]
+}

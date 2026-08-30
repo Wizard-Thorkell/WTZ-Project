@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.3b versioned engine/content porting manifest and verifier`.
+- Active package: `P8.3c clean-worktree port rehearsal and P8.3 phase gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -123,8 +123,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P8.3a | Executable Z 0 compatibility inventory and regression matrix | Complete |
-| P8.3b | Versioned engine/content porting manifest and compatibility verifier | Active |
-| P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Pending |
+| P8.3b | Versioned engine/content porting manifest and compatibility verifier | Complete |
+| P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Active |
 
 ## Phase P0 Packages
 
@@ -7915,10 +7915,109 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.3b freezes the minimal engine/content port boundary, verifies
   revisions and required symbols/files, and reports actionable incompatibilities.
 
+## Completed Package: P8.3b Versioned Engine/Content Port Contract
+
+### Scope
+
+- Define the machine-readable `WTZ-PORT-1` boundary between WTZ Project and WTZ
+  Engine, rooted at RobustToolbox `v275.2.0` and the official paired revisions.
+- Inventory the ordered 20-commit engine extension series as 20 independently
+  named capabilities, with an engine API probe and project consumer for each.
+- Add strict official-pair and history-independent portable verification modes,
+  protected compile targets, clean-worktree enforcement, and JSON evidence.
+- Add a fail-closed self-test for malformed manifests and rewritten histories.
+- Publish a destination workflow, failure interpretation, and the explicit
+  boundary between source/compile compatibility and runtime proof.
+
+### Evidence
+
+- `verify_zlevel_port.ps1 -Mode Paired -NoRestore` passes the exact WTZ pair at
+  project minimum `bd6ce6d1`, engine base `3136118b`, and engine head
+  `7cbd778024`. It verifies all 20 capabilities, the 20 ordered commit subjects,
+  28 engine plus 22 Content probes, the submodule gitlink/URL, and both protected
+  Debug builds with zero contract failures.
+- The verifier self-test passes 6/6. It rejects a missing capability, missing
+  probe, broken probe, missing protected build, and official head outside the
+  ordered series. It accepts an unresolvable official project hash only in
+  `Portable` mode and only with the expected rewritten-history warning.
+- The existing executable Z 0 gate passes all 18/18 contracts across 15 domains.
+  The complete Debug `FullyQualifiedName~ZLevel` matrix passes 342/342 with no
+  failures or skips, and Content Z-level/mapping units pass 22/22.
+- Two generated 3/6/10-floor baseline runs pass 3/3. The final run records
+  10.560, 15.535, and 34.209 ms with 6,336 allocated bytes at every depth. The
+  first run recorded one transient 6,560-byte 10-floor sample and returned to
+  6,336 bytes in the fresh rerun; no production path changed in this package.
+- The final non-incremental single-worker `SpaceStation14.slnx` build passes in
+  2m30.59s with zero errors and 688 established upstream warnings.
+
+### Decisions
+
+- Keep the engine boundary capability-oriented. Commit identity is authoritative
+  for the official pair, while a destination may satisfy the same capability
+  through rebased, cherry-picked, or equivalent source in `Portable` mode.
+- Require every capability to have both an engine probe and a real project
+  consumer. An API marker without compiled consumption is not a portable
+  contract.
+- Protect `WTZ-PORT-1`, all 20 capability IDs, exactly 50 probes, both build
+  targets, and the final-series head in the verifier itself. Editing only the
+  manifest cannot silently weaken the gate.
+- Capture native-process output and exit codes explicitly under Windows
+  PowerShell 5.1. Expected Git or verifier failures remain inspectable instead
+  of escaping before the JSON report or self-test can classify them.
+- Treat source probes and compilation as compatibility evidence, not runtime
+  equivalence. P8.3c owns a clean detached rehearsal; P8.4 owns foreign/runtime
+  and public-server release evidence.
+
+### Completion Gate
+
+- [x] Scope check: one manifest, two PowerShell tools, one focused guide, and
+      synchronized roadmap/hardening/ledger documentation; production behavior
+      and the WTZ Engine checkout are unchanged.
+- [x] Invariant review: Z 0 preservation, world/local frames, moving grids,
+      server authority, rendering, audio, physics, serialization, save/load,
+      and atomic writes are represented by named engine/consumer contracts.
+- [x] Automated verification: 6 self-tests, 50 probes, 2 contract builds, 18 Z 0
+      contracts, 342 broad integration cases, 22 unit/mapping cases, two
+      baseline runs, and the full solution build pass.
+- [x] Performance evidence: no runtime source changed; repeated neutral
+      baselines preserve the 6,336-byte final reference, with the one transient
+      224-byte variance recorded rather than hidden.
+- [x] Documentation: official pair, 20-capability series, verification modes,
+      destination workflow, reports, failures, and semantic limits are covered.
+- [x] Dependency check: WTZ Engine is clean, published, and paired at
+      `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [x] Git check: generated reports remain ignored; whitespace, staged scope,
+      worktrees, commit, push, and remote hash are checked at publication.
+- [x] Mini review: fail-closed mutation, rewritten-history acceptance, native
+      stderr handling, manifest integrity, and runtime-proof limits were tested.
+- [x] Commit: package prepared as `Define the WTZ Z-level port contract` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: the engine fork contains exactly 20 WTZ commits over `v275.2.0`, not
+  an informal or partially recoverable patch set. The manifest now preserves
+  their order, subjects, responsibilities, and consumers.
+- Finding: a portable verifier must tolerate missing official commit objects,
+  not merely different checked-out heads. The acceptance self-test exposed and
+  fixed that distinction before publication.
+- Finding: official-pair and portable equivalence are intentionally different
+  claims. The report names which one was established instead of collapsing them
+  into a generic pass.
+- Residual risk: regex probes prove required source shapes, and builds prove
+  signatures, but neither proves semantics after adapting to a foreign upstream.
+- Residual risk: the single transient 10-floor allocation sample reinforces that
+  P8.4 needs explicit performance tolerances and repeated release samples rather
+  than equality against one process measurement.
+- Next package: P8.3c will execute the guide from clean detached project/engine
+  worktrees, verify both modes in Release, record the destination-style result,
+  and close the consolidated P8.3 phase gate.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.3b | `Define the WTZ Z-level port contract` | 6 self-tests, 20 capabilities, 50 probes, 2 builds, 18 Z 0, 342 broad, 22 unit/mapping, 2x3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.3a | `Make Z 0 compatibility executable` | 3 new, 18 contract, all 342 broad covered, 2 isolated pooled, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2c | `Reuse Z-level gravity field workspaces` | 4 focused, 1 Debug + 2 Release soaks, 339 broad covered, isolated cache, 22 unit/mapping, 3 baseline, full build, allocation/diff/dependency review | Complete |
 | 2026-08-30 | P8.2b | `Stagger Z-level PVS refresh work` | 4 scheduler, 1 Debug + 2 Release soaks, 17 focused, 337 broad, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |

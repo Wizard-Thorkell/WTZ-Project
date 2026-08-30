@@ -13,6 +13,7 @@ Official repositories:
 - Engine fork: https://github.com/Wizard-Thorkell/WTZ-Engine
 - Active implementation ledger: [ZLevelImplementationLedger.md](ZLevelImplementationLedger.md)
 - Executable Z 0 compatibility contract: [ZLevelZZeroCompatibility.md](ZLevelZZeroCompatibility.md)
+- Engine/content porting contract: [ZLevelPorting.md](ZLevelPorting.md)
 - Server hardening and scale evidence: [ZLevelServerHardening.md](ZLevelServerHardening.md)
 - Shared trace contract: [ZLevelTrace.md](ZLevelTrace.md)
 - Trace benchmark report: [ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md)
@@ -1179,8 +1180,10 @@ now reuses per-grid gravity topology workspaces and incrementally maintains live
 tiles, reducing total measured allocation by approximately 98.8 percent while
 preserving exact connected-component results. P8.3a now binds 18 exact tests in
 WTZ Project and WTZ Engine to a machine-readable compatibility matrix covering
-15 required Z 0 domains. P8.3b owns the versioned porting contract and automated
-engine/content compatibility verifier.
+15 required Z 0 domains. P8.3b now binds the 20-commit WTZ Engine extension
+series to 20 named capabilities, 50 engine/consumer probes, two protected build
+targets, and a fail-closed compatibility verifier. P8.3c owns the clean-worktree
+portable rehearsal and the consolidated P8.3 phase gate.
 
 ## Definition Of Done
 

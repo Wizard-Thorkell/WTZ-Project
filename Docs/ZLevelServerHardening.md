@@ -259,6 +259,31 @@ three 3/6/10-floor baselines. The baseline remains at 6,336 allocated bytes for
 every floor depth. A non-incremental single-worker solution build completes in
 3m01s with zero errors and 704 established warnings.
 
+## P8.3b Executable Port Contract
+
+WTZ Project now publishes `Docs/ZLevelPortingManifest.json` as the versioned
+`WTZ-PORT-1` engine/content boundary. It records the RobustToolbox `v275.2.0`
+base, the ordered 20-commit WTZ Engine extension series, one capability per
+commit, 28 engine probes, 22 project-consumer probes, and the two compile
+targets that jointly cover the contract.
+
+`Tools/verify_zlevel_port.ps1` has two explicit policies. `Paired` proves the
+official project minimum, exact engine head, commit order and subjects,
+submodule gitlink and URL, all probes, and both builds. `Portable` permits
+rewritten history while keeping probes and builds authoritative. Both modes
+write an ignored revision/hash/build report; `-RequireClean` is reserved for
+release and rehearsal gates.
+
+The verifier protects its capability, probe, build, head, and contract-version
+sets independently from the JSON. `Tools/test_zlevel_port_verifier.ps1` proves
+that five malformed contracts fail closed and that an unresolvable official
+project hash is accepted by `Portable` only with an explicit warning. The final
+package gate passes 6/6 verifier self-tests, 50/50 probes, 2/2 contract builds,
+18/18 Z 0 contracts, 342/342 broad integration cases, 22/22 unit/mapping cases,
+and two 3/6/10-floor baseline runs. The final baseline allocates 6,336 bytes at
+every depth, and the full non-incremental single-worker solution build finishes
+in 2m30.59s with zero errors and 688 established warnings.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -272,10 +297,10 @@ every floor depth. A non-incremental single-worker solution build completes in
   allocation by approximately 98.8 percent with exact connectivity unchanged.
 - **P8.3a:** complete. The `WTZ-Z0-1` matrix protects 15 required domains with
   18 exact project/engine tests and a fail-closed TRX-verifying runner.
-- **P8.3b:** active. Publish the minimal versioned engine/content porting
-  manifest and compatibility verifier.
-- **P8.3c:** rehearse the documented port on a clean worktree and close the
-  phase gate.
+- **P8.3b:** complete. `WTZ-PORT-1` protects the ordered 20-capability engine
+  series with 50 source/consumer probes, two builds, and fail-closed self-tests.
+- **P8.3c:** active. Rehearse the documented port on clean project/engine
+  worktrees and close the phase gate.
 - **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
   regression, operational diagnostics, and the final public-server checklist.
 
