@@ -54,7 +54,7 @@ output, and checks that the report contains the requested profile.
 ## Report Contract
 
 The runner writes `artifacts/zlevel-server-soak/zlevel-server-soak.json`. Schema
-version 2 records:
+version 3 records:
 
 - host runtime, architecture, logical processors, GC mode, and build mode;
 - every configured cache and work budget consumed by the workload;
@@ -63,6 +63,11 @@ version 2 records:
   forced collection, and GC collection counts;
 - min/average/p50/p95/p99/max latency summaries for complete iterations and
   individual per-session PVS refresh calls;
+- the same latency summary plus main-thread allocation for movement/viewer
+  updates, open mutation, vertical consumers, sound, traversal, the complete PVS
+  batch, restoration, restored consumers, and unattributed work;
+- complete-iteration latency split by whether a Gen0/Gen1/Gen2 collection was
+  observed during that iteration;
 - shared boundary, sky, visibility, gravity, PVS, and trace metrics;
 - sound portal, route, and per-session playback metrics;
 - traversal snapshot metrics and final bounded-cache lifecycle state.
@@ -114,13 +119,49 @@ full gravity-field rebuilds after paired tile mutations, and stop-the-world
 Gen0/Gen1 collections. A dedicated-server GC profile remains required by P8.4;
 these workstation-GC captures must not be treated as portable production SLA.
 
+## P8.2 Attribution Evidence
+
+Schema 3 is an append-only extension of the P8.1 report. Two equivalent Release
+captures retained the 10-floor, 32-session, 960-candidate, 8-warm-up, and
+128-measured-iteration profile while attributing each iteration by owner.
+
+| Measurement | Attribution run 1 | Attribution run 2 |
+| --- | ---: | ---: |
+| Total measured time | 7,160.518 ms | 7,123.143 ms |
+| Main-thread allocation | 170,175,768 B | 170,175,552 B |
+| PVS batch p50 / p95 / p99 | 17.714 / 111.475 / 130.917 ms | 15.748 / 110.789 / 132.784 ms |
+| Open vertical consumers p50 / p95 / p99 | 2.975 / 8.145 / 12.095 ms | 2.667 / 9.638 / 15.505 ms |
+| Restored consumers p50 / p95 / p99 | 1.803 / 3.746 / 5.226 ms | 1.791 / 3.519 / 5.646 ms |
+| Gravity build time | 631.818 ms | 626.953 ms |
+| PVS refresh time | 6,064.464 ms | 6,039.005 ms |
+| Iterations with / without a collection | 7 / 121 | 7 / 121 |
+
+The deterministic counters still match exactly and total time differs by only
+0.52 percent. PVS owns approximately 85 percent of measured runtime and its
+32-session batch reproduces the long tail. The two gravity-consumer stages own
+168,249,344 bytes in both runs, approximately 98.9 percent of measured
+allocation, because every removal and restoration forces a complete field
+rebuild. PVS allocates only 409,600 and 411,040 bytes in the complete runs.
+
+Collections do not explain the PVS tail: iterations without a collection still
+reach p95 above 123 ms and maximums above 165 ms. P8.2 therefore has two
+independent production targets. First, stagger session refreshes across ticks so
+the existing 10 Hz cadence does not intentionally batch every player into one
+frame. Second, remove repeated full-grid gravity topology materialization from
+single-tile invalidation without weakening connectivity correctness. Cache
+capacities remain unchanged.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
   traversal, and structural-mutation profile passes without correctness or
   budget failure and establishes the schema 2 reference above.
-- **P8.2:** change budgets, cache policy, invalidation, or lifecycle ownership
-  only in response to P8.1 evidence, then compare the same report schema.
+- **P8.2a:** complete. Schema 3 attributes the reproducible tail to batched PVS
+  CPU and the allocation pressure to full gravity rebuilds.
+- **P8.2b:** stagger and bound PVS refresh scheduling while retaining fail-open
+  visibility behavior, independent sound authorization, and fair session age.
+- **P8.2c:** harden gravity invalidation and field rebuild allocation using the
+  same structural workload and connectivity assertions.
 - **P8.3:** execute the explicit Z 0 regression matrix and publish the minimal
   engine/content porting contract with automated checks.
 - **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping

@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.2 evidence-driven runtime hardening`.
+- Active package: `P8.2b staggered and bounded PVS refresh scheduling`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -109,6 +109,14 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Active |
 | P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Pending |
 | P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Pending |
+
+## Phase P8.2 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P8.2a | Per-stage latency/allocation attribution and GC correlation | Complete |
+| P8.2b | Fair, staggered, and bounded PVS refresh scheduling | Active |
+| P8.2c | Gravity invalidation, topology allocation, and lifecycle hardening | Pending |
 
 ## Phase P0 Packages
 
@@ -7469,9 +7477,9 @@ allocation is inside Robust physics enumeration.
   negligible and sky/sound caches have ample headroom. First decompose the
   reproducible p95 iteration tail by subsystem, then address scheduling,
   invalidation, or allocation at the measured owner.
-- Keep schema 2 as the P8.2 comparison contract. It corrects GC collection
-  accounting by sampling before the deliberate post-run collection and adds
-  percentile summaries without changing production telemetry.
+- Keep schema 2 as the immutable P8.1 baseline. P8.2 may append attribution
+  fields under a new schema while retaining every existing counter and the
+  corrected pre-collection GC accounting.
 
 ### Completion Gate
 
@@ -7521,10 +7529,96 @@ allocation is inside Robust physics enumeration.
   changes only the budget, cache, invalidation, scheduling, or lifecycle path
   shown to own the long tail.
 
+## Completed Package: P8.2a Runtime Attribution
+
+### Scope
+
+- Extend the deterministic soak report without changing its workload or any
+  production subsystem policy.
+- Attribute latency and current-thread allocation to frame/viewer updates, open
+  mutation, vertical consumers, sound, traversal, PVS batch, restoration,
+  restored consumers, and measurement overhead.
+- Correlate complete-iteration latency with Gen0/Gen1/Gen2 collection activity.
+- Validate that attributed bytes sum exactly to the measured iteration bytes and
+  retain every P8.1 correctness, budget, cache, and lifecycle invariant.
+
+### Evidence
+
+- The schema 3 short Debug profile passes 1/1 at 10 floors, 4 sessions, 240
+  candidates, and 8 measured iterations. Its attribution accounts for every one
+  of 10,592,208 measured bytes; the two gravity-consumer stages own 10,515,840.
+- Two schema 3 Release profiles pass at 10 floors, 32 sessions, 960 candidates,
+  8 warm-ups, and 128 measured iterations. Total time is 7,160.518 and 7,123.143
+  ms, a 0.52 percent difference; allocation is 170,175,768 and 170,175,552 bytes.
+- PVS batch p50/p95/p99 is 17.714/111.475/130.917 ms and
+  15.748/110.789/132.784 ms. Shared subsystem metrics attribute 6,064.464 and
+  6,039.005 ms, approximately 85 percent of total runtime, to PVS refreshes.
+- Open vertical consumer p95 is 8.145 and 9.638 ms; restored consumer p95 is
+  3.746 and 3.519 ms. Gravity builds total 631.818 and 626.953 ms.
+- The two gravity-consumer stages allocate exactly 168,249,344 bytes in both
+  runs, approximately 98.9 percent of total allocation. Complete PVS batches
+  allocate only 409,600 and 411,040 bytes.
+- Both runs observe collections in 7 of 128 iterations. The 121 iterations
+  without a collection still have p95 above 123 ms and maximum above 165 ms, so
+  collection pauses do not explain the reproducible PVS tail.
+- The Debug and Release integration projects build with zero errors. All three
+  schema 3 runs preserve exact P8.1 counters, zero budget/fail-open failures,
+  bounded caches, restored tiles, current traversal snapshots, and zero pending
+  gravity refreshes.
+
+### Decisions
+
+- Treat PVS scheduling and gravity topology allocation as independent owners.
+  Do not hide either result behind a larger cache or a looser safety budget.
+- P8.2b will stagger the existing PVS cadence fairly across ticks and bound a
+  single update's session work while preserving fail-open visuals and separately
+  fail-closed sound authorization.
+- P8.2c will avoid repeated full-grid topology materialization for isolated tile
+  mutations while retaining exact connected-component gravity behavior.
+- Schema 3 is append-only over schema 2. Timing remains comparative evidence,
+  while byte conservation and all functional counters remain executable policy.
+
+### Completion Gate
+
+- [x] Scope check: one integration harness, its runner, and synchronized P8 docs;
+      no production policy or engine code changed.
+- [x] Invariant review: workload geometry, Z 0 behavior, world/local frames,
+      moving grids, server sessions, boundary channels, restoration, and caches
+      are unchanged from P8.1.
+- [x] Automated verification: Debug and Release builds pass; one short Debug and
+      two complete Release schema 3 profiles pass.
+- [x] Performance evidence: equivalent Release captures reproduce stage owners,
+      counters, allocations, percentiles, and collection correlation.
+- [x] Documentation: schema, evidence, interpretation, and next owners are
+      synchronized in the ledger, server-hardening guide, runner, and main doc.
+- [x] Dependency check: WTZ Engine remains clean at published revision
+      `7cbd778024`; attribution requires no engine change.
+- [x] Git check: generated reports remain ignored; final staged whitespace,
+      scope, tree, commit, push, and remote hash are checked at publication.
+- [x] Mini review: the attribution itself initially allocated 40 bytes per
+      iteration through `Enum.GetValues`; a pre-measurement static stage table
+      removed that observer error before evidence was accepted.
+- [x] Commit: package prepared as `Attribute Z-level server workload costs` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: batching all sessions at the same 10 Hz boundary, not an individual
+  pathological refresh, creates the PVS frame tail.
+- Finding: gravity rebuilds are a smaller CPU owner in the 32-session profile but
+  dominate allocation and become the primary cost in the 4-session profile.
+- Finding: collection activity is reproducible but is not necessary for a slow
+  iteration; scheduling and topology allocation need direct fixes.
+- Residual risk: stage attribution still runs synthetic sessions on workstation
+  GC. Dedicated-server scheduling and representative-map evidence remain P8.4.
+- Next package: P8.2b introduces fair staggered PVS scheduling, scheduler metrics,
+  deterministic cadence/starvation tests, and before/after batch evidence.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.2a | `Attribute Z-level server workload costs` | Debug/Release builds, 1 short Debug soak, 2 full Release soaks, byte conservation, diff/dependency review | Complete |
 | 2026-08-30 | P8.1 | `Measure deterministic Z-level server scale` | 2 Release soaks, 337 complete Debug, 321 namespace Release, isolated pooled cache, 18 unit/mapping, 5 interaction, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P7 gate | `Close Z-level vertical content phase` | 135 cross-package, all 336 broad covered, 18 unit/mapping, 2x3 baseline, 2x24 real GL, full build, architecture/diff review | Complete |
 | 2026-08-30 | P7.4b2b | `Navigate authored Z-level flight corridors` | 6 focused, 1 official map, 38 path, 336 broad, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |

@@ -1114,11 +1114,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_server_soak
 
 The runner defaults to the P8.1 Release profile of 10 floors, 32 sessions, 960
 representative entities, 36 traversal nodes, and 128 measured structural
-iterations. Its schema 2 report includes subsystem counters and budgets,
-bounded-cache state, allocation/heap/GC evidence, and iteration/PVS latency
-percentiles. Load axes are script parameters; generated reports remain under
-ignored `artifacts/`. See `Docs/ZLevelServerHardening.md` for the workload
-contract, current evidence, and interpretation limits.
+iterations. Its schema 3 report includes subsystem counters and budgets,
+bounded-cache state, allocation/heap/GC evidence, iteration/PVS latency
+percentiles, per-stage latency/allocation, and GC correlation. Load axes are
+script parameters; generated reports remain under ignored `artifacts/`. See
+`Docs/ZLevelServerHardening.md` for the workload contract, current evidence, and
+interpretation limits.
 
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.
@@ -1160,11 +1161,12 @@ gate.
 
 P8.1's deterministic server soak is implemented and has repeatable passing
 Release evidence at 32 sessions without budget exhaustion or retained-heap
-growth. It also exposes a complete-iteration p95 above 130 ms on the reference
-host despite per-session PVS p95 below 5 ms. P8.2 owns subsystem attribution and
-evidence-driven scheduling/invalidation/allocation hardening; current cache
-capacities remain unchanged because the release profile showed no material
-cache pressure.
+growth. P8.2a attributes approximately 85 percent of measured runtime and the
+long-tail frame to the intentionally batched PVS refresh, while paired complete
+gravity rebuilds own approximately 98.9 percent of measured allocation. P8.2b
+and P8.2c own those independent scheduling and invalidation/allocation targets;
+cache capacities remain unchanged because the release profile showed no
+material cache pressure.
 
 ## Definition Of Done
 

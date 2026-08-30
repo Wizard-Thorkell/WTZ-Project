@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
 }
 
 $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-if ($report.schemaVersion -ne 2) {
+if ($report.schemaVersion -ne 3) {
     throw "Unsupported server soak report schema: $($report.schemaVersion)."
 }
 
@@ -121,3 +121,16 @@ Write-Host ("  PVS latency p50/p95/p99/max={0:N3}/{1:N3}/{2:N3}/{3:N3} ms" -f `
     $report.measured.pvsRefreshLatency.p95Milliseconds,
     $report.measured.pvsRefreshLatency.p99Milliseconds,
     $report.measured.pvsRefreshLatency.maxMilliseconds)
+Write-Host "  stage attribution:"
+foreach ($stage in $report.measured.stages) {
+    Write-Host ("    {0}: p50/p95/p99/max={1:N3}/{2:N3}/{3:N3}/{4:N3} ms, allocated={5:N0} bytes" -f `
+        $stage.name,
+        $stage.latency.p50Milliseconds,
+        $stage.latency.p95Milliseconds,
+        $stage.latency.p99Milliseconds,
+        $stage.latency.maxMilliseconds,
+        $stage.allocatedBytes)
+}
+Write-Host ("  iterations with/without GC collection={0}/{1}" -f `
+    $report.measured.collectionCorrelation.iterationsWithCollection,
+    $report.measured.collectionCorrelation.iterationsWithoutCollection)

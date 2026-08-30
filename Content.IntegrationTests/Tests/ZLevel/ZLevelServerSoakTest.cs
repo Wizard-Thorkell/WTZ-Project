@@ -184,7 +184,7 @@ public sealed class ZLevelServerSoakTest : GameTest
                 AssertRestored(stressFixture);
 
                 report = new ZLevelServerSoakReport(
-                    2,
+                    3,
                     DateTimeOffset.UtcNow,
                     CreateHostSnapshot(),
                     settings,
@@ -324,6 +324,7 @@ public sealed class ZLevelServerSoakTest : GameTest
         var routePortals = new List<ZLevelSoundPortal>();
         var iterationLatencyTicks = new long[iterations];
         var pvsRefreshLatencyTicks = new long[iterations * sessions.Count];
+        var stageRecorder = new ZLevelServerSoakStageRecorder(iterations);
         var pvsLatencyIndex = 0;
 
         metrics.ResetCounters();
@@ -341,16 +342,27 @@ public sealed class ZLevelServerSoakTest : GameTest
 
         for (var iteration = 0; iteration < iterations; iteration++)
         {
+            var generationZeroAtIterationStart = GC.CollectionCount(0);
+            var generationOneAtIterationStart = GC.CollectionCount(1);
+            var generationTwoAtIterationStart = GC.CollectionCount(2);
+            var iterationAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var iterationStarted = Stopwatch.GetTimestamp();
+
+            var stageStarted = stageRecorder.Start();
             MoveGrid(entityManager, fixture, iteration);
             PositionViewers(entityManager, fixture, viewers, iteration);
+            stageRecorder.Record(ZLevelServerSoakStage.FrameAndViewerUpdate, iteration, stageStarted);
 
             var mutationTile = MutationTiles[iteration % MutationTiles.Length];
             var mutationZ = 1 + iteration % (fixture.FloorCount - 1);
             var mutation = new ZLevelTileIndices(mutationTile.X, mutationTile.Y, mutationZ);
+
+            stageStarted = stageRecorder.Start();
             map.SetZLevelTile(fixture.StationGridUid, grids[fixture.StationGridUid], mutation, Tile.Empty);
+            stageRecorder.Record(ZLevelServerSoakStage.OpenMutation, iteration, stageStarted);
             try
             {
+                stageStarted = stageRecorder.Start();
                 QueryVerticalConsumers(
                     entityManager,
                     fixture,
@@ -360,13 +372,18 @@ public sealed class ZLevelServerSoakTest : GameTest
                     skyExposure,
                     transform,
                     visibility);
+                stageRecorder.Record(ZLevelServerSoakStage.OpenVerticalConsumers, iteration, stageStarted);
+
+                stageStarted = stageRecorder.Start();
                 RouteAcrossStableShaft(
                     fixture,
                     grids[fixture.StationGridUid],
                     iteration,
                     routes,
                     routePortals);
+                stageRecorder.Record(ZLevelServerSoakStage.SoundRoute, iteration, stageStarted);
 
+                stageStarted = stageRecorder.Start();
                 var openSnapshot = graph.CreateSnapshot(fixture.MapId);
                 Assert.That(
                     graph.ValidateSnapshot(openSnapshot),
@@ -375,20 +392,32 @@ public sealed class ZLevelServerSoakTest : GameTest
                 Assert.That(
                     graph.ValidateSnapshot(cachedOpenSnapshot),
                     Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
+                stageRecorder.Record(ZLevelServerSoakStage.OpenTraversalGraph, iteration, stageStarted);
 
+                stageStarted = stageRecorder.Start();
                 foreach (var session in sessions)
                 {
                     var pvsStarted = Stopwatch.GetTimestamp();
                     pvs.RefreshSession(session);
                     pvsRefreshLatencyTicks[pvsLatencyIndex++] = Stopwatch.GetTimestamp() - pvsStarted;
                 }
+                stageRecorder.Record(ZLevelServerSoakStage.PvsRefreshBatch, iteration, stageStarted);
             }
             finally
             {
-                map.SetZLevelTile(fixture.StationGridUid, grids[fixture.StationGridUid], mutation, floorTile);
-                gravity.Update(0f);
+                stageStarted = stageRecorder.Start();
+                try
+                {
+                    map.SetZLevelTile(fixture.StationGridUid, grids[fixture.StationGridUid], mutation, floorTile);
+                    gravity.Update(0f);
+                }
+                finally
+                {
+                    stageRecorder.Record(ZLevelServerSoakStage.RestoreMutation, iteration, stageStarted);
+                }
             }
 
+            stageStarted = stageRecorder.Start();
             boundaries.TryGetBoundary(
                 fixture.StationGridUid,
                 grids[fixture.StationGridUid],
@@ -405,13 +434,28 @@ public sealed class ZLevelServerSoakTest : GameTest
                 mutationTile,
                 fixture.FloorCount - 1,
                 out _);
+            stageRecorder.Record(ZLevelServerSoakStage.RestoredConsumers, iteration, stageStarted);
+
+            stageStarted = stageRecorder.Start();
             var restoredSnapshot = graph.CreateSnapshot(fixture.MapId);
             Assert.That(graph.ValidateSnapshot(restoredSnapshot), Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
             var cachedRestoredSnapshot = graph.CreateSnapshot(fixture.MapId);
             Assert.That(
                 graph.ValidateSnapshot(cachedRestoredSnapshot),
                 Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.Current));
-            iterationLatencyTicks[iteration] = Stopwatch.GetTimestamp() - iterationStarted;
+            stageRecorder.Record(ZLevelServerSoakStage.RestoredTraversalGraph, iteration, stageStarted);
+
+            var iterationElapsedTicks = Stopwatch.GetTimestamp() - iterationStarted;
+            iterationLatencyTicks[iteration] = iterationElapsedTicks;
+            var iterationAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - iterationAllocatedBefore;
+            var collectionOccurred = GC.CollectionCount(0) != generationZeroAtIterationStart ||
+                GC.CollectionCount(1) != generationOneAtIterationStart ||
+                GC.CollectionCount(2) != generationTwoAtIterationStart;
+            stageRecorder.CompleteIteration(
+                iteration,
+                iterationElapsedTicks,
+                iterationAllocatedBytes,
+                collectionOccurred);
         }
 
         var elapsedTicks = Stopwatch.GetTimestamp() - started;
@@ -427,6 +471,8 @@ public sealed class ZLevelServerSoakTest : GameTest
         var generationTwoCollections = GC.CollectionCount(2) - collectionTwoBefore;
         var iterationLatency = CreateLatencySnapshot(iterationLatencyTicks);
         var pvsRefreshLatency = CreateLatencySnapshot(pvsRefreshLatencyTicks);
+        var stageSnapshots = stageRecorder.CreateStageSnapshots();
+        var collectionCorrelation = stageRecorder.CreateCollectionCorrelation();
         var state = CreateRuntimeState(
             boundaries,
             gravity,
@@ -452,6 +498,8 @@ public sealed class ZLevelServerSoakTest : GameTest
             generationTwoCollections,
             iterationLatency,
             pvsRefreshLatency,
+            stageSnapshots,
+            collectionCorrelation,
             sharedMetrics,
             portalMetrics,
             routeMetrics,
@@ -618,6 +666,13 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(run.GenerationTwoCollections, Is.GreaterThanOrEqualTo(0));
             Assert.That(run.IterationLatency.Samples, Is.EqualTo(settings.MeasuredIterations));
             Assert.That(run.PvsRefreshLatency.Samples, Is.EqualTo(expectedRefreshes));
+            Assert.That(run.Stages, Has.Count.EqualTo(Enum.GetValues<ZLevelServerSoakStage>().Length));
+            Assert.That(run.Stages.Select(stage => stage.Name), Is.Unique);
+            Assert.That(run.Stages.Sum(stage => stage.AllocatedBytes), Is.EqualTo(run.AllocatedBytes));
+            Assert.That(
+                run.CollectionCorrelation.IterationsWithCollection +
+                run.CollectionCorrelation.IterationsWithoutCollection,
+                Is.EqualTo(settings.MeasuredIterations));
             Assert.That(double.IsFinite(run.IterationLatency.P99Milliseconds), Is.True);
             Assert.That(double.IsFinite(run.PvsRefreshLatency.P99Milliseconds), Is.True);
             Assert.That(run.IterationLatency.P50Milliseconds,
@@ -685,6 +740,44 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(run.RuntimeState.GravityPendingRefreshGrids, Is.Zero);
             Assert.That(run.RuntimeState.TraversalCachedSnapshots, Is.LessThanOrEqualTo(1));
         });
+
+        foreach (var stage in run.Stages)
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(stage.Latency.Samples, Is.EqualTo(settings.MeasuredIterations));
+                Assert.That(stage.AllocatedBytes, Is.GreaterThanOrEqualTo(0));
+                Assert.That(double.IsFinite(stage.Latency.P99Milliseconds), Is.True);
+                Assert.That(stage.Latency.P50Milliseconds,
+                    Is.LessThanOrEqualTo(stage.Latency.MaxMilliseconds));
+                Assert.That(stage.Latency.P95Milliseconds,
+                    Is.LessThanOrEqualTo(stage.Latency.MaxMilliseconds));
+                Assert.That(stage.Latency.P99Milliseconds,
+                    Is.LessThanOrEqualTo(stage.Latency.MaxMilliseconds));
+            });
+        }
+
+        AssertCorrelationLatency(
+            run.CollectionCorrelation.WithCollectionLatency,
+            run.CollectionCorrelation.IterationsWithCollection);
+        AssertCorrelationLatency(
+            run.CollectionCorrelation.WithoutCollectionLatency,
+            run.CollectionCorrelation.IterationsWithoutCollection);
+    }
+
+    private static void AssertCorrelationLatency(
+        ZLevelServerSoakLatencySnapshot? latency,
+        int expectedSamples)
+    {
+        if (expectedSamples == 0)
+        {
+            Assert.That(latency, Is.Null);
+            return;
+        }
+
+        Assert.That(latency, Is.Not.Null);
+        Assert.That(latency!.Samples, Is.EqualTo(expectedSamples));
+        Assert.That(double.IsFinite(latency.P99Milliseconds), Is.True);
     }
 
     private void AssertRestored(ZLevelStressFixture fixture)
@@ -808,6 +901,132 @@ public sealed class ZLevelServerSoakTest : GameTest
         TestContext.AddTestAttachment(path, "WTZ Z-level deterministic server soak");
         TestContext.Progress.WriteLine($"WTZ Z-level server soak: {path}");
     }
+
+    internal enum ZLevelServerSoakStage : byte
+    {
+        FrameAndViewerUpdate,
+        OpenMutation,
+        OpenVerticalConsumers,
+        SoundRoute,
+        OpenTraversalGraph,
+        PvsRefreshBatch,
+        RestoreMutation,
+        RestoredConsumers,
+        RestoredTraversalGraph,
+        Unattributed,
+    }
+
+    private readonly record struct ZLevelServerSoakStageStart(long TimestampTicks, long AllocatedBytes);
+
+    private sealed class ZLevelServerSoakStageRecorder
+    {
+        private static readonly ZLevelServerSoakStage[] StageValues =
+            Enum.GetValues<ZLevelServerSoakStage>();
+
+        private readonly long[][] _latencyTicks;
+        private readonly long[][] _allocatedBytes;
+        private readonly long[] _iterationTicks;
+        private readonly bool[] _collectionOccurred;
+
+        public ZLevelServerSoakStageRecorder(int iterations)
+        {
+            var stageCount = StageValues.Length;
+            _latencyTicks = new long[stageCount][];
+            _allocatedBytes = new long[stageCount][];
+            for (var stage = 0; stage < stageCount; stage++)
+            {
+                _latencyTicks[stage] = new long[iterations];
+                _allocatedBytes[stage] = new long[iterations];
+            }
+
+            _iterationTicks = new long[iterations];
+            _collectionOccurred = new bool[iterations];
+        }
+
+        public ZLevelServerSoakStageStart Start()
+        {
+            return new ZLevelServerSoakStageStart(
+                Stopwatch.GetTimestamp(),
+                GC.GetAllocatedBytesForCurrentThread());
+        }
+
+        public void Record(
+            ZLevelServerSoakStage stage,
+            int iteration,
+            ZLevelServerSoakStageStart started)
+        {
+            var index = (int) stage;
+            _latencyTicks[index][iteration] = Stopwatch.GetTimestamp() - started.TimestampTicks;
+            _allocatedBytes[index][iteration] =
+                GC.GetAllocatedBytesForCurrentThread() - started.AllocatedBytes;
+        }
+
+        public void CompleteIteration(
+            int iteration,
+            long totalTicks,
+            long totalAllocatedBytes,
+            bool collectionOccurred)
+        {
+            long attributedTicks = 0;
+            long attributedBytes = 0;
+            foreach (var stage in StageValues)
+            {
+                if (stage == ZLevelServerSoakStage.Unattributed)
+                    continue;
+
+                attributedTicks += _latencyTicks[(int) stage][iteration];
+                attributedBytes += _allocatedBytes[(int) stage][iteration];
+            }
+
+            if (attributedTicks > totalTicks || attributedBytes > totalAllocatedBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Stage attribution exceeded iteration {iteration} totals: " +
+                    $"ticks {attributedTicks}/{totalTicks}, bytes {attributedBytes}/{totalAllocatedBytes}.");
+            }
+
+            _latencyTicks[(int) ZLevelServerSoakStage.Unattributed][iteration] =
+                totalTicks - attributedTicks;
+            _allocatedBytes[(int) ZLevelServerSoakStage.Unattributed][iteration] =
+                totalAllocatedBytes - attributedBytes;
+            _iterationTicks[iteration] = totalTicks;
+            _collectionOccurred[iteration] = collectionOccurred;
+        }
+
+        public IReadOnlyList<ZLevelServerSoakStageSnapshot> CreateStageSnapshots()
+        {
+            var snapshots = new List<ZLevelServerSoakStageSnapshot>(_latencyTicks.Length);
+            foreach (var stage in StageValues)
+            {
+                var index = (int) stage;
+                snapshots.Add(new ZLevelServerSoakStageSnapshot(
+                    stage.ToString(),
+                    CreateLatencySnapshot((long[]) _latencyTicks[index].Clone()),
+                    _allocatedBytes[index].Sum()));
+            }
+
+            return snapshots;
+        }
+
+        public ZLevelServerSoakCollectionCorrelationSnapshot CreateCollectionCorrelation()
+        {
+            var withCollection = new List<long>();
+            var withoutCollection = new List<long>();
+            for (var iteration = 0; iteration < _iterationTicks.Length; iteration++)
+            {
+                var destination = _collectionOccurred[iteration]
+                    ? withCollection
+                    : withoutCollection;
+                destination.Add(_iterationTicks[iteration]);
+            }
+
+            return new ZLevelServerSoakCollectionCorrelationSnapshot(
+                withCollection.Count,
+                withoutCollection.Count,
+                withCollection.Count == 0 ? null : CreateLatencySnapshot(withCollection.ToArray()),
+                withoutCollection.Count == 0 ? null : CreateLatencySnapshot(withoutCollection.ToArray()));
+        }
+    }
 }
 
 internal sealed record ZLevelServerSoakSettings(
@@ -918,6 +1137,8 @@ internal sealed record ZLevelServerSoakRunSnapshot(
     int GenerationTwoCollections,
     ZLevelServerSoakLatencySnapshot IterationLatency,
     ZLevelServerSoakLatencySnapshot PvsRefreshLatency,
+    IReadOnlyList<ZLevelServerSoakStageSnapshot> Stages,
+    ZLevelServerSoakCollectionCorrelationSnapshot CollectionCorrelation,
     ZLevelMetricsSnapshot SharedMetrics,
     ZLevelSoundPortalCacheMetrics SoundPortals,
     ZLevelSoundRouteMetrics SoundRoutes,
@@ -940,6 +1161,17 @@ internal sealed record ZLevelServerSoakLatencySnapshot(
     double P95Milliseconds,
     double P99Milliseconds,
     double MaxMilliseconds);
+
+internal sealed record ZLevelServerSoakStageSnapshot(
+    string Name,
+    ZLevelServerSoakLatencySnapshot Latency,
+    long AllocatedBytes);
+
+internal sealed record ZLevelServerSoakCollectionCorrelationSnapshot(
+    int IterationsWithCollection,
+    int IterationsWithoutCollection,
+    ZLevelServerSoakLatencySnapshot? WithCollectionLatency,
+    ZLevelServerSoakLatencySnapshot? WithoutCollectionLatency);
 
 internal sealed record ZLevelServerSoakRuntimeState(
     int BoundaryCacheEntries,
