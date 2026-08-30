@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using Content.Client.Administration.Managers;
 using Content.Client.Weather;
 using Content.Client.ZLevel.Commands;
 using Content.Client.Viewport;
@@ -50,6 +51,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private static readonly Vector2 ClearProbe = new(5.5f, 4.5f);
     private static readonly Vector2 ActiveFloorProbe = new(3.5f, 2.5f);
     private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan AdminSettleDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ObserveRetryInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ScreenshotTimeout = TimeSpan.FromSeconds(10);
     private const double MinimumShadowModeDifference = 0.0004d;
@@ -74,6 +76,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     };
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
+    [Dependency] private readonly IClientAdminManager _admin = default!;
     [Dependency] private readonly IClientConsoleHost _console = default!;
     [Dependency] private readonly EyeSystem _eyeSystem = default!;
     [Dependency] private readonly IEyeManager _eyeManager = default!;
@@ -102,6 +105,8 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private CapturePhase _phase;
     private long _started;
     private long _lastObserveAttempt;
+    private long _lastReadminAttempt;
+    private long _observerReady;
     private long _screenshotQueued;
     private long _serverViewRequested;
     private int _captureIndex;
@@ -144,6 +149,8 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _autoShutdown = autoShutdown;
         _started = Stopwatch.GetTimestamp();
         _lastObserveAttempt = 0;
+        _lastReadminAttempt = 0;
+        _observerReady = 0;
         _captureIndex = 0;
         _restored = false;
         _fixturePrepared = false;
@@ -239,6 +246,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             transform.MapID != MapId.Nullspace &&
             HasComp<EyeComponent>(player))
         {
+            _observerReady = Stopwatch.GetTimestamp();
             _phase = CapturePhase.WaitingForFixture;
             return;
         }
@@ -253,6 +261,21 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
 
     private void WaitForFixture()
     {
+        if (_observerReady == 0 || Elapsed(_observerReady) < AdminSettleDelay)
+            return;
+
+        if (!_admin.IsActive())
+        {
+            var now = Stopwatch.GetTimestamp();
+            if (_lastReadminAttempt == 0 || Elapsed(_lastReadminAttempt) >= ObserveRetryInterval)
+            {
+                _lastReadminAttempt = now;
+                _console.RemoteExecuteCommand(null, "readmin");
+            }
+
+            return;
+        }
+
         if (_state.CurrentState is not IMainViewportState ||
             !TryFindFixture(out var grid))
         {

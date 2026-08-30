@@ -1213,8 +1213,17 @@ ms p95, 865,682 allocated bytes per cycle, and a 265,360-byte retained-heap
 delta after full collection. The prolonged 32-session run passes 1,024
 iterations without scheduler debt, and the separate 64-session capacity gate
 passes at 44.535 ms p95, 95.31 percent context-cache hits, and 28,315 allocated
-bytes per iteration. P8.4c next owns the executable gameplay, mapping, and
-persistence release matrix.
+bytes per iteration.
+
+P8.4c now defines `WTZ-RELEASE-1` as a fail-closed Release build plus 41 exact
+tests across 19 gameplay, mapping, and persistence domains. It composes the
+18-test Z 0 contract, 50-probe engine/project contract, and 15-capture,
+24-check real-client visual contract while binding clean source and the exact
+WTZ Engine gitlink. Development and broad regression evidence pass; the strict
+clean run remains the package completion authority. The complete contract,
+commands, report interpretation, and limits are documented in
+`Docs/ZLevelRelease.md`. P8.4d then owns operational diagnostics, recovery, and
+the final public-server roadmap gate.
 
 ## Definition Of Done
 

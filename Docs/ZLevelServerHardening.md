@@ -418,6 +418,35 @@ retain high-water capacity until their owning grid is removed. These limits are
 regression thresholds for the declared host and synthetic fixture, not a
 portable player-count promise for arbitrary maps or hardware.
 
+## P8.4c Executable Release Matrix
+
+`Docs/ZLevelReleaseManifest.json` and `Tools/run_zlevel_release_gate.ps1`
+define `WTZ-RELEASE-1`. The fail-closed runner requires clean paired WTZ Project
+and WTZ Engine worktrees, exact gitlink identity, a full `SpaceStation14.slnx`
+Release build, and 41 exact tests across 19 gameplay, mapping, persistence, and
+presentation domains. It parses exact TRX results and rejects omitted,
+duplicate, failed, or undeclared tests.
+
+The matrix composes `WTZ-Z0-1` at 18/18 tests, `WTZ-PORT-1` at 50/50 probes,
+and `WTZ-VISUAL-1` at exactly 15 captures and 24/24 checks. Child report
+identity, revisions, counts, and SHA-256 hashes are part of the parent record.
+Development-only dirty/build/visual switches can report only
+`DevelopmentPassed`; they cannot satisfy the strict contract.
+
+Release integration also refreshes an attached in-game viewer immediately when
+its world Z changes and keeps transform ancestors of visible PVS candidates in
+transport. This is required for an upper-floor player, light, and occluder to
+replicate as an attached hierarchy immediately after traversal. Metrics count
+only evaluated candidates so transport parents do not corrupt visibility
+conservation.
+
+The full development matrix passes 41/41 exact tests and all three composites.
+Broader evidence passes 343 cases with two explicit conditional skips and zero
+failures, 22/22 unit/mapping cases, the 3/6/10-floor baseline, and a full Debug
+solution build with zero errors. Package completion still requires a strict
+clean run from the first published package revision. Commands, report schema,
+evidence, and residual risks are in `Docs/ZLevelRelease.md`.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -441,9 +470,12 @@ portable player-count promise for arbitrary maps or hardware.
 - **P8.4b:** complete. True
   Server GC lifecycle, 32-session endurance, and 64-session capacity envelopes
   pass with exact cache ownership restored after every map cycle.
-- **P8.4:** active. P8.4c owns the executable gameplay, mapping, and persistence
-  release matrix; P8.4d owns operational diagnostics, recovery guidance, and
-  the final public-server checklist.
+- **P8.4c:** active, ready for its strict clean gate. The executable
+  `WTZ-RELEASE-1` contract and broad development evidence pass; no development
+  bypass is acceptable as completion evidence.
+- **P8.4d:** planned. It owns operational diagnostics, recovery guidance,
+  representative deployment checks, and the final P0-P8 public-server
+  checklist.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,

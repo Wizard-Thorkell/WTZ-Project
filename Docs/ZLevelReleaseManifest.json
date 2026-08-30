@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "WTZ-RELEASE-1",
+  "configuration": "Release",
+  "sourcePolicy": {
+    "minimumProjectRevision": "0139161a2ecbdbf6a2fd59b9959b57d401d3a54b",
+    "engineRevision": "7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2",
+    "engineSubmodulePath": "RobustToolbox",
+    "requireCleanProject": true,
+    "requireCleanEngine": true
+  },
+  "buildTargets": [
+    "SpaceStation14.slnx"
+  ],
+  "requiredDomains": [
+    "atmosphere",
+    "combat",
+    "construction",
+    "elevators",
+    "flight",
+    "interaction",
+    "lighting",
+    "mapping-lifecycle",
+    "mapping-placement",
+    "mapping-protocol",
+    "movement-gravity",
+    "navigation-ai",
+    "persistence-autosave",
+    "persistence-roundtrip",
+    "persistence-snapshot",
+    "sound",
+    "traversal",
+    "visibility-rendering",
+    "weather"
+  ],
+  "entries": [
+    {
+      "id": "atmosphere.vertical-gas-flow",
+      "domain": "atmosphere",
+      "contract": "An authored atmosphere opening transfers gas between adjacent floors.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelAtmosTest.ExplicitVerticalOpeningTransfersGas"
+    },
+    {
+      "id": "atmosphere.pipe-network-isolation",
+      "domain": "atmosphere",
+      "contract": "Pipe networks and overlapping atmos devices remain isolated by world floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelAtmosTest.PipeNetworksAndOverlapStayOnTheirZLevel"
+    },
+    {
+      "id": "combat.vertical-hitscan",
+      "domain": "combat",
+      "contract": "Hitscan reaches an intended lower floor only through projectile-open boundaries.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelHitscanTest.OpenVerticalHitscanReachesTargetFloor"
+    },
+    {
+      "id": "combat.projectile-authority",
+      "domain": "combat",
+      "contract": "A fired physical projectile collides only on its authoritative world floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelProjectileLifecycleTest.FiredProjectileCollidesOnlyOnAuthoritativeWorldZ"
+    },
+    {
+      "id": "combat.explosion-three-floor",
+      "domain": "combat",
+      "contract": "Explosion topology crosses two authored openings in deterministic floor order.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelExplosionTopologyTest.TwoOpenBoundariesReachThirdFloorInOrder"
+    },
+    {
+      "id": "construction.vertical-surfaces",
+      "domain": "construction",
+      "contract": "Roofs, grates, catwalks, and shafts author the intended support and boundary channels.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelVerticalContentTest.AuthoredSurfacesResolveChannelsSupportAndConstructionContent"
+    },
+    {
+      "id": "elevators.passenger-move",
+      "domain": "elevators",
+      "contract": "A powered elevator moves its cabin and captured passengers after the authoritative delay.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelElevatorTest.CabinAndCapturedPassengersMoveAfterAuthoritativeDelay"
+    },
+    {
+      "id": "elevators.ai-call-and-ride",
+      "domain": "elevators",
+      "contract": "NPC navigation can call and ride a physical elevator to its requested floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelElevatorTest.NavigationCallsCabinThenCarriesWaitingUserWithZeroDuration"
+    },
+    {
+      "id": "flight.open-boundary-moving-frame",
+      "domain": "flight",
+      "contract": "Native flight crosses open boundaries and keeps a local target while its grid frame moves.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelFlightTest.FlightCrossesOpenBoundariesAndKeepsLocalTargetWhenFrameMoves"
+    },
+    {
+      "id": "flight.gravity-restoration",
+      "domain": "flight",
+      "contract": "Stopping native flight restores artificial gravity behavior without leaving stale state.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelFlightTest.StoppingFlightRestoresArtificialGravity"
+    },
+    {
+      "id": "interaction.vertical-boundary-authority",
+      "domain": "interaction",
+      "contract": "A cross-floor interaction requires an explicitly open interaction boundary.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInteractionAuthorityTest.ExplicitVerticalInteractionRequiresItsBoundaryChannel"
+    },
+    {
+      "id": "interaction.admin-crowbar-floor",
+      "domain": "interaction",
+      "contract": "An admin ghost using a crowbar deconstructs only the floor it currently occupies.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelAdminGhostTileInteractionTest.AdminGhostCrowbarDeconstructsItsCurrentZLevelOnly"
+    },
+    {
+      "id": "lighting.aperture-moving-frame",
+      "domain": "lighting",
+      "contract": "Projected lower-floor light requires a complete aperture stack and follows moving frames.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelLightingProjectionTest.ProjectionRequiresCompleteApertureStackAndTracksMovingFrames"
+    },
+    {
+      "id": "lighting.shadow-order",
+      "domain": "lighting",
+      "contract": "Projected shadow rows remain contiguous and ordered from the nearest visible floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelLightingShadowTest.ShadowRowsFollowNearestFloorOrderAndStayContiguous"
+    },
+    {
+      "id": "mapping-lifecycle.official-map-load",
+      "domain": "mapping-lifecycle",
+      "contract": "The official three-floor mapping station loads with its authored roof and shafts.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMapFormatTest.OfficialThreeFloorTestMapLoadsWithRoofAndShafts"
+    },
+    {
+      "id": "mapping-lifecycle.initialized-floor-mutations",
+      "domain": "mapping-lifecycle",
+      "contract": "Network floor create, copy, and delete operations preserve runtime state on an initialized map.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInitializedMappingMutationTest.NetworkFloorLifecyclePreservesRuntimeStateOnInitializedMap"
+    },
+    {
+      "id": "mapping-placement.tile-floor-authority",
+      "domain": "mapping-placement",
+      "contract": "Mapping tile placement mutates the requested floor rather than canonical Z 0.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.Placement.PlacementZLevelAuthorityTest.TilePlacementUsesRequestedZLevel"
+    },
+    {
+      "id": "mapping-placement.entity-floor-authority",
+      "domain": "mapping-placement",
+      "contract": "Mapping entity placement stamps the authoritative requested floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.Placement.PlacementZLevelAuthorityTest.EntityPlacementStampsRequestedZLevel"
+    },
+    {
+      "id": "mapping-protocol.correlated-save",
+      "domain": "mapping-protocol",
+      "contract": "Server mapping snapshots remain request-correlated and concurrent client saves fail closed.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMappingSaveProtocolTest.ServerAlwaysCorrelatesAndClientRejectsConcurrentSaves"
+    },
+    {
+      "id": "mapping-protocol.pending-request",
+      "domain": "mapping-protocol",
+      "contract": "The client keeps one mapping save request pending until an explicit terminal response.",
+      "project": "Content.Tests/Content.Tests.csproj",
+      "fullyQualifiedTest": "Content.Tests.Client.Mapping.MappingSaveRequestTrackerTest.KeepsRequestPendingUntilExplicitEnd"
+    },
+    {
+      "id": "movement-gravity.no-source-no-fall",
+      "domain": "movement-gravity",
+      "contract": "A configured map without a gravity source does not pull bodies through empty space.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.NativeZLevelMapWithoutGravitySourceDoesNotFall"
+    },
+    {
+      "id": "movement-gravity.generator-target",
+      "domain": "movement-gravity",
+      "contract": "Connected station structure is pulled toward the gravity generator's floor only.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ConnectedGravityGeneratorPullsTowardItsLevelOnly"
+    },
+    {
+      "id": "movement-gravity.opening-fall",
+      "domain": "movement-gravity",
+      "contract": "A body on an upper floor falls once through an unsupported opening and publishes the correct tile event.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ZLevelUpperFloorFallAndTileEventTest"
+    },
+    {
+      "id": "navigation-ai.cross-floor-route",
+      "domain": "navigation-ai",
+      "contract": "NPC steering plans and executes an authored cross-floor route.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelPathfindingTest.NPCSteeringPlansAndExecutesCrossFloorRoute"
+    },
+    {
+      "id": "navigation-ai.flight-corridor",
+      "domain": "navigation-ai",
+      "contract": "NPC steering activates flight only for an authored vertical flight corridor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelFlightPathfindingTest.NPCSteeringPlansAndExecutesAuthoredFlightCorridor"
+    },
+    {
+      "id": "persistence-autosave.initialized-atomic",
+      "domain": "persistence-autosave",
+      "contract": "An initialized mapping autosave is validated, atomically promoted, and loadable.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInitializedMappingAutosaveTest.ValidatedInitializedMapAutosaveIsAtomicAndLoadable"
+    },
+    {
+      "id": "persistence-autosave.server-file-promotion",
+      "domain": "persistence-autosave",
+      "contract": "The server promotes a complete UTF-8 temporary autosave without a byte-order mark.",
+      "project": "Content.Tests/Content.Tests.csproj",
+      "fullyQualifiedTest": "Content.Tests.Server.MappingAutosaveFileWriterTest.PromotesCompleteTemporaryFileWithoutBom"
+    },
+    {
+      "id": "persistence-autosave.client-utf8",
+      "domain": "persistence-autosave",
+      "contract": "The client encodes mapping snapshots as strict UTF-8 without a byte-order mark.",
+      "project": "Content.Tests/Content.Tests.csproj",
+      "fullyQualifiedTest": "Content.Tests.Client.Mapping.MappingManagerTest.EncodesSnapshotAsStrictUtf8WithoutBom"
+    },
+    {
+      "id": "persistence-roundtrip.initialized-double-cycle",
+      "domain": "persistence-roundtrip",
+      "contract": "An initialized authored map is structurally stable across two save/load cycles.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInitializedMapSnapshotTest.InitializedAuthoredMapSnapshotIsStructurallyStableAcrossTwoCycles"
+    },
+    {
+      "id": "persistence-roundtrip.versioned-map",
+      "domain": "persistence-roundtrip",
+      "contract": "Versioned native layers, anchored entities, and boundaries remain equivalent across two map round trips.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMapFormatTest.VersionedMapRoundTripsTwiceWithLayersEntitiesAndBoundaries"
+    },
+    {
+      "id": "persistence-roundtrip.vertical-content",
+      "domain": "persistence-roundtrip",
+      "contract": "Authored vertical content retains equivalent topology across two round trips.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelVerticalContentTest.VerticalContentRoundTripsTwiceWithEquivalentTopology"
+    },
+    {
+      "id": "persistence-snapshot.transient-filtering",
+      "domain": "persistence-snapshot",
+      "contract": "An initialized snapshot excludes transient roots while preserving authored Z-level state.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInitializedMapSnapshotTest.InitializedSnapshotExcludesTransientRootsAndRoundTripsZLevelState"
+    },
+    {
+      "id": "sound.pressure-aware-route",
+      "domain": "sound",
+      "contract": "Vertical sound routes require current pressure and expose transmission loss.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelSoundRouteTest.VerticalRoutesRequireCurrentPressureAndReportTransmissionLoss"
+    },
+    {
+      "id": "sound.unauthorized-audio-mute",
+      "domain": "sound",
+      "contract": "Unauthorized cross-floor audio remains muted even when engine PVS is disabled.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelSoundPlaybackTest.EnginePvsDisabledStillSafetyMutesUnauthorizedCrossFloorAudio"
+    },
+    {
+      "id": "traversal.step-trigger",
+      "domain": "traversal",
+      "contract": "A traversal step trigger starts only when the user occupies its authoritative floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ZLevelTraversalStepTriggerRequiresSameFloor"
+    },
+    {
+      "id": "traversal.adjacent-support",
+      "domain": "traversal",
+      "contract": "The traversal API moves only to directly adjacent floors with valid support.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ZLevelTraversalApiMovesOnlyToDirectSupportedAdjacentFloors"
+    },
+    {
+      "id": "visibility-rendering.pvs-openings",
+      "domain": "visibility-rendering",
+      "contract": "Per-session PVS follows current authored visibility openings.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ZLevelPvsTracksVisibilityOpenings"
+    },
+    {
+      "id": "visibility-rendering.viewer-floor-refresh",
+      "domain": "visibility-rendering",
+      "contract": "Changing the attached viewer's authored floor immediately refreshes PVS and attaches the new floor's lights and occluders.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.ViewerFloorChangeRefreshesPvsAndReplicatesImmediately"
+    },
+    {
+      "id": "visibility-rendering.tile-moving-frame",
+      "domain": "visibility-rendering",
+      "contract": "Projected lower-floor tiles require complete apertures and follow moving grid frames.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelTileProjectionTest.NormalPlanUsesCompleteAperturesAndTracksMovingFrames"
+    },
+    {
+      "id": "weather.configured-exposure",
+      "domain": "weather",
+      "contract": "Configured weather exposure combines local blockers with the authoritative sky column.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelWeatherExposureTest.ConfiguredPolicyCombinesLocalTileBlockersAndSkyColumn"
+    },
+    {
+      "id": "weather.active-floor-mask",
+      "domain": "weather",
+      "contract": "The client weather mask follows the active world floor and moving frame.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelWeatherPresentationTest.MaskUsesActiveWorldFloorAndMovingFrame"
+    }
+  ],
+  "compositeGates": [
+    {
+      "id": "port-pairing",
+      "contractVersion": "WTZ-PORT-1",
+      "script": "Tools/verify_zlevel_port.ps1",
+      "report": "zlevel-port-compatibility.json"
+    },
+    {
+      "id": "real-client-visual",
+      "contractVersion": "WTZ-VISUAL-1",
+      "script": "Tools/run_zlevel_visual_capture.ps1",
+      "report": "zlevel-visual-capture-gate.json",
+      "expectedCaptures": 15,
+      "expectedChecks": 24
+    },
+    {
+      "id": "z-zero",
+      "contractVersion": "WTZ-Z0-1",
+      "script": "Tools/run_zlevel_z0_compatibility.ps1",
+      "report": "zlevel-z0-compatibility.json"
+    }
+  ]
+}

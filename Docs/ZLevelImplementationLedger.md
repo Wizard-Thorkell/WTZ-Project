@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4c executable WTZ-RELEASE-1 gameplay, mapping, and persistence matrix`.
+- Active package: `P8.4c executable WTZ-RELEASE-1 gameplay, mapping, and persistence matrix (implementation verified; strict clean gate pending)`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -8359,6 +8359,113 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4c defines `WTZ-RELEASE-1` as a fail-closed executable matrix
   for gameplay, mapping, initialized save/load, rendering evidence, Z 0, and
   engine/project pairing.
+
+## Active Package: P8.4c Executable WTZ-RELEASE-1 Matrix
+
+### Scope
+
+- Bind a clean WTZ Project revision, exact WTZ Engine revision, and matching
+  `RobustToolbox` gitlink to one versioned release contract.
+- Build the complete solution in Release and execute 41 exact tests across 19
+  gameplay, mapping, persistence, and presentation domains.
+- Compose the existing `WTZ-Z0-1`, `WTZ-PORT-1`, and real-client visual gates
+  without permitting a missing, duplicate, renamed, or additional test to pass
+  silently.
+- Cover immediate PVS refresh after an attached viewer changes floors and keep
+  required transform ancestors in transport without inflating candidate
+  metrics.
+- Record machine-readable evidence and distinguish strict `Passed` runs from
+  all development-only bypasses.
+
+### Development Evidence
+
+- Manifest validation accepts exactly 19 required domains, 41 protected tests,
+  three protected composite gates, one full build target, the declared minimum
+  project revision, and the exact engine/gitlink revision.
+- Eight fail-closed self-tests accept the canonical contract and reject a
+  missing domain, missing entry, duplicate test, unprotected project, missing
+  child gate, weakened clean-source policy, and reduced visual count.
+- Development run `20260830T154257Z-48560-a8427ecd` passes 38/38 integration
+  and 3/3 unit tests, 18/18 Z 0 tests, 50/50 port probes, and 15 captures with
+  24/24 visual checks. It correctly reports `DevelopmentPassed` because the
+  package source was not yet committed.
+- A separate deterministic real-client run passes exactly 15 captures and
+  24/24 checks. Sandbox round setup and explicit admin acquisition remove
+  unrelated fixture mutation and observer-role timing from capture identity.
+- The broad Release Z-level run passes 343 tests, conditionally skips two
+  long fixture-dependent cases, and fails zero of 345 total cases. The three
+  neutral 3/6/10-floor baselines and 22 unit/mapping tests pass.
+- The non-incremental, single-worker Debug solution build succeeds in 2m54.07s
+  with zero errors and 688 established warnings.
+
+### Decisions
+
+- Protect exact fully-qualified tests and reject extra TRX results. A broad
+  filter remains useful regression evidence but cannot define a stable release
+  contract.
+- Require a full Release solution build once in the parent. The port child may
+  skip its duplicate builds only because the parent verifies the exact same
+  paired revisions before invoking it.
+- Treat every dirty-source, skipped-build, or skipped-visual switch as a
+  development run. `DevelopmentPassed` is useful while implementing the gate
+  but is never release evidence.
+- Refresh server PVS synchronously for the attached in-game session after a Z
+  change. Mapping and snapshot actors may transiently have no session and are
+  ignored rather than treated as an invalid runtime state.
+- Preserve transform ancestors as PVS transport dependencies. Count only the
+  original candidate intersection in metrics so `visible + culled ==
+  candidates` remains exact.
+- Make the visual fixture deterministic with Sandbox and explicit admin state;
+  do not weaken pixel checks to accommodate unrelated round variation.
+
+### Pending Completion Gate
+
+- [x] Scope check: the focused source, manifest, runners, tests, and synchronized
+      documentation are confined to the executable release contract and the
+      PVS behavior it exposed.
+- [x] Invariant review: Z 0 compatibility, world/local Z, moving grids, server
+      authority, engine PVS hierarchy, and boundary channels are represented by
+      exact tests or composed child gates.
+- [x] Automated verification: self-tests, manifest validation, complete
+      development matrix, focused PVS/persistence cases, broad Z-level suite,
+      unit/mapping filter, baselines, visual gate, and solution build pass.
+- [x] Performance evidence: this package does not change scheduler cadence or
+      cache policy; existing P8.4a/P8.4b envelopes remain the performance
+      authority and broad metrics conservation passes after the PVS correction.
+- [x] Documentation: contract, commands, reports, development evidence,
+      limitations, and porting implications are recorded in the release guide,
+      overview, hardening guide, porting guide, and ledger.
+- [x] Dependency check: no WTZ Engine source changed; the checkout and gitlink
+      remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [ ] Git check: publish the implementation revision, verify its remote hash,
+      and run the strict gate from the resulting clean project and engine trees.
+- [x] Mini review: fail-closed validation, exact test ownership, report hashes,
+      source identity, PVS hierarchy, metrics conservation, fixture determinism,
+      and residual package advisories were reviewed.
+- [ ] Commit: close only after strict `WTZ-RELEASE-1` reports `Passed` with
+      41/41 tests, 3/3 composites, clean trees, and no development bypasses.
+
+### Mini Review
+
+- Finding: changing the attached viewer's floor updated its Z component before
+  the next scheduled PVS cycle, leaving a short stale exclusion window. The
+  floor-change event now refreshes that session immediately.
+- Finding: preserving a visible child was insufficient when engine PVS excluded
+  its grid or map parent. The bounded transform chain is now kept as transport
+  state while metrics remain candidate-only.
+- Finding: randomized Sandbox-external round variation altered fixture walls
+  and shadows. The visual runner now fixes the preset and admin lifecycle rather
+  than broadening expected pixels.
+- Finding: an initial broad baseline exposed ancestor inflation in visibility
+  metrics. Candidate/visible intersection counting restores exact conservation;
+  the 3/6/10 baselines and complete broad suite pass after the correction.
+- Residual risk: real-client output and timing remain host-specific, and the
+  exact matrix does not exercise every upstream gameplay path or station map.
+- Residual risk: established advisories in cryptography and legacy Pow3r
+  dependencies remain upstream package work; this release matrix records but
+  does not waive them.
+- Next action: publish this implementation, execute the strict clean gate on
+  that exact revision, record its report and hashes, then begin P8.4d.
 
 ## Package History
 

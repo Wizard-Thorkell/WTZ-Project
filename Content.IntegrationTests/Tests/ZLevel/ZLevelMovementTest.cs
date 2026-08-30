@@ -28,6 +28,7 @@ using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
@@ -713,6 +714,108 @@ public sealed class ZLevelMovementTest : MovementTest
         {
             Assert.That(CEntMan.GetComponent<MetaDataComponent>(clientTarget!.Value).Flags.HasFlag(MetaDataFlags.Detached), Is.True,
                 "Closing the boundary again must evict lower-floor entities.");
+        });
+    }
+
+    [Test]
+    public async Task ViewerFloorChangeRefreshesPvsAndReplicatesImmediately()
+    {
+        NetEntity upperLight = default;
+        NetEntity upperOccluder = default;
+
+        await Server.WaitPost(() => Server.CfgMan.SetCVar(CVars.NetPVS, true));
+        await Server.WaitAssertion(() =>
+        {
+            var map = SEntMan.System<SharedMapSystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            var zLevelMap = SEntMan.System<SharedZLevelMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var playerTile = map.TileIndicesFor(
+                MapData.Grid,
+                grid,
+                SEntMan.GetCoordinates(PlayerCoords));
+
+            zLevelMap.Configure(
+                MapData.MapUid,
+                0,
+                1,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+            map.SetZLevelTile(
+                MapData.Grid,
+                grid,
+                new ZLevelTileIndices(playerTile.X, playerTile.Y, 1),
+                new Tile(1));
+
+            var coordinates = SEntMan.GetCoordinates(PlayerCoords);
+            var transientActor = SEntMan.SpawnEntity(null, coordinates);
+            var light = SEntMan.SpawnEntity(null, coordinates);
+            var occluder = SEntMan.SpawnEntity(null, coordinates);
+            SEntMan.EnsureComponent<ActorComponent>(transientActor);
+            SEntMan.EnsureComponent<PointLightComponent>(light);
+            SEntMan.EnsureComponent<OccluderComponent>(occluder);
+            Assert.That(zLevel.SetZLevelPosition(transientActor, 1), Is.True,
+                "An unsessioned transient actor must not be treated as an active PVS viewer.");
+            Assert.That(zLevel.SetZLevelPosition(light, 1), Is.True);
+            Assert.That(zLevel.SetZLevelPosition(occluder, 1), Is.True);
+            upperLight = SEntMan.GetNetEntity(light);
+            upperOccluder = SEntMan.GetNetEntity(occluder);
+            SEntMan.DeleteEntity(transientActor);
+            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+        });
+
+        await Pair.RunUntilSynced();
+        await Client.WaitAssertion(() =>
+        {
+            Assert.That(CEntMan.TryGetEntity(upperLight, out _), Is.False,
+                "The closed upper floor must start outside the Z0 viewer's PVS.");
+            Assert.That(CEntMan.TryGetEntity(upperOccluder, out _), Is.False,
+                "The closed upper floor must start outside the Z0 viewer's PVS.");
+        });
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var zLevel = SEntMan.System<SharedZLevelSystem>();
+            metrics.ResetCounters();
+            Assert.That(zLevel.SetZLevelPosition(SPlayer, 1), Is.True);
+            var snapshot = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(snapshot.PvsRefreshes, Is.EqualTo(1));
+                Assert.That(snapshot.PvsViewers, Is.EqualTo(1));
+                Assert.That(snapshot.PvsCandidates, Is.GreaterThan(0));
+                Assert.That(snapshot.PvsVisible, Is.GreaterThan(0));
+            });
+        });
+
+        await Pair.RunUntilSynced();
+        await Client.WaitAssertion(() =>
+        {
+            var player = CEntMan.GetEntity(Player);
+            Assert.That(CEntMan.System<SharedZLevelSystem>().GetZLevel(player), Is.EqualTo(1));
+            if (!CEntMan.TryGetEntity(upperLight, out var light))
+            {
+                Assert.Fail("The new floor's light must enter PVS with the viewer.");
+                return;
+            }
+
+            if (!CEntMan.TryGetEntity(upperOccluder, out var occluder))
+            {
+                Assert.Fail("The new floor's occluder must enter PVS with the viewer.");
+                return;
+            }
+
+            Assert.That(
+                CEntMan.GetComponent<MetaDataComponent>(light.Value).Flags
+                    .HasFlag(MetaDataFlags.Detached),
+                Is.False,
+                "The new floor's light must remain attached after entering PVS.");
+            Assert.That(
+                CEntMan.GetComponent<MetaDataComponent>(occluder.Value).Flags
+                    .HasFlag(MetaDataFlags.Detached),
+                Is.False,
+                "The new floor's occluder must remain attached after entering PVS.");
         });
     }
 

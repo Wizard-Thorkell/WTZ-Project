@@ -184,9 +184,12 @@ is a partial/promisor clone; its index and worktree remain independent.
    generic engine APIs back into Content.
 4. Run `verify_zlevel_port.ps1 -Mode Portable` with builds enabled.
 5. Run `run_zlevel_z0_compatibility.ps1` to protect ordinary 2D behavior.
-6. Run the focused Z-level, mapping, baseline, visual, and server-soak gates
-   appropriate to the destination's intended feature set.
-7. Record the destination engine/project revisions and any manifest-versioned
+6. Adapt and run `WTZ-RELEASE-1` when the destination intends to claim the full
+   WTZ gameplay/mapping/persistence surface. Its paired `WTZ-PORT-1` child and
+   exact engine revision must be intentionally versioned for that destination.
+7. Run any additional baseline, server-soak, representative-map, and deployment
+   gates appropriate to the destination's intended capacity and feature set.
+8. Record the destination engine/project revisions and any manifest-versioned
    compatibility adaptations before opening a PR.
 
 ## Failure Interpretation
@@ -207,5 +210,9 @@ is a partial/promisor clone; its index and worktree remain independent.
 Source probes detect missing or renamed contracts and compilation detects type-
 level incompatibility. They do not prove runtime semantics on a foreign engine.
 P8.3c proves a clean-worktree rehearsal of both supported history policies.
-P8.4 still owns broad gameplay, visual, mapping, soak, and public-server release
-evidence.
+`WTZ-RELEASE-1` now composes this paired contract with exact gameplay, visual,
+mapping, persistence, and Z 0 evidence for the official WTZ revisions. A
+foreign fork must version its manifest and engine pairing rather than claiming
+the official contract by name after changing either side. Synthetic matrix
+success still does not replace destination-specific soak, representative-map,
+or operational evidence; P8.4d owns those final WTZ checks.

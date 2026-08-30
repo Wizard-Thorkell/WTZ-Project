@@ -15,6 +15,7 @@ using Robust.Shared.Enums;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Player;
 
@@ -30,6 +31,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
     public const int MaximumVisibilityCheckBudget = 1_000_000;
     public const int DefaultMaxSessionRefreshesPerUpdate = 16;
     public const int MaximumSessionRefreshesPerUpdate = 256;
+    private const int MaximumParentDepth = 64;
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly ISharedPlayerManager _players = default!;
@@ -51,6 +53,8 @@ public sealed class ZLevelPvsSystem : EntitySystem
     private readonly ZLevelPvsRefreshScheduler _refreshScheduler = new(TargetRefreshInterval);
 
     private EntityQuery<EyeComponent> _eyeQuery;
+    private EntityQuery<MapComponent> _mapQuery;
+    private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<MetaDataComponent> _metaQuery;
     private EntityQuery<OccluderComponent> _occluderQuery;
     private EntityQuery<PointLightComponent> _pointLightQuery;
@@ -102,12 +106,15 @@ public sealed class ZLevelPvsSystem : EntitySystem
         base.Initialize();
 
         _eyeQuery = GetEntityQuery<EyeComponent>();
+        _mapQuery = GetEntityQuery<MapComponent>();
+        _gridQuery = GetEntityQuery<MapGridComponent>();
         _metaQuery = GetEntityQuery<MetaDataComponent>();
         _occluderQuery = GetEntityQuery<OccluderComponent>();
         _pointLightQuery = GetEntityQuery<PointLightComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
 
         _players.PlayerStatusChanged += OnPlayerStatusChanged;
+        SubscribeLocalEvent<ActorComponent, ZLevelPositionChangedEvent>(OnViewerZLevelChanged);
 
         Subs.CVar(_configuration, CVars.NetPVS, OnPvsEnabled, true);
         Subs.CVar(_configuration, CVars.NetMaxUpdateRange, _ => RefreshViewSize(), true);
@@ -260,6 +267,14 @@ public sealed class ZLevelPvsSystem : EntitySystem
                 if (!_pvsEnabled)
                     continue;
 
+                // Engine PVS treats a culled ancestor as culling its entire subtree.
+                // Map and grid roots are transport dependencies, not visual candidates.
+                if (_mapQuery.HasComp(candidate) || _gridQuery.HasComp(candidate))
+                {
+                    MarkTransformChainVisible(candidate);
+                    continue;
+                }
+
                 if (budgetExhausted || _visible.Contains(candidate))
                     continue;
 
@@ -290,7 +305,7 @@ public sealed class ZLevelPvsSystem : EntitySystem
                       IsVerticalRenderDependencyVisible(candidate, viewer);
                 if (isVisible)
                 {
-                    _visible.Add(candidate);
+                    MarkTransformChainVisible(candidate);
                 }
             }
         }
@@ -318,6 +333,23 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _culled.UnionWith(_soundCulled);
         _pvs.ReplaceSessionCulling(session, _culled);
         RecordRefresh(started, visibilityChecks, false);
+    }
+
+    private void MarkTransformChainVisible(EntityUid candidate)
+    {
+        var current = candidate;
+        for (var depth = 0; depth < MaximumParentDepth; depth++)
+        {
+            _visible.Add(current);
+            if (!_transformQuery.TryComp(current, out var transform))
+                return;
+
+            var parent = transform.ParentUid;
+            if (!parent.IsValid())
+                return;
+
+            current = parent;
+        }
     }
 
     /// <summary>
@@ -432,12 +464,35 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _soundPlayback.ClearSession(args.Session, args.NewStatus != SessionStatus.Disconnected);
     }
 
+    private void OnViewerZLevelChanged(Entity<ActorComponent> entity, ref ZLevelPositionChangedEvent args)
+    {
+        // Mapping and snapshot setup can briefly create an actor before a session is attached.
+        var session = entity.Comp.PlayerSession;
+        if (session == null ||
+            session.Status != SessionStatus.InGame ||
+            session.AttachedEntity != entity.Owner)
+            return;
+
+        RefreshSession(session);
+    }
+
     private void RecordRefresh(long started, int visibilityChecks, bool budgetExhausted)
     {
+        var visibleCandidates = 0;
+        if (!budgetExhausted)
+        {
+            // Engine PVS also needs transform ancestors; metrics count evaluated candidates only.
+            foreach (var candidate in _candidates)
+            {
+                if (_visible.Contains(candidate))
+                    visibleCandidates++;
+            }
+        }
+
         _metrics.RecordPvsRefresh(
             _viewers.Count,
             _candidates.Count,
-            budgetExhausted ? _candidates.Count : _visible.Count,
+            budgetExhausted ? _candidates.Count : visibleCandidates,
             budgetExhausted ? 0 : _culled.Count,
             visibilityChecks,
             budgetExhausted,
