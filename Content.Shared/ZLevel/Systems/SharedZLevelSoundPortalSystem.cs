@@ -576,10 +576,13 @@ public sealed class SharedZLevelSoundPortalSystem : EntitySystem
             _cachedExplicitPortals -= removed.ExplicitOpenCount;
         }
 
-        _invalidatedChunks += _removeScratch.Count;
+        var removedCount = _removeScratch.Count;
+        _invalidatedChunks += removedCount;
         _removeScratch.Clear();
         if (_chunks.Count == 0)
             _cacheOrder.Clear();
+        else if (removedCount > 0)
+            CompactCacheOrder();
     }
 
     private void OnCacheCapacityChanged(int configuredCapacity)

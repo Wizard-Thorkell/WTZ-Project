@@ -42,6 +42,8 @@ public sealed class SharedZLevelSkyExposureSystem : EntitySystem
     private int _maxBoundaryChecks = DefaultMaxBoundaryChecks;
 
     public int CachedExposureCount => _cache.Count;
+    public int CachedColumnCount => _columns.Count;
+    public int CacheOrderEntryCount => _cacheOrder.Count;
     public int CacheCapacity => _cacheCapacity;
     public int MaxBoundaryChecks => _maxBoundaryChecks;
 

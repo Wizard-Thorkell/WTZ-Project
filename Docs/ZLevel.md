@@ -1203,6 +1203,19 @@ and zero deferred or exhausted refreshes. P8.4b owns Server GC endurance,
 repeated grid lifecycle, and retained-memory evidence before the gameplay and
 operations release gates.
 
+P8.4b now runs the same workloads under a testhost that confirms true Server
+GC. A repeated native-map lifecycle harness tracks 17 boundary, sky, gravity,
+sound, and traversal ownership counters and requires all of them to return to
+their exact baseline after every deletion. Boundary and sound bulk teardown
+also compact stale order tokens while preserving entries owned by surviving
+grids. The executable lifecycle envelope passes 128 measured cycles at 20.168
+ms p95, 865,682 allocated bytes per cycle, and a 265,360-byte retained-heap
+delta after full collection. The prolonged 32-session run passes 1,024
+iterations without scheduler debt, and the separate 64-session capacity gate
+passes at 44.535 ms p95, 95.31 percent context-cache hits, and 28,315 allocated
+bytes per iteration. P8.4c next owns the executable gameplay, mapping, and
+persistence release matrix.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

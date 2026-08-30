@@ -22,6 +22,10 @@ param(
 
     [switch] $RequireReleaseEnvelope,
 
+    [switch] $RequireServerGC,
+
+    [switch] $RequireCapacityEnvelope,
+
     [switch] $NoBuild
 )
 
@@ -39,6 +43,18 @@ $releaseEnvelope = [ordered]@{
     MaximumPvsSchedulerFrameMilliseconds = 66.667
     MinimumVisibilityContextCacheHitPercent = 85.0
     MaximumAllocatedBytesPerIteration = 24KB
+}
+$capacityEnvelope = [ordered]@{
+    Floors = 10
+    Sessions = 64
+    MinimumWarmupIterations = 8
+    MinimumMeasuredIterations = 128
+    CandidateCopies = 8
+    MaximumPvsSchedulerFrameP95Milliseconds = 55.0
+    MaximumPvsSchedulerFrameP99Milliseconds = 66.667
+    MaximumPvsSchedulerFrameMilliseconds = 125.0
+    MinimumVisibilityContextCacheHitPercent = 90.0
+    MaximumAllocatedBytesPerIteration = 40KB
 }
 
 if ($RequireReleaseEnvelope) {
@@ -60,6 +76,28 @@ if ($RequireReleaseEnvelope) {
             $releaseEnvelope.CandidateCopies)
     }
 }
+
+if ($RequireCapacityEnvelope) {
+    if ($Configuration -ne "Release") {
+        throw "The capacity envelope requires -Configuration Release."
+    }
+
+    if ($Floors -ne $capacityEnvelope.Floors -or
+        $Sessions -ne $capacityEnvelope.Sessions -or
+        $WarmupIterations -lt $capacityEnvelope.MinimumWarmupIterations -or
+        $Iterations -lt $capacityEnvelope.MinimumMeasuredIterations -or
+        $CandidateCopies -ne $capacityEnvelope.CandidateCopies) {
+        throw (("The capacity envelope requires floors={0}, sessions={1}, warmup>={2}, " +
+            "iterations>={3}, and candidate-copies={4}.") -f
+            $capacityEnvelope.Floors,
+            $capacityEnvelope.Sessions,
+            $capacityEnvelope.MinimumWarmupIterations,
+            $capacityEnvelope.MinimumMeasuredIterations,
+            $capacityEnvelope.CandidateCopies)
+    }
+}
+
+$serverGcRequired = $RequireServerGC -or $RequireCapacityEnvelope
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot "artifacts\zlevel-server-soak"
@@ -89,6 +127,7 @@ $previous = @{
     Warmup = $env:WTZ_ZLEVEL_SOAK_WARMUP
     Iterations = $env:WTZ_ZLEVEL_SOAK_ITERATIONS
     CandidateCopies = $env:WTZ_ZLEVEL_SOAK_CANDIDATE_COPIES
+    ServerGC = $env:DOTNET_gcServer
 }
 
 try {
@@ -98,6 +137,9 @@ try {
     $env:WTZ_ZLEVEL_SOAK_WARMUP = $WarmupIterations.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     $env:WTZ_ZLEVEL_SOAK_ITERATIONS = $Iterations.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     $env:WTZ_ZLEVEL_SOAK_CANDIDATE_COPIES = $CandidateCopies.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    if ($serverGcRequired) {
+        $env:DOTNET_gcServer = "1"
+    }
 
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) {
@@ -111,6 +153,7 @@ finally {
     $env:WTZ_ZLEVEL_SOAK_WARMUP = $previous.Warmup
     $env:WTZ_ZLEVEL_SOAK_ITERATIONS = $previous.Iterations
     $env:WTZ_ZLEVEL_SOAK_CANDIDATE_COPIES = $previous.CandidateCopies
+    $env:DOTNET_gcServer = $previous.ServerGC
 }
 
 if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
@@ -134,6 +177,10 @@ foreach ($entry in $expected.GetEnumerator()) {
     if ($report.settings.($entry.Key) -ne $entry.Value) {
         throw "Server soak report setting '$($entry.Key)' is $($report.settings.($entry.Key)); expected $($entry.Value)."
     }
+}
+
+if ($serverGcRequired -and -not $report.host.serverGarbageCollection) {
+    throw "The server soak report was produced without Server GC enabled."
 }
 
 $releaseEnvelopeSummary = $null
@@ -195,12 +242,75 @@ if ($RequireReleaseEnvelope) {
         $allocatedBytesPerIteration
 }
 
+$capacityEnvelopeSummary = $null
+if ($RequireCapacityEnvelope) {
+    $failures = [System.Collections.Generic.List[string]]::new()
+    $scheduler = $report.measured.pvsScheduler
+    $frameLatency = $report.measured.pvsSchedulerFrameLatency
+    $allocatedBytesPerIteration =
+        [double] $report.measured.allocatedBytes / $report.measured.iterations
+
+    if ($report.host.buildConfiguration -ne "Release") {
+        $failures.Add("report build configuration is '$($report.host.buildConfiguration)'")
+    }
+    if ($frameLatency.p95Milliseconds -gt
+        $capacityEnvelope.MaximumPvsSchedulerFrameP95Milliseconds) {
+        $failures.Add(("PVS frame p95 is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.p95Milliseconds,
+            $capacityEnvelope.MaximumPvsSchedulerFrameP95Milliseconds))
+    }
+    if ($frameLatency.p99Milliseconds -gt
+        $capacityEnvelope.MaximumPvsSchedulerFrameP99Milliseconds) {
+        $failures.Add(("PVS frame p99 is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.p99Milliseconds,
+            $capacityEnvelope.MaximumPvsSchedulerFrameP99Milliseconds))
+    }
+    if ($frameLatency.maxMilliseconds -gt
+        $capacityEnvelope.MaximumPvsSchedulerFrameMilliseconds) {
+        $failures.Add(("PVS frame maximum is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.maxMilliseconds,
+            $capacityEnvelope.MaximumPvsSchedulerFrameMilliseconds))
+    }
+    if ($scheduler.visibilityContextCacheHitPercent -lt
+        $capacityEnvelope.MinimumVisibilityContextCacheHitPercent) {
+        $failures.Add(("PVS context-cache hit rate is {0:N2}%; minimum is {1:N2}%" -f
+            $scheduler.visibilityContextCacheHitPercent,
+            $capacityEnvelope.MinimumVisibilityContextCacheHitPercent))
+    }
+    if ($allocatedBytesPerIteration -gt
+        $capacityEnvelope.MaximumAllocatedBytesPerIteration) {
+        $failures.Add(("allocation is {0:N0} bytes/iteration; maximum is {1:N0}" -f
+            $allocatedBytesPerIteration,
+            $capacityEnvelope.MaximumAllocatedBytesPerIteration))
+    }
+    if ($scheduler.deferredRefreshes -ne 0 -or $scheduler.budgetExhaustions -ne 0) {
+        $failures.Add(("PVS scheduler has {0} deferred refreshes and {1} budget exhaustions" -f
+            $scheduler.deferredRefreshes,
+            $scheduler.budgetExhaustions))
+    }
+
+    if ($failures.Count -gt 0) {
+        throw "Z-level capacity envelope failed: $($failures -join '; ')."
+    }
+
+    $capacityEnvelopeSummary =
+        "p95={0:N3} ms, p99={1:N3} ms, cache={2:N2}%, allocated={3:N0} bytes/iteration" -f
+        $frameLatency.p95Milliseconds,
+        $frameLatency.p99Milliseconds,
+        $scheduler.visibilityContextCacheHitPercent,
+        $allocatedBytesPerIteration
+}
+
 Write-Host "Z-level server soak report written to $reportPath"
 Write-Host ("  sessions={0}, floors={1}, entities={2}, iterations={3}" -f `
     $report.settings.sessionCount,
     $report.settings.floorCount,
     $report.fixture.candidateEntityCount,
     $report.measured.iterations)
+Write-Host ("  host build={0}, server-gc={1}, latency-mode={2}" -f `
+    $report.host.buildConfiguration,
+    $report.host.serverGarbageCollection,
+    $report.host.garbageCollectionLatencyMode)
 Write-Host ("  elapsed={0:N3} ms, per-session-refresh={1:N6} ms, allocated={2:N0} bytes" -f `
     $report.measured.elapsedMilliseconds,
     $report.measured.millisecondsPerSessionRefresh,
@@ -245,4 +355,7 @@ Write-Host ("  iterations with/without GC collection={0}/{1}" -f `
     $report.measured.collectionCorrelation.iterationsWithoutCollection)
 if ($null -ne $releaseEnvelopeSummary) {
     Write-Host "  release envelope: PASS ($releaseEnvelopeSummary)"
+}
+if ($null -ne $capacityEnvelopeSummary) {
+    Write-Host "  capacity envelope: PASS ($capacityEnvelopeSummary)"
 }

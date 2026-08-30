@@ -234,8 +234,9 @@ equivalent. Gravity build CPU also falls from approximately 627-632 ms to
 This is a high-water cache, not zero retained memory. A live grid keeps the
 capacity needed by its largest observed topology until grid teardown. Operators
 should compare reuse, cached-grid count, retained heap after collection, and
-grid lifecycle together. P8.4 still needs representative-station and repeated
-grid creation/deletion evidence before assigning a production memory envelope.
+grid lifecycle together. P8.4b adds the repeated-map and Server GC lifecycle
+evidence below; representative station behavior remains part of the release
+validation rather than an inference from this synthetic topology workload.
 
 ## P8.3a Executable Z 0 Contract
 
@@ -355,6 +356,68 @@ portable promise for arbitrary hardware or station content. P8.4b owns true
 Server GC, longer endurance, repeated grid lifecycle, and retained-memory
 evidence.
 
+## P8.4b Server GC Lifecycle And Capacity Envelopes
+
+The lifecycle harness creates a fresh native three-floor map, fills a 6 by 6
+column on every floor, initializes it, and warms boundary, sky, gravity, sound,
+and traversal caches. It then deletes the map and requires 17 ownership
+counters to return exactly to the state captured before the cycle. A second
+test keeps one warmed map alive while removing another, proving that order-cache
+compaction preserves the surviving map rather than relying on a global clear.
+
+The audit found two teardown-specific retention paths. Boundary cache entries
+were removed when a grid terminated, but their FIFO tokens remained until a
+later capacity compaction. Sound portal grid/map invalidation had the same
+behavior whenever another grid still owned chunks. Both systems now compact
+their order queues after bulk removal. Boundary teardown and configuration
+changes reuse scratch buffers instead of allocating temporary lists, and the
+system has explicit shutdown cleanup. Admin metrics expose cache entries and
+order tokens together, plus boundary registrations/providers and sky
+columns/order entries, so operators can distinguish live high-water state from
+orphaned ownership.
+
+`Tools/run_zlevel_server_lifecycle.ps1` always launches the testhost with
+`DOTNET_gcServer=1`, requires the report itself to confirm Server GC, compares
+the complete baseline and final state, and requires a full collection. Its
+Release envelope requires at least 8 warm-up and 128 measured cycles, cycle
+p95 <= 30 ms, p99 <= 40 ms, maximum <= 66.667 ms, allocation <= 1 MiB per
+cycle, and retained heap delta <= 2 MiB.
+
+| Lifecycle measurement | Calibration | Envelope confirmation |
+| --- | ---: | ---: |
+| Cycle p50 / p95 / p99 | 14.897 / 17.385 / 22.512 ms | 15.212 / 20.168 / 22.802 ms |
+| Cycle maximum | 24.036 ms | 22.849 ms |
+| Allocation per cycle | 865,684 B | 865,682 B |
+| Retained heap delta | 265,144 B | 265,360 B |
+| Gen0 / Gen1 / Gen2 collections | 2 / 2 / 2 | 2 / 2 / 2 |
+
+`Tools/run_zlevel_server_soak.ps1 -RequireServerGC` independently verifies the
+GC mode for ordinary soaks. `-RequireCapacityEnvelope` defines a separate
+64-session Release profile because doubling viewers is not expected to satisfy
+the 32-session one-frame envelope. It requires 10 floors, 64 sessions, 8
+warm-up iterations, at least 128 measured iterations, 8 candidate copies,
+p95 <= 55 ms, p99 <= 66.667 ms, maximum <= 125 ms, context-cache hits >= 90
+percent, allocation <= 40 KiB per iteration, and no scheduler debt or budget
+exhaustion.
+
+| Server GC profile | 32 x 128 | 32 x 1,024 | 64 x 128 capacity gate |
+| --- | ---: | ---: | ---: |
+| Scheduler-frame p95 | 23.315 ms | 19.892 ms | 44.535 ms |
+| Scheduler-frame p99 | 26.437 ms | 22.907 ms | 53.109 ms |
+| Scheduler-frame maximum | 42.555 ms | 59.288 ms | 79.219 ms |
+| Context-cache hit rate | 90.63% | 88.91% | 95.31% |
+| Allocation per iteration | 16,897 B | 15,164 B | 28,315 B |
+| Deferred / exhausted refreshes | 0 / 0 | 0 / 0 | 0 / 0 |
+
+The 1,024-iteration run evaluates 28,525,291 PVS candidates without collection
+inside the measured window because total measured allocation is only 15.5 MB.
+That absence is not used as a retention claim: the lifecycle envelope measures
+process-wide allocation and forces compacting full collections around repeated
+map ownership. Live gravity workspaces and other bounded caches intentionally
+retain high-water capacity until their owning grid is removed. These limits are
+regression thresholds for the declared host and synthetic fixture, not a
+portable player-count promise for arbitrary maps or hardware.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -375,9 +438,12 @@ evidence.
 - **P8.4a:** complete. Batch-local candidate geometry reuse brings the
   32-session scheduler-frame p95 under the executable 30 ms Release envelope
   while final boundary decisions remain per viewer and authoritative.
-- **P8.4:** active. Run prolonged and release-sized profiles, broad
-  gameplay/mapping regression, operational diagnostics, and the final
-  public-server checklist.
+- **P8.4b:** complete. True
+  Server GC lifecycle, 32-session endurance, and 64-session capacity envelopes
+  pass with exact cache ownership restored after every map cycle.
+- **P8.4:** active. P8.4c owns the executable gameplay, mapping, and persistence
+  release matrix; P8.4d owns operational diagnostics, recovery guidance, and
+  the final public-server checklist.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,

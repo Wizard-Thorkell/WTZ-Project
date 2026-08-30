@@ -67,6 +67,9 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"  boundary: queries={metrics.BoundaryQueries}, hits={metrics.BoundaryCacheHits}, " +
             $"misses={metrics.BoundaryCacheMisses}, hit-rate={metrics.BoundaryCacheHitPercent:0.00}%, " +
             $"cache={boundaries.CachedBoundaryCount}/{boundaries.BoundaryCacheCapacity}, " +
+            $"order={boundaries.BoundaryCacheOrderTokenCount}, " +
+            $"registrations/providers={boundaries.BoundaryRegistrationCount}/" +
+            $"{boundaries.BoundaryProviderCount}, " +
             $"invalidations={metrics.BoundaryInvalidations}, evictions={metrics.BoundaryEvictions}");
         shell.WriteLine(
             $"  sky exposure: queries={metrics.SkyExposureQueries}, " +
@@ -74,6 +77,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"checks={metrics.SkyExposureBoundaryChecks}, " +
             $"hit-rate={metrics.SkyExposureCacheHitPercent:0.00}%, " +
             $"cache={skyExposure.CachedExposureCount}/{skyExposure.CacheCapacity}, " +
+            $"columns/order={skyExposure.CachedColumnCount}/{skyExposure.CacheOrderEntryCount}, " +
             $"invalid/boundary/budget={metrics.SkyExposureInvalidQueries}/" +
             $"{metrics.SkyExposureBoundaryFailures}/{metrics.SkyExposureBudgetExhaustions}, " +
             $"invalidated/evicted={metrics.SkyExposureInvalidatedEntries}/" +
@@ -189,6 +193,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"  sound portals: queries={portalMetrics.PortalQueries}, " +
             $"chunks={portalMetrics.CachedChunks}/{portalMetrics.CacheCapacity}, " +
             $"open/explicit={portalMetrics.CachedOpenPortals}/{portalMetrics.CachedExplicitPortals}, " +
+            $"order={portalMetrics.CacheOrderTokens}, " +
             $"hit-rate={portalMetrics.CacheHitPercent:0.00}%, builds={portalMetrics.Builds}, " +
             $"budget={portalMetrics.ChunkBudgetExhaustions}/" +
             $"{portalMetrics.BuildBudgetExhaustions}/{portalMetrics.CandidateBudgetExhaustions}");

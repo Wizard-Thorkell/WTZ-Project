@@ -420,16 +420,34 @@ public sealed class ZLevelSoundPortalCacheTest : GameTest
             var auxiliary = mapManager.CreateGridEntity(testMap.MapId);
             auxiliary.Comp.CanSplit = false;
             var portals = SEntMan.System<SharedZLevelSoundPortalSystem>();
+            var primary = new Entity<MapGridComponent>(
+                testMap.Grid,
+                SEntMan.GetComponent<MapGridComponent>(testMap.Grid));
             portals.InvalidateAll();
+            Assert.That(portals.TryGetPortalChunk(
+                primary,
+                Vector2i.Zero,
+                0,
+                out _), Is.True);
             Assert.That(portals.TryGetPortalChunk(
                 auxiliary,
                 Vector2i.Zero,
                 0,
                 out _), Is.True);
-            Assert.That(portals.CachedChunkCount, Is.EqualTo(1));
+            Assert.That(portals.CachedChunkCount, Is.EqualTo(2));
 
             SEntMan.DeleteEntity(auxiliary.Owner);
-            Assert.That(portals.CachedChunkCount, Is.Zero);
+            var metrics = portals.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(portals.CachedChunkCount, Is.EqualTo(1));
+                Assert.That(metrics.CacheOrderTokens, Is.EqualTo(1));
+                Assert.That(portals.TryGetPortalChunk(
+                    primary,
+                    Vector2i.Zero,
+                    0,
+                    out _), Is.True);
+            });
         });
     }
 

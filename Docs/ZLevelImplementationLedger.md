@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4b Server GC endurance, lifecycle, and memory envelope`.
+- Active package: `P8.4c executable WTZ-RELEASE-1 gameplay, mapping, and persistence matrix`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -115,8 +115,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P8.4a | Batch-local PVS context reuse and 32-session Release envelope | Complete |
-| P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Active |
-| P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Planned |
+| P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Complete |
+| P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Active |
 | P8.4d | Operational diagnostics, recovery guide, and final P0-P8 gate | Planned |
 
 ## Phase P8.2 Packages
@@ -8239,10 +8239,132 @@ allocation is inside Robust physics enumeration.
   endurance, repeated map/grid creation and deletion, and verifies that owned
   caches and retained memory return to explicit bounds.
 
+## Completed Package: P8.4b Server GC Lifecycle And Capacity Envelopes
+
+### Scope
+
+- Audit boundary, sky, gravity, sound, and traversal cache ownership across
+  repeated native-map creation, initialization, warming, and deletion.
+- Run the deterministic 32-session soak and a separate 64-session capacity
+  profile in a testhost that reports true Server GC.
+- Add executable latency, allocation, scheduler-debt, and retained-memory
+  envelopes without changing gameplay policy, cache capacity, PVS cadence, or
+  the WTZ Engine dependency.
+- Expose ownership diagnostics needed to compare live cache entries with order
+  tokens, registrations, providers, and column indexes.
+
+### Evidence
+
+- The lifecycle harness warms 17 ownership counters on a native three-floor
+  map and returns every counter to the exact pre-cycle baseline after each of 8
+  warm-up and 128 measured create/delete cycles. A second two-map test removes
+  one owner while retaining the other and proves surviving boundary and sound
+  entries remain exact.
+- Two Server GC lifecycle captures pass. The calibration records 17.385 ms p95,
+  22.512 ms p99, 24.036 ms maximum, 865,684 allocated bytes per cycle, and a
+  265,144-byte retained delta. The executable envelope confirmation records
+  20.168 ms p95, 22.802 ms p99, 22.849 ms maximum, 865,682 bytes per cycle,
+  and a 265,360-byte retained delta. Both observe 2/2/2 Gen0/Gen1/Gen2
+  collections and exact final-state equality.
+- The 32-session, 128-iteration Server GC smoke passes the P8.4a Release
+  envelope at 23.315 ms p95, 26.437 ms p99, 90.63 percent context hits, and
+  16,897 bytes per iteration. The 1,024-iteration endurance run evaluates
+  28,525,291 candidates at 19.892 ms p95, 22.907 ms p99, 59.288 ms maximum,
+  88.91 percent hits, and 15,164 bytes per iteration. Neither run accumulates
+  scheduler debt or exhausts a budget.
+- The repeated 64-session capacity gate passes at 44.535 ms p95, 53.109 ms
+  p99, 79.219 ms maximum, 95.31 percent context hits, and 28,315 bytes per
+  iteration, with zero deferred or exhausted refreshes.
+- The canonical Debug `FullyQualifiedName~ZLevel` matrix passes 343 cases and
+  conditionally skips one aperture-cache case; that case passes 1/1 in
+  isolation, so all 344 cases are covered without a failed assertion. The
+  narrower namespace matrix also passes 328/328, and the package's three
+  targeted lifecycle/survivor tests pass 3/3.
+- Content Z-level/mapping units pass 22/22. The final Debug 3/6/10-floor
+  baseline passes at 10.6475, 15.6408, and 24.2960 ms with exactly 6,336
+  allocated bytes and zero boundary, sky, or gravity warm-cache misses at every
+  depth.
+- The non-incremental single-worker Debug solution build succeeds in 2m58.17s
+  with zero errors and 704 established upstream warnings.
+
+### Decisions
+
+- Compact FIFO order tokens after bulk grid/map removal. Ordinary tile
+  invalidation keeps the existing bounded lazy-token policy; the capacity-based
+  compactor still prevents unbounded growth without adding sort work to every
+  mutation.
+- Reuse boundary teardown and order-compaction scratch lists. Teardown should
+  release owned entries without allocating another high-water object graph.
+- Treat cache entries and order tokens as separate ownership counters. A cache
+  count alone could report zero while stale keys still retained grid identity.
+- Require the generated report, not merely the parent shell, to identify Server
+  GC and the requested build configuration. Environment variables are restored
+  in `finally` after every runner invocation.
+- Keep the 32-session Release envelope and 64-session capacity envelope
+  separate. The latter permits p95 <= 55 ms, p99 <= 66.667 ms, maximum <= 125
+  ms, hits >= 90 percent, and allocation <= 40 KiB per iteration while still
+  requiring zero scheduler debt and budget exhaustion.
+- Use process-wide allocation and compacting full collections for lifecycle
+  retention evidence. The prolonged soak's lack of an in-window collection is
+  expected from only 15.5 MB of measured allocation and is not treated as proof
+  of zero retention.
+
+### Completion Gate
+
+- [x] Scope check: cache ownership cleanup, diagnostics, Server GC runners,
+      lifecycle tests, envelopes, and synchronized documentation only; no
+      unrelated gameplay, content, cadence, or engine behavior changed.
+- [x] Invariant review: component-free Z 0, map-local/world Z, moving grids,
+      surviving owners, boundary-channel authority, and server-only lifecycle
+      behavior remain unchanged and covered.
+- [x] Automated verification: 3 targeted, all 344 broad cases covered, 328
+      namespace cases, 22 unit/mapping cases, 3 baselines, 2 lifecycle runs, 3
+      Server GC soak profiles, and the full solution build pass.
+- [x] Performance evidence: lifecycle calibration and confirmation, 1,024-run
+      endurance, and repeated 64-session capacity samples record latency,
+      allocation, GC mode, cache ownership, debt, budgets, and retained heap.
+- [x] Documentation: ownership model, commands, report schema, thresholds,
+      measured evidence, high-water semantics, and interpretation limits are
+      recorded in the hardening guide, overview, and ledger.
+- [x] Dependency check: no WTZ Engine source changed; project gitlink and clean
+      engine checkout remain paired at
+      `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [x] Git check: whitespace, ignored artifacts, source status, focused diff,
+      script parsing, dependency pairing, and remote identity pass review before
+      publication.
+- [x] Mini review: cache ownership, surviving-grid behavior, queue bounds,
+      forced-GC interpretation, configuration identity, environment cleanup,
+      threshold headroom, and residual fixture limits were reviewed.
+- [x] Commit: package closes as `Bound Z-level cache ownership across server
+      lifecycles` on `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: dictionary cleanup was not sufficient ownership cleanup. Boundary
+  and sound queues could retain stale grid-bearing tokens after bulk removal
+  even though live entry counters looked correct.
+- Finding: an empty-cache lifecycle and a surviving-cache lifecycle are both
+  necessary. A final `Clear()` can make the former pass while hiding accidental
+  deletion or retention when another owner remains active.
+- Finding: the shared project output can make `--configuration Debug --no-build`
+  execute a previously built Release assembly. The final Debug build and gates
+  were rerun after detecting that identity ambiguity rather than mislabeling the
+  earlier functional pass.
+- Residual risk: the soaks use deterministic synthetic positions and content on
+  one Windows host. The envelopes are regression gates, not a portable public
+  server player-count guarantee.
+- Residual risk: live grids intentionally retain bounded high-water workspaces.
+  This package proves release on owner teardown, not continuous shrinkage while
+  an unusually large grid remains alive.
+- Next package: P8.4c defines `WTZ-RELEASE-1` as a fail-closed executable matrix
+  for gameplay, mapping, initialized save/load, rendering evidence, Z 0, and
+  engine/project pairing.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4b | `Bound Z-level cache ownership across server lifecycles` | 3 targeted, all 344 broad covered, 328 namespace, 22 unit/mapping, 3 baseline, 2 lifecycle + 3 Server GC profiles, full build, ownership/performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.4a | `Reuse PVS geometry across Z-level viewers` | 11 focused, all 342 broad covered, 22 unit/mapping, 3 baseline, 2 repeated + 1 envelope Release soak, full build, performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.3c / P8.3 gate | `Close the WTZ Z-level porting phase` | 2 clean modes, 100 probes, 4 Release builds, 6 self-tests, 18 Z 0, all 342 broad covered, 22 unit/mapping, 3 baseline, full build, cleanup/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.3b | `Define the WTZ Z-level port contract` | 6 self-tests, 20 capabilities, 50 probes, 2 builds, 18 Z 0, 342 broad, 22 unit/mapping, 2x3 baseline, full build, diff/dependency review | Complete |

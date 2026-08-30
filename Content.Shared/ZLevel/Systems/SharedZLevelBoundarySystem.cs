@@ -38,11 +38,16 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     private readonly Dictionary<BoundaryCacheKey, int> _providerCounts = new();
     private readonly Dictionary<BoundaryCacheKey, BoundaryCacheEntry> _boundaryCache = new();
     private readonly Queue<BoundaryCacheToken> _boundaryCacheOrder = new();
+    private readonly List<BoundaryCacheKey> _removeScratch = new();
+    private readonly List<BoundaryCacheToken> _cacheOrderScratch = new();
     private int _boundaryCacheCapacity = DefaultBoundaryCacheCapacity;
     private long _nextCacheSequence;
 
     public int CachedBoundaryCount => _boundaryCache.Count;
     public int BoundaryCacheCapacity => _boundaryCacheCapacity;
+    public int BoundaryCacheOrderTokenCount => _boundaryCacheOrder.Count;
+    public int BoundaryRegistrationCount => _registrations.Count;
+    public int BoundaryProviderCount => _providerCounts.Count;
 
     public override void Initialize()
     {
@@ -69,6 +74,17 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
             CCVars.ZLevelBoundaryCacheCapacity,
             OnBoundaryCacheCapacityChanged,
             true);
+    }
+
+    public override void Shutdown()
+    {
+        _registrations.Clear();
+        _providerCounts.Clear();
+        _boundaryCache.Clear();
+        _boundaryCacheOrder.Clear();
+        _removeScratch.Clear();
+        _cacheOrderScratch.Clear();
+        base.Shutdown();
     }
 
     public bool TryGetBoundary(
@@ -296,52 +312,62 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
 
     private void OnGridTerminating(Entity<MapGridComponent> entity, ref EntityTerminatingEvent args)
     {
-        var remove = new List<BoundaryCacheKey>();
+        _removeScratch.Clear();
         foreach (var key in _boundaryCache.Keys)
         {
             if (key.GridUid == entity.Owner)
-                remove.Add(key);
+                _removeScratch.Add(key);
         }
 
-        foreach (var key in remove)
+        foreach (var key in _removeScratch)
         {
             _boundaryCache.Remove(key);
         }
 
-        if (remove.Count > 0)
-            _metrics.RecordBoundaryInvalidatedEntries(remove.Count);
+        if (_removeScratch.Count > 0)
+        {
+            _metrics.RecordBoundaryInvalidatedEntries(_removeScratch.Count);
+            CompactCacheOrder();
+        }
 
-        remove.Clear();
+        _removeScratch.Clear();
         foreach (var key in _providerCounts.Keys)
         {
             if (key.GridUid == entity.Owner)
-                remove.Add(key);
+                _removeScratch.Add(key);
         }
 
-        foreach (var key in remove)
+        foreach (var key in _removeScratch)
         {
             _providerCounts.Remove(key);
         }
+
+        _removeScratch.Clear();
     }
 
     private void OnMapConfigurationChanged(ref ZLevelMapConfigurationChangedEvent args)
     {
-        var remove = new List<BoundaryCacheKey>();
+        _removeScratch.Clear();
         foreach (var key in _boundaryCache.Keys)
         {
             if (!_transformQuery.TryComp(key.GridUid, out var transform) || transform.MapUid != args.MapUid)
                 continue;
 
-            remove.Add(key);
+            _removeScratch.Add(key);
         }
 
-        foreach (var key in remove)
+        foreach (var key in _removeScratch)
         {
             _boundaryCache.Remove(key);
         }
 
-        if (remove.Count > 0)
-            _metrics.RecordBoundaryInvalidatedEntries(remove.Count);
+        if (_removeScratch.Count > 0)
+        {
+            _metrics.RecordBoundaryInvalidatedEntries(_removeScratch.Count);
+            CompactCacheOrder();
+        }
+
+        _removeScratch.Clear();
     }
 
     private void OnQuery(Entity<ZLevelBoundaryComponent> entity, ref ZLevelBoundaryQueryEvent args)
@@ -498,17 +524,19 @@ public sealed class SharedZLevelBoundarySystem : EntitySystem
     private void CompactCacheOrder()
     {
         _boundaryCacheOrder.Clear();
-        var ordered = new List<BoundaryCacheToken>(_boundaryCache.Count);
+        _cacheOrderScratch.Clear();
         foreach (var (cachedKey, entry) in _boundaryCache)
         {
-            ordered.Add(new BoundaryCacheToken(cachedKey, entry.Sequence));
+            _cacheOrderScratch.Add(new BoundaryCacheToken(cachedKey, entry.Sequence));
         }
 
-        ordered.Sort(static (left, right) => left.Sequence.CompareTo(right.Sequence));
-        foreach (var token in ordered)
+        _cacheOrderScratch.Sort(static (left, right) => left.Sequence.CompareTo(right.Sequence));
+        foreach (var token in _cacheOrderScratch)
         {
             _boundaryCacheOrder.Enqueue(token);
         }
+
+        _cacheOrderScratch.Clear();
     }
 
     private readonly record struct BoundaryRegistration(
