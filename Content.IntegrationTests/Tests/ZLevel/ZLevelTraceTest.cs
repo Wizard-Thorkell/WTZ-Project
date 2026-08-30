@@ -445,6 +445,110 @@ public sealed class ZLevelTraceTest : GameTest
     }
 
     [Test]
+    public async Task ContinuousOffsetsMoveCrossingsWithoutChangingLegacyCenterPoints()
+    {
+        var testMap = await Pair.CreateTestMap();
+
+        await Server.WaitAssertion(() =>
+        {
+            SEntMan.System<SharedZLevelMapSystem>().Configure(
+                testMap.MapUid,
+                0,
+                2,
+                0,
+                ZLevelDefaultBoundaryMode.ExplicitOnly);
+            var trace = SEntMan.System<SharedZLevelTraceSystem>();
+
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.25f, 0.5f),
+                2,
+                0.01f,
+                out var flightOrigin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(4.25f, 0.5f),
+                0,
+                0.99f,
+                out var flightDestination), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(0.25f, 0.5f),
+                2,
+                out var legacyOrigin), Is.True);
+            Assert.That(trace.TryCreateGridPoint(
+                testMap.Grid,
+                new Vector2(4.25f, 0.5f),
+                0,
+                out var legacyDestination), Is.True);
+
+            var flight = trace.Trace(new ZLevelTraceRequest(
+                flightOrigin,
+                flightDestination,
+                ZLevelBoundaryChannels.Projectile,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            var reverse = trace.Trace(new ZLevelTraceRequest(
+                flightDestination,
+                flightOrigin,
+                ZLevelBoundaryChannels.Projectile,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+            var legacy = trace.Trace(new ZLevelTraceRequest(
+                legacyOrigin,
+                legacyDestination,
+                ZLevelBoundaryChannels.Projectile,
+                Options: ZLevelTraceOptions.IncludeTileVisits));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(flight.Termination, Is.EqualTo(ZLevelTraceTermination.Completed));
+                Assert.That(flightOrigin.WorldHeight, Is.EqualTo(2.01d).Within(0.0001d));
+                Assert.That(flightDestination.WorldHeight, Is.EqualTo(0.99d).Within(0.0001d));
+                Assert.That(flight.BoundaryCrossings.Select(crossing => crossing.Tile), Is.EqualTo(new[]
+                {
+                    new Vector2i(0, 0),
+                    new Vector2i(4, 0),
+                }));
+                Assert.That(reverse.BoundaryCrossings.Select(crossing => crossing.Tile), Is.EqualTo(new[]
+                {
+                    new Vector2i(4, 0),
+                    new Vector2i(0, 0),
+                }));
+                Assert.That(legacyOrigin.LocalZOffset, Is.EqualTo(ZLevelTracePoint.DefaultZOffset));
+                Assert.That(legacyDestination.WorldZOffset, Is.EqualTo(ZLevelTracePoint.DefaultZOffset));
+                Assert.That(legacy.BoundaryCrossings.Select(crossing => crossing.Tile), Is.EqualTo(new[]
+                {
+                    new Vector2i(1, 0),
+                    new Vector2i(3, 0),
+                }));
+                Assert.That(flight.BoundaryCrossings.Select(crossing => crossing.Distance), Is.Ordered.Ascending);
+                Assert.That(flight.Segments, Has.Length.EqualTo(3));
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(trace.TryCreateGridPoint(
+                    testMap.Grid,
+                    Vector2.Zero,
+                    0,
+                    -0.01f,
+                    out _), Is.False);
+                Assert.That(trace.TryCreateGridPoint(
+                    testMap.Grid,
+                    Vector2.Zero,
+                    0,
+                    1f,
+                    out _), Is.False);
+                Assert.That(trace.TryCreateGridPoint(
+                    testMap.Grid,
+                    Vector2.Zero,
+                    0,
+                    float.NaN,
+                    out _), Is.False);
+            });
+        });
+    }
+
+    [Test]
     public async Task PerfectDiagonalTileOrderIsDeterministic()
     {
         var testMap = await Pair.CreateTestMap();

@@ -301,3 +301,9 @@ Critical state, stun, knockdown, throws, and buckling interrupt active flight.
 Initialized mapping snapshots retain authored flight tuning but strip active
 targets and action references, then reconstruct fresh actions after load. The
 official mapping station provides a filled jetpack on Z 0 for manual testing.
+
+P7.4b2a exposes an active flyer's continuous local offset to `ZLevelTrace`,
+hitscan, and bounded physical trajectories. Inactive entities and coordinate
+targets keep the compatibility center offset, while ordinary planar fixtures
+remain owned by one discrete world floor. Flying-NPC route planning and
+execution remain the separate P7.4b2b package.

@@ -54,6 +54,24 @@ public sealed partial class SharedZLevelSystem
         return _flightQuery.Resolve(uid, ref flight, false) && flight.Active;
     }
 
+    /// <summary>
+    /// Returns the continuous trace offset of an active flyer. Ordinary entities
+    /// retain the established floor-center trace model.
+    /// </summary>
+    public float GetFlightTraceZOffset(EntityUid uid, ZLevelFlightComponent? flight = null)
+    {
+        if (!IsFlying(uid, flight) || !_transformQuery.TryComp(uid, out var transform))
+            return ZLevelTracePoint.DefaultZOffset;
+
+        var position = CompOrNull<ZLevelPositionComponent>(uid);
+        var worldZ = _transform.GetWorldZLevel((uid, transform, position));
+        var worldHeight = _transform.GetZLevelWorldHeight((uid, transform, position));
+        var offset = worldHeight - worldZ;
+        return float.IsFinite(offset) && offset >= 0f && offset < 1f
+            ? offset
+            : ZLevelTracePoint.DefaultZOffset;
+    }
+
     public ZLevelFlightResult TryStartFlight(
         EntityUid uid,
         int? targetLocalZLevel = null,

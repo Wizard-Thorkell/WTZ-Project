@@ -17,11 +17,14 @@ logging, and presentation.
    independently validates targetless layers against the effective origin,
    map, frame, downward direction, and visibility. This validation runs before
    ammunition use and again before every burst follow-up.
-3. `HitscanBasicRaycastSystem` takes the origin world Z from the authoritative
-   shooter transform. A cross-floor target must be on the same map and grid
-   frame, visible from the shooter, and within three-dimensional max range. An
-   explicit target that was deleted, moved, hidden, raised, or otherwise became
-   invalid fails terminally instead of becoming a targetless planar trace.
+3. `HitscanBasicRaycastSystem` takes the origin world Z and, for active flight,
+   its continuous offset from the authoritative shooter state. A cross-floor
+   target must be on the same map and grid frame, visible from the shooter, and
+   within three-dimensional max range. Active target flight supplies its own
+   destination offset; ordinary entities and coordinate targets use the floor
+   center. An explicit target that was deleted, moved, hidden, raised, or
+   otherwise became invalid fails terminally instead of becoming a targetless
+   planar trace.
 4. One caller-owned `ZLevelTraceBuffer` evaluates collision with the hitscan's
    existing mask and the `Projectile` boundary channel. The first closed deck
    terminates the result before geometry on the next floor is evaluated.
@@ -45,6 +48,12 @@ the planar direction from that current server transform, so a forged companion
 coordinate cannot redirect the ray. Recoil still applies after authoritative
 aim is established. Range is measured in XYZ with one floor equal to one world
 distance unit.
+
+Cross-floor range and boundary timing use continuous heights. This matters when
+a shooter is near one deck boundary and its target is near another: the line
+crosses the tiles dictated by those physical heights instead of an assumed
+center-to-center route. Calls without active flight retain offset `0.5`, so the
+legacy crossing columns and ranges are unchanged.
 
 Vertical traces currently require shooter and target to share one structural
 grid frame. That matches the ownership contract of `ZLevelTrace`; overlapping
@@ -82,6 +91,8 @@ two-dimensional presentation limit, not a collision limit.
   boundaries.
 - Reflections originate on the hit entity's world Z and continue as a same-floor
   2D ray because the existing reflection event has no vertical target.
+- Fixtures remain filtered by discrete effective world Z. Flight height selects
+  the cross-floor trace geometry but is not a second planar collision layer.
 - Visual payload construction is covered by client/server compilation and
   serializer-hash parity. A manual in-game visual pass remains required before
   public-server hardening.
@@ -108,6 +119,9 @@ projectile-specific closed boundaries,
 visibility denial, upward-target rejection, XYZ range, target-only obstacles,
 diagonal moving frames, vertical-crossing budget failure, and the
 collision-enabled allocation capture.
+
+P7.4b2a adds an asymmetric active-flight case whose physical route avoids a
+closed center-line tile and reaches the server-authoritative target.
 
 P2.4d3c adds real client/server gun requests, per-shot burst revalidation, idle
 aim cleanup, authoritative entity direction, and fail-closed deleted/stale

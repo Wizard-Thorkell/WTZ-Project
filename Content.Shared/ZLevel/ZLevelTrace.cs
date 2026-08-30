@@ -37,26 +37,46 @@ public enum ZLevelTraceTermination : byte
 /// </summary>
 public readonly record struct ZLevelTracePoint
 {
+    public const float DefaultZOffset = 0.5f;
+    public static readonly float MaximumZOffset = MathF.BitDecrement(1f);
+
     public ZLevelMapCoordinates WorldCoordinates { get; }
+    public float WorldZOffset { get; }
     public EntityUid? GridUid { get; }
     public Vector2 LocalPosition { get; }
     public int LocalZ { get; }
+    public float LocalZOffset { get; }
+
+    public double WorldHeight => WorldCoordinates.Z + (double) WorldZOffset;
+    public double LocalHeight => LocalZ + (double) LocalZOffset;
 
     internal ZLevelTracePoint(
         ZLevelMapCoordinates worldCoordinates,
+        float worldZOffset,
         EntityUid? gridUid,
         Vector2 localPosition,
-        int localZ)
+        int localZ,
+        float localZOffset)
     {
         WorldCoordinates = worldCoordinates;
+        WorldZOffset = worldZOffset;
         GridUid = gridUid;
         LocalPosition = localPosition;
         LocalZ = localZ;
+        LocalZOffset = localZOffset;
     }
 
-    public static ZLevelTracePoint FromMap(ZLevelMapCoordinates coordinates)
+    public static ZLevelTracePoint FromMap(
+        ZLevelMapCoordinates coordinates,
+        float worldZOffset = DefaultZOffset)
     {
-        return new ZLevelTracePoint(coordinates, null, coordinates.Position, coordinates.Z);
+        return new ZLevelTracePoint(
+            coordinates,
+            worldZOffset,
+            null,
+            coordinates.Position,
+            coordinates.Z,
+            worldZOffset);
     }
 }
 

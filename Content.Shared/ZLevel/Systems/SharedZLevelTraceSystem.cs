@@ -74,11 +74,27 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         int localZ,
         out ZLevelTracePoint point)
     {
+        return TryCreateGridPoint(
+            gridUid,
+            localPosition,
+            localZ,
+            ZLevelTracePoint.DefaultZOffset,
+            out point);
+    }
+
+    public bool TryCreateGridPoint(
+        EntityUid gridUid,
+        Vector2 localPosition,
+        int localZ,
+        float localZOffset,
+        out ZLevelTracePoint point)
+    {
         point = default;
         if (!_gridQuery.HasComp(gridUid) ||
-            !TryComp<TransformComponent>(gridUid, out var gridTransform) ||
+            !TryComp(gridUid, out TransformComponent? gridTransform) ||
             gridTransform.MapID == MapId.Nullspace ||
-            !IsFinite(localPosition))
+            !IsFinite(localPosition) ||
+            !IsValidZOffset(localZOffset))
         {
             return false;
         }
@@ -89,9 +105,11 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                 mapCoordinates.Position,
                 _transform.LocalToWorldZLevel(gridUid, localZ),
                 mapCoordinates.MapId),
+            localZOffset,
             gridUid,
             localPosition,
-            localZ);
+            localZ,
+            localZOffset);
         return true;
     }
 
@@ -136,7 +154,9 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             destinationWorld.MapId == MapId.Nullspace ||
             !IsFinite(originWorld.Position) ||
             !IsFinite(destinationWorld.Position) ||
-            !float.IsFinite(GetTraceLength(originWorld, destinationWorld)))
+            !IsValidZOffset(normalizedOrigin.WorldZOffset) ||
+            !IsValidZOffset(normalizedDestination.WorldZOffset) ||
+            !float.IsFinite(GetTraceLength(normalizedOrigin, normalizedDestination)))
         {
             return EmptyResult(ZLevelTraceTermination.InvalidCoordinates, request.Origin);
         }
@@ -193,7 +213,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             return true;
 
         if (!_gridQuery.HasComp(gridUid) ||
-            !TryComp<TransformComponent>(gridUid, out var gridTransform) ||
+            !TryComp(gridUid, out TransformComponent? gridTransform) ||
             gridTransform.MapID == MapId.Nullspace ||
             !IsFinite(point.LocalPosition))
         {
@@ -205,8 +225,10 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             gridUid,
             point.LocalPosition,
             point.LocalZ,
+            point.LocalZOffset,
             mapCoordinates.Position,
             _transform.LocalToWorldZLevel(gridUid, point.LocalZ),
+            point.WorldZOffset,
             mapCoordinates.MapId);
         return true;
     }
@@ -218,7 +240,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     {
         projected = default;
         if (!_gridQuery.HasComp(frameUid) ||
-            !TryComp<TransformComponent>(frameUid, out var frameTransform) ||
+            !TryComp(frameUid, out TransformComponent? frameTransform) ||
             frameTransform.MapID == MapId.Nullspace ||
             frameTransform.MapID != point.WorldCoordinates.MapId)
         {
@@ -238,8 +260,10 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             frameUid,
             local.Position,
             _transform.WorldToLocalZLevel(frameUid, point.WorldCoordinates.Z),
+            point.WorldZOffset,
             point.WorldCoordinates.Position,
             point.WorldCoordinates.Z,
+            point.WorldZOffset,
             point.WorldCoordinates.MapId);
         return true;
     }
@@ -248,7 +272,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         in ZLevelTraceRequest request,
         ZLevelTraceBuffer buffer)
     {
-        var length = GetTraceLength(request.Origin.WorldCoordinates, request.Destination.WorldCoordinates);
+        var length = GetTraceLength(request.Origin, request.Destination);
         if (!TryAppendSegment(
                 buffer,
                 request,
@@ -277,9 +301,9 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         var destination = request.Destination;
         var originWorld = origin.WorldCoordinates;
         var destinationWorld = destination.WorldCoordinates;
-        var worldDeltaZ = destinationWorld.Z - originWorld.Z;
-        var step = Math.Sign(worldDeltaZ);
-        var totalLength = GetTraceLength(originWorld, destinationWorld);
+        var worldDeltaHeight = destination.WorldHeight - origin.WorldHeight;
+        var step = Math.Sign(destinationWorld.Z - originWorld.Z);
+        var totalLength = GetTraceLength(origin, destination);
         var currentPoint = origin;
         var currentDistance = 0f;
 
@@ -289,8 +313,8 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
             var toWorldZ = fromWorldZ + step;
             var fromLocalZ = origin.LocalZ + step * i;
             var toLocalZ = fromLocalZ + step;
-            var boundaryHeight = fromWorldZ + step * 0.5f;
-            var interpolation = (boundaryHeight - originWorld.Z) / worldDeltaZ;
+            var boundaryHeight = step > 0 ? fromWorldZ + 1d : fromWorldZ;
+            var interpolation = (float) ((boundaryHeight - origin.WorldHeight) / worldDeltaHeight);
             var worldPosition = Vector2.Lerp(
                 originWorld.Position,
                 destinationWorld.Position,
@@ -304,8 +328,10 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                 gridUid,
                 localPosition,
                 fromLocalZ,
+                step > 0 ? ZLevelTracePoint.MaximumZOffset : 0f,
                 worldPosition,
                 fromWorldZ,
+                step > 0 ? ZLevelTracePoint.MaximumZOffset : 0f,
                 originWorld.MapId);
 
             if (!TryAppendSegment(
@@ -354,8 +380,10 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
                 gridUid,
                 localPosition,
                 toLocalZ,
+                step > 0 ? 0f : ZLevelTracePoint.MaximumZOffset,
                 worldPosition,
                 toWorldZ,
+                step > 0 ? 0f : ZLevelTracePoint.MaximumZOffset,
                 originWorld.MapId);
             currentDistance = crossingDistance;
         }
@@ -665,7 +693,7 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
 
     private bool ShouldIgnoreEntity(EntityUid entity, EntityFilter filter)
     {
-        if (entity == filter.IgnoredEntity || !TryComp<TransformComponent>(entity, out var transform))
+        if (entity == filter.IgnoredEntity || !TryComp(entity, out TransformComponent? transform))
             return true;
 
         return _transform.GetWorldZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity))) !=
@@ -676,15 +704,19 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
         EntityUid gridUid,
         Vector2 localPosition,
         int localZ,
+        float localZOffset,
         Vector2 worldPosition,
         int worldZ,
+        float worldZOffset,
         MapId mapId)
     {
         return new ZLevelTracePoint(
             new ZLevelMapCoordinates(worldPosition, worldZ, mapId),
+            worldZOffset,
             gridUid,
             localPosition,
-            localZ);
+            localZ,
+            localZOffset);
     }
 
     private static Vector2i GetTile(Vector2 position, float tileSize)
@@ -695,12 +727,12 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     }
 
     private static float GetTraceLength(
-        ZLevelMapCoordinates origin,
-        ZLevelMapCoordinates destination)
+        ZLevelTracePoint origin,
+        ZLevelTracePoint destination)
     {
-        var delta = destination.Position - origin.Position;
-        var deltaZ = (double)destination.Z - origin.Z;
-        return (float)Math.Sqrt(delta.LengthSquared() + deltaZ * deltaZ);
+        var delta = destination.WorldCoordinates.Position - origin.WorldCoordinates.Position;
+        var deltaHeight = destination.WorldHeight - origin.WorldHeight;
+        return (float)Math.Sqrt(delta.LengthSquared() + deltaHeight * deltaHeight);
     }
 
     private static float Lerp(float start, float end, float amount)
@@ -711,6 +743,11 @@ public sealed class SharedZLevelTraceSystem : EntitySystem
     private static bool IsFinite(Vector2 value)
     {
         return float.IsFinite(value.X) && float.IsFinite(value.Y);
+    }
+
+    private static bool IsValidZOffset(float value)
+    {
+        return float.IsFinite(value) && value >= 0f && value < 1f;
     }
 
     private static ZLevelTraceBufferResult EmptyResult(

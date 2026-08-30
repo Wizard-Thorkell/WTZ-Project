@@ -49,6 +49,31 @@ public sealed class ZLevelHitscanTest : GameTest
         layer:
         - WallLayer
         hard: true
+
+- type: entity
+  id: ZLevelHitscanFlyer
+  components:
+  - type: Physics
+    bodyType: Dynamic
+  - type: ZLevelFlight
+
+- type: entity
+  id: ZLevelHitscanFlyingObstacle
+  components:
+  - type: Physics
+    bodyType: Dynamic
+  - type: Fixtures
+    fixtures:
+      hitscan:
+        shape:
+          !type:PhysShapeAabb
+          bounds: ""-0.4,-0.4,0.4,0.4""
+        mask:
+        - FullTileMask
+        layer:
+        - WallLayer
+        hard: true
+  - type: ZLevelFlight
 ";
 
     public sealed class HitscanListenerSystem : TestListenerSystem<HitscanRaycastFiredEvent>;
@@ -129,6 +154,55 @@ public sealed class ZLevelHitscanTest : GameTest
                 Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
                 Assert.That(snapshot.TraceSegments, Is.EqualTo(2));
                 Assert.That(snapshot.TraceBoundaryCrossings, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
+    public async Task ActiveFlightOffsetsSelectThePhysicalCrossingColumn()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid shooter = default;
+        EntityUid target = default;
+        EntityUid hitscan = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap, 2);
+            var map = SEntMan.System<SharedMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+            for (var x = 0; x <= 4; x++)
+                map.SetTile(testMap.Grid, grid, new Vector2i(x, 0), new Tile(1));
+
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            shooter = Spawn(testMap, "ZLevelHitscanFlyer", new Vector2(0.25f, 0.5f), 2);
+            target = Spawn(testMap, "ZLevelHitscanFlyingObstacle", new Vector2(4.25f, 0.5f), 0);
+            Assert.That(zLevels.SetZLevelPosition(shooter, 2, 0.01f), Is.True);
+            Assert.That(zLevels.SetZLevelPosition(target, 0, 0.99f), Is.True);
+            Assert.That(zLevels.TryStartFlight(shooter, 2, 0.01f), Is.EqualTo(ZLevelFlightResult.Success));
+            Assert.That(zLevels.TryStartFlight(target, 0, 0.99f), Is.EqualTo(ZLevelFlightResult.Success));
+
+            // A center-to-center trace would cross this closed tile. The active
+            // flight heights instead cross tiles 0 and 4.
+            CloseBoundary(testMap, new Vector2i(1, 0), 1, ZLevelBoundaryChannels.Projectile);
+            hitscan = SpawnHitscan(testMap);
+        });
+
+        await RunTicksSync(1);
+
+        await Server.WaitAssertion(() =>
+        {
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            metrics.ResetCounters();
+            var data = Fire(hitscan, shooter, target, Vector2.UnitX);
+            var snapshot = metrics.Snapshot();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(data.HitEntity, Is.EqualTo(target));
+                Assert.That(snapshot.TraceCompleted, Is.EqualTo(1));
+                Assert.That(snapshot.TraceClosedBoundaries, Is.Zero);
+                Assert.That(snapshot.TraceBoundaryCrossings, Is.EqualTo(2));
             });
         });
     }

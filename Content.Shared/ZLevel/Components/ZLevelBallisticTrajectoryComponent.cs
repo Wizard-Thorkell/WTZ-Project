@@ -31,7 +31,13 @@ public sealed partial class ZLevelBallisticTrajectoryComponent : Component
     public int SourceLocalZ;
 
     [DataField, AutoNetworkedField]
+    public float SourceLocalZOffset = ZLevelTracePoint.DefaultZOffset;
+
+    [DataField, AutoNetworkedField]
     public int TargetLocalZ;
+
+    [DataField, AutoNetworkedField]
+    public float TargetLocalZOffset = ZLevelTracePoint.DefaultZOffset;
 
     [DataField, AutoNetworkedField]
     public int NextCrossing;

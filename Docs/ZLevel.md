@@ -307,8 +307,9 @@ Implemented Z-aware physical projectile lifecycle:
   displaced vertical frame origins.
 - Impact effects carry world Z to the client, while embedded projectiles inherit
   their target's floor and preserve it when detached.
-- Deliberate physical flight through deck openings remains the active P2.2b
-  package; lifecycle guarantees are documented in
+- Deliberate physical flight through deck openings is implemented for projectiles
+  and thrown entities. Active flyer heights now supply continuous source and
+  entity-target endpoints; lifecycle guarantees are documented in
   [ZLevelProjectiles.md](ZLevelProjectiles.md).
 
 Implemented vertical boundary foundation:
@@ -525,7 +526,7 @@ visual references after core lighting behavior is floor-aware.
 | Moving ships and planets | Explicit world/local Z frame origins and frame-aware docking | Map-network controllers | Mature transit, planet, pilot, and gravity product layer | WTZ Project has the stronger coordinate primitive; Monolith has broader product behavior. |
 | Atmosphere and construction | Native sparse cells, boundaries, tools, cables, and power isolation | Broad gameplay integration on linked maps | Partial CE port | WTZ Project is ahead in engine-level integration. |
 | Structural collapse | Sparse `(x, y, z)` solver, revisions, stale-job rejection, delayed collapse | Mature time-sliced solver and richer presentation | Not present at the inspected commit | WTZ Project is stronger in concurrency safety; Crystal Edge is stronger in presentation. |
-| Vertical gameplay | Basic traversal, falling, placement, and construction | Mature flight, climbing, roofs, throwing, and weather | CE-derived plus space-oriented systems | Crystal Edge remains the strongest gameplay reference. |
+| Vertical gameplay | Traversal, falling, roofs, shafts, catwalks, elevators, weather, mapping, and native flight | Mature flight, climbing, roofs, throwing, and weather | CE-derived plus space-oriented systems | WTZ has the broader native integration; Crystal Edge remains the richer climbing reference. |
 | Rendering | One native viewport with floor filtering | Repeated viewport passes | Repeated passes, depth scaling, and clouds | WTZ Project is cheaper architecturally; Monolith is visually richer today. |
 
 The project is no longer just a prototype patch. Its engine, replication,
@@ -582,8 +583,8 @@ Major unfinished areas:
   inter-floor roofs, mapper-authored top caps, and first-pass powered elevators
   are available. Elevator mapping, initialized save/load, pathfinding, and AI
   execution are integrated. Z-aware weather rendering/audio is integrated;
-  ramps, player-built top caps, spatial weather volumes, and flight content
-  remain pending.
+  ramps, player-built top caps, spatial weather volumes, flight-specific visual
+  height, and explicit flying-NPC navigation remain pending.
 - Many anchored entities and construction systems still assume one tile stack.
 - FTL docking aligns grid frames, but arbitrary transit-map entry, planet
   landing, frame-authoring UI, and conflict policy for already-docked grid
@@ -1131,7 +1132,8 @@ and presentation in specialized systems rather than adding those policies to
 Native flight's movement, gravity, collision, lifecycle, and save-state
 contracts are documented in `Docs/ZLevelFlight.md`. P7.4b1 supplies native
 actions, intrinsic/jetpack content, interruption policy, and mapping coverage.
-Flight-aware projectiles and explicit AI navigation/execution remain P7.4b2.
+P7.4b2a supplies continuous flight-aware trace, hitscan, and physical trajectory
+endpoints. Explicit AI navigation/execution remains P7.4b2b.
 
 ## Definition Of Done
 

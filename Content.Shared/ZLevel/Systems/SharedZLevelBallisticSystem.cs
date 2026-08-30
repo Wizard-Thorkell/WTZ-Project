@@ -96,6 +96,8 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
 
         var sourceLocalZ = _zLevels.GetZLevel(uid);
         var targetLocalZ = _zLevels.GetZLevel(target);
+        var sourceLocalZOffset = GetSourceTraceZOffset(uid, frameUid, sourceLocalZ);
+        var targetLocalZOffset = _zLevels.GetFlightTraceZOffset(target);
         var sourceMap = TransformSystem.GetMapCoordinates((uid, transform));
         var targetMap = TransformSystem.GetMapCoordinates((target, targetTransform));
         if (!IsFinite(sourceMap.Position) || !IsFinite(targetMap.Position))
@@ -108,7 +110,9 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
             transform,
             frameUid,
             sourceLocalZ,
-            targetLocalZ);
+            sourceLocalZOffset,
+            targetLocalZ,
+            targetLocalZOffset);
     }
 
     /// <summary>
@@ -156,7 +160,9 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
             transform,
             frameUid,
             _zLevels.GetZLevel(uid),
-            TransformSystem.WorldToLocalZLevel(frameUid, targetWorldZ));
+            GetSourceTraceZOffset(uid, frameUid, _zLevels.GetZLevel(uid)),
+            TransformSystem.WorldToLocalZLevel(frameUid, targetWorldZ),
+            ZLevelTracePoint.DefaultZOffset);
     }
 
     private bool TryStartTrajectory(
@@ -166,12 +172,16 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
         TransformComponent transform,
         EntityUid frameUid,
         int sourceLocalZ,
-        int targetLocalZ)
+        float sourceLocalZOffset,
+        int targetLocalZ,
+        float targetLocalZOffset)
     {
         if (HasComp<ZLevelBallisticTrajectoryComponent>(uid) ||
             !_gridQuery.HasComp(frameUid) ||
             (physics.BodyType & (BodyType.Dynamic | BodyType.KinematicController)) == 0 ||
             !IsFinite(mapDisplacement) ||
+            !IsValidZOffset(sourceLocalZOffset) ||
+            !IsValidZOffset(targetLocalZOffset) ||
             !IsActiveBallistic(uid))
         {
             return false;
@@ -206,8 +216,18 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
         if (!float.IsFinite(localDistance) || localDistance <= 0f || !IsFinite(localDelta))
             return false;
 
-        if (!_trace.TryCreateGridPoint(frameUid, origin, sourceLocalZ, out var traceOrigin) ||
-            !_trace.TryCreateGridPoint(frameUid, destination, targetLocalZ, out var traceDestination))
+        if (!_trace.TryCreateGridPoint(
+                frameUid,
+                origin,
+                sourceLocalZ,
+                sourceLocalZOffset,
+                out var traceOrigin) ||
+            !_trace.TryCreateGridPoint(
+                frameUid,
+                destination,
+                targetLocalZ,
+                targetLocalZOffset,
+                out var traceDestination))
         {
             return false;
         }
@@ -223,13 +243,18 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
         if (result.Termination is not (ZLevelTraceTermination.Completed or ZLevelTraceTermination.ClosedBoundary))
             return false;
 
+        if (!_zLevels.SetZLevelPosition(uid, sourceLocalZ, sourceLocalZOffset))
+            return false;
+
         var trajectory = EnsureComp<ZLevelBallisticTrajectoryComponent>(uid);
         trajectory.FrameUid = frameUid;
         trajectory.Origin = origin;
         trajectory.Direction = localDelta / localDistance;
         trajectory.PlanarDistance = localDistance;
         trajectory.SourceLocalZ = sourceLocalZ;
+        trajectory.SourceLocalZOffset = sourceLocalZOffset;
         trajectory.TargetLocalZ = targetLocalZ;
+        trajectory.TargetLocalZOffset = targetLocalZOffset;
         trajectory.NextCrossing = 0;
         trajectory.PendingCrossing = false;
         trajectory.CollisionDuringStep = false;
@@ -442,7 +467,13 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
             return;
         }
 
-        if (!_zLevels.SetZLevelPosition(uid, toLocalZ))
+        var crossingCount = Math.Abs(trajectory.TargetLocalZ - trajectory.SourceLocalZ);
+        var destinationOffset = trajectory.NextCrossing + 1 >= crossingCount
+            ? trajectory.TargetLocalZOffset
+            : step > 0
+                ? 0f
+                : ZLevelTracePoint.MaximumZOffset;
+        if (!_zLevels.SetZLevelPosition(uid, toLocalZ, destinationOffset))
         {
             TerminateTrajectory(uid, trajectory, RouteTermination.Invalid);
             return;
@@ -450,7 +481,6 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
 
         _metrics.RecordBallisticCrossing();
 
-        var crossingCount = Math.Abs(trajectory.TargetLocalZ - trajectory.SourceLocalZ);
         ExtendThrownFlightTime(uid, trajectory, physics, transform);
 
         trajectory.NextCrossing++;
@@ -480,6 +510,8 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
         var step = Math.Sign(trajectory.TargetLocalZ - trajectory.SourceLocalZ);
         return trajectory.FrameUid.IsValid() &&
                trajectory.PlanarDistance > 0f &&
+               IsValidZOffset(trajectory.SourceLocalZOffset) &&
+               IsValidZOffset(trajectory.TargetLocalZOffset) &&
                IsFinite(trajectory.Origin) &&
                IsFinite(trajectory.Direction) &&
                trajectory.NextCrossing >= 0 &&
@@ -684,12 +716,42 @@ public sealed class SharedZLevelBallisticSystem : VirtualController
 
     private static float GetCrossingProgress(ZLevelBallisticTrajectoryComponent trajectory)
     {
-        var crossingCount = Math.Abs(trajectory.TargetLocalZ - trajectory.SourceLocalZ);
-        return trajectory.PlanarDistance * (trajectory.NextCrossing + 0.5f) / crossingCount;
+        var step = Math.Sign(trajectory.TargetLocalZ - trajectory.SourceLocalZ);
+        var sourceHeight = trajectory.SourceLocalZ + (double) trajectory.SourceLocalZOffset;
+        var targetHeight = trajectory.TargetLocalZ + (double) trajectory.TargetLocalZOffset;
+        var boundaryHeight = step > 0
+            ? trajectory.SourceLocalZ + trajectory.NextCrossing + 1d
+            : trajectory.SourceLocalZ - trajectory.NextCrossing;
+        var interpolation = (boundaryHeight - sourceHeight) / (targetHeight - sourceHeight);
+        return trajectory.PlanarDistance * (float) Math.Clamp(interpolation, 0d, 1d);
+    }
+
+    private float GetSourceTraceZOffset(EntityUid uid, EntityUid frameUid, int sourceLocalZ)
+    {
+        EntityUid? source = null;
+        if (_projectileQuery.TryComp(uid, out var projectile))
+            source = projectile.Shooter;
+        else if (_thrownQuery.TryComp(uid, out var thrown))
+            source = thrown.Thrower;
+
+        if (source is { } sourceUid &&
+            _transformQuery.TryComp(sourceUid, out var sourceTransform) &&
+            sourceTransform.GridUid == frameUid &&
+            _zLevels.GetZLevel(sourceUid) == sourceLocalZ)
+        {
+            return _zLevels.GetFlightTraceZOffset(sourceUid);
+        }
+
+        return _zLevels.GetFlightTraceZOffset(uid);
     }
 
     private static bool IsFinite(Vector2 value)
     {
         return float.IsFinite(value.X) && float.IsFinite(value.Y);
+    }
+
+    private static bool IsValidZOffset(float value)
+    {
+        return float.IsFinite(value) && value >= 0f && value < 1f;
     }
 }

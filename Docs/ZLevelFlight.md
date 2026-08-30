@@ -3,8 +3,9 @@
 P7.4a defines the shared movement, gravity, and collision contract for entities
 that can fly between native Z-level floors. P7.4b1 adds authoritative player
 controls, intrinsic and jetpack capability sources, gameplay interruptions, and
-mapping content. Flight-aware traces, projectiles, and AI remain P7.4b2
-consumers of the same typed contract.
+mapping content. P7.4b2a makes traces, hitscan, and bounded physical trajectories
+consume active flight height. Explicit AI navigation remains P7.4b2b work over
+the same typed contract.
 
 ## State Model
 
@@ -53,6 +54,11 @@ fixtures. `LocalZOffset` does not create fractional cross-floor fixture
 collisions. Two entities on the same discrete world Z can collide even when one
 is hovering; entities on different world Z floors cannot. Vertical consumers
 must use a boundary-aware trace instead of relying on planar fixtures.
+
+`GetFlightTraceZOffset()` exposes continuous height only for an active flyer.
+All other entities return the compatibility center offset `0.5`. Trace and
+combat consumers can therefore interpolate exact deck crossings without
+changing planar collision ownership.
 
 ## API And Lifecycle
 
@@ -129,10 +135,12 @@ boundaries, and lifecycle invalidations. `ResetCounters()` resets every flight
 counter. The stress artifact schema is version 5 after the metrics contract
 change.
 
-## P7.4b2 Boundary
+## P7.4b2 Status
 
-The next package adds explicit flight navigation connections and execution for
-AI plus flight-aware trace/projectile policy. It must not make every empty tile
+P7.4b2a carries active source and entity-target offsets through `ZLevelTrace`,
+hitscan range and collision, and ballistic crossing timing. Coordinate targets
+and inactive entities remain at the floor center. P7.4b2b adds explicit flight
+navigation connections and execution for AI. It must not make every empty tile
 walkable, bypass `Body` boundary checks, or reinterpret `LocalZOffset` as a
 second collision layer. Specialized trace, combat, and pathfinding rules remain
 outside the flight movement solver.
@@ -165,3 +173,14 @@ outside the flight movement solver.
   3/6/10 floors. Every measured run allocates 6,336 bytes, reports 100% warm
   boundary/sky/gravity cache hits, zero cache misses or PVS exhaustion, and zero
   neutral flight work.
+- P7.4b2a passes 3/3 new continuous-height cases, 72/72 complete trace/combat/
+  flight consumer cases, and all 330 broad Z-level cases with 329 passes plus
+  the established deliberate pathfinding skip. Content unit/mapping tests pass
+  18/18.
+- Its repeated 3/6/10-floor baseline records 16.9534/19.9935/23.1440 ms and
+  6,336 bytes at every depth, with 100% warm boundary/sky/gravity hits, zero PVS
+  exhaustion, and zero neutral flight work. A first 86.1608 ms ten-floor sample
+  did not reproduce and had identical allocation/cache counters.
+- The P7.4b2a non-incremental full build completes in 2m46s with zero errors and
+  691 established warnings. A dedicated project rebuild attributes zero warning
+  to a modified code or test file.

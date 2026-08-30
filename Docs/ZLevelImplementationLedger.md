@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.4b2 flight trace, projectile, and AI integration`.
+- Active package: `P7.4b2b explicit flight AI navigation and execution`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4b2 active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4b2b active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -97,7 +97,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.3b | Bounded Z-aware weather rendering, audio, and diagnostics | Complete |
 | P7.4a | Flight movement, gravity, and collision contract | Complete |
 | P7.4b1 | Flight controls, capability content, interruptions, and mapping | Complete |
-| P7.4b2 | Flight trace, projectile, and AI navigation/execution integration | Active |
+| P7.4b2a | Continuous flight trace and combat integration | Complete |
+| P7.4b2b | Explicit flight AI navigation and execution | Active |
 | P7 gate | End-to-end vertical-content and scope review | Pending |
 
 ## Phase P0 Packages
@@ -7012,10 +7013,117 @@ allocation is inside Robust physics enumeration.
   explicit flight navigation edges and execution without marking empty space as
   ordinary walkable area.
 
+## Completed Package: P7.4b2a Continuous Flight Trace And Combat
+
+### Scope
+
+- Extend the shared trace point with bounded continuous height while preserving
+  the existing floor-center API for every ordinary caller.
+- Use active shooter and entity-target flight heights for authoritative hitscan
+  range, crossing geometry, and bounded physical trajectory timing.
+- Preserve discrete world-floor fixture collision and defer explicit flying-NPC
+  path planning/execution to P7.4b2b.
+
+### Implementation
+
+- `ZLevelTracePoint` now carries local/world offsets and derived continuous
+  heights. Offsets are finite values in `[0, 1)`; legacy constructors default to
+  `0.5`.
+- Vertical traces cross real integer deck planes. Segment contact points use
+  offset zero above a boundary and the greatest representable offset below one
+  beneath it, while cumulative distances remain exact continuous XYZ values.
+- `GetFlightTraceZOffset()` exposes inherited active-flight height and returns
+  the compatibility center for every inactive or malformed entity.
+- Hitscan derives continuous source and active entity-target endpoints before
+  validating three-dimensional range and issuing the shared `Projectile` trace.
+- Ballistic routes replicate source/target offsets, stamp the projectile at the
+  source height, compute each crossing from continuous endpoint geometry, and
+  retain contact-side offsets on intermediate floors.
+- Coordinate targets remain floor-centered. Planar fixtures continue to filter
+  only by effective discrete world Z; no fractional collision layer is added.
+
+### Evidence
+
+- The three new asymmetric-offset trace, hitscan, and ballistic cases pass 3/3.
+- Complete trace, hitscan, ballistic, and flight consumer classes pass 72/72.
+- The complete Content `FullyQualifiedName~ZLevel` matrix covers 330 cases: 329
+  pass, the established concurrent-path fixture remains deliberately skipped,
+  and there are zero failures.
+- Content structural and mapping unit tests pass 18/18.
+- The repeated schema-version 5 3/6/10-floor baseline passes 3/3 at 16.9534,
+  19.9935, and 23.1440 ms. Every run allocates 6,336 bytes, has 100% warm
+  boundary/sky/gravity cache hits, zero PVS budget exhaustion, and zero neutral
+  flight updates. A first isolated 86.1608 ms ten-floor sample did not reproduce
+  and retained identical allocation/cache counters.
+- The non-incremental single-worker solution build passes in 2m46s with zero
+  errors and 691 established warnings. A dedicated non-incremental integration
+  rebuild attributes zero warning to any modified production or test file.
+- `git diff --check` passes apart from informational LF-to-CRLF notices. WTZ
+  Engine is clean and remains pinned to published revision `7cbd778024`; this
+  package requires no engine change.
+
+### Decisions
+
+- Continuous height belongs to trace endpoints, not to a new global 3D physics
+  body model. Specialized consumers opt in while old callers retain exact
+  center-to-center behavior.
+- Integer planes are the canonical boundary geometry for half-open floor slabs.
+  The old center offsets still cross at the same XY positions as before.
+- An active projectile route snapshots its endpoint heights at launch. Target
+  movement or later flight retargeting does not bend an in-flight shot.
+- Intermediate ballistic offsets describe the contacted side of a deck; planar
+  collision remains authoritative on the projectile's discrete floor.
+- P7.4b2 is split into a trace/combat package and an AI package so each receives
+  its own tests, performance capture, review, documentation, and commit gate.
+
+### Completion Gate
+
+- [x] Scope check: continuous trace/combat endpoints only; no pathfinding,
+      rendering, map content, or engine change entered the package.
+- [x] Invariant review: default `0.5`, finite/range validation, upward/downward
+      symmetry, moving-frame projection, closed boundaries, launch snapshots,
+      and discrete fixtures were reviewed.
+- [x] Automated verification: 3 new, 72 consumer, 330 broad cases covered, 18
+      unit/mapping, and two complete 3-case baseline runs pass.
+- [x] Performance evidence: the repeated neutral baseline remains at 6,336 bytes
+      with no flight work and stable 3/6/10-floor timing.
+- [x] Documentation: trace geometry, hitscan, physical trajectories, flight,
+      vertical-content status, general status, evidence, and remaining AI scope
+      are synchronized.
+- [x] Dependency check: no WTZ Engine change; clean submodule remains pinned to
+      published revision `7cbd778024`.
+- [x] Git check: full build, warning attribution, whitespace, generated-artifact
+      ignore state, tree scope, and dependency state pass.
+- [x] Mini review: contact-side representation, numeric precision, compatibility,
+      target snapshots, fixture semantics, and test-grid ownership were reviewed.
+- [x] Commit: prepared as isolated `Trace active Z-level flight heights` on
+      `zlevel/vertical-content`; push and hash verification follow.
+
+### Mini Review
+
+- Finding: modeling a floor as `[Z, Z + 1)` removes the hidden half-level
+  assumption while retaining identical geometry for all default-center callers.
+- Finding: double-precision height arithmetic prevents large discrete Z values
+  from erasing a small float offset before interpolation.
+- Finding: a dynamic collidable integration target must stand over a materialized
+  grid tile; otherwise Robust correctly reparents it to map space and native
+  flight rejects it as `InvalidGrid`.
+- Finding: source height must come from the shooter/thrower after lifecycle
+  stamping, not from a newly spawned projectile's default center.
+- Residual risk: projectile visuals and fixtures do not interpolate fractional
+  height continuously between crossings; this is intentional discrete-floor
+  behavior, but a future visual-height layer may present smoother motion.
+- Residual risk: same-floor fixture collision intentionally ignores different
+  hover offsets. Implementing true volumetric collision would be a separate
+  engine-scale physics project.
+- Next package: P7.4b2b adds explicit flight navigation edges, actor capability
+  policy, and AI execution without treating every empty tile as walkable.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P7.4b2a | `Trace active Z-level flight heights` | 3 new, 72 consumer, 330 broad cases covered, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b1 | `Add native Z-level flight controls` | 14 focused, 327 broad cases covered, 18 unit/mapping, 3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4a | `Define native Z-level flight physics` | 10 focused, 31 movement/map, 322 broad, 11 unit/mapping, 3 baseline, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3b | `Present weather on active Z levels` | 8 focused, all 314 broad covered, 14 unit/mapping, 3 baseline, 24 real GL, full build, allocation/warning/diff review | Complete |

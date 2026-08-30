@@ -50,14 +50,17 @@ out-of-range explicit targets cancel the request or remaining burst without a
 coordinate fallback. Transient aim state is cleared when firing stops or ends.
 
 The networked `ZLevelBallisticTrajectoryComponent` stores a route in the grid's
-local frame. A line between floor centers crosses each half-level plane in
-order, so a route from local Z 2 to Z 0 changes floors at one quarter and three
-quarters of its planar distance. Before launch, a buffered `Projectile` trace
-validates the coordinate frame and bounded crossing count. Each crossing is
-then revalidated against the current boundary at the entity's actual tile,
-allowing mapping changes made during flight to take effect.
+local frame, including continuous source and target offsets. An active shooter
+or thrower supplies the source height, an active entity target supplies the
+destination height, and coordinate targets use the floor center. Ordinary
+endpoints therefore retain offset `0.5`. A line crosses each integer deck plane
+in order; its exact crossing progress comes from the continuous endpoint
+heights. Before launch, a buffered `Projectile` trace validates the coordinate
+frame and bounded crossing count. Each crossing is then revalidated against the
+current boundary at the entity's actual tile, allowing mapping changes made
+during flight to take effect.
 
-The physics controller clips a substep at the next half-level crossing. After
+The physics controller clips a substep at the next integer deck crossing. After
 the solver runs, WTZ restores only a collinear, non-reversed velocity response,
 flushes contacts created by the clipped movement, and changes floor only if no
 hard collision occurred. Reflections and source-floor obstacles therefore win
@@ -120,6 +123,9 @@ stamps that value into the destination grid or map frame afterward.
 - Exact impact-effect appearance still needs a manual in-game visual pass; the
   event serializer and floor payload have automated client/server coverage.
 - Cross-grid vertical flight is not inferred from overlapping XY geometry.
+- Planar projectile fixtures remain discrete by world floor. Stored continuous
+  offsets govern crossing timing and contact-side state, not fractional fixture
+  collision.
 
 ## Verification
 
@@ -157,3 +163,6 @@ network throw cases cover lower entities, lower coordinates, same-floor parity,
 forged upper entities/coordinates, stale layers, and deleted UIDs. The final gate
 passes 51/51 focused combat cases, 4/4 native weapon/throw cases, and 182/182
 focused Z-level integration cases with no skips.
+
+P7.4b2a adds an asymmetric active-flight route that proves source and target
+offset replication, source stamping, and the physical first boundary tile.

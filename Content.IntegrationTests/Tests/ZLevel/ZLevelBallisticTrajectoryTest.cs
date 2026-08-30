@@ -78,6 +78,21 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
     spread: 0
 
 - type: entity
+  id: ZLevelBallisticFlyer
+  components:
+  - type: Physics
+    bodyType: Dynamic
+  - type: ZLevelFlight
+
+- type: entity
+  parent: ZLevelBallisticTarget
+  id: ZLevelBallisticFlyingTarget
+  components:
+  - type: Physics
+    bodyType: Dynamic
+  - type: ZLevelFlight
+
+- type: entity
   id: ZLevelBallisticTestGun
   components:
   - type: Gun
@@ -874,6 +889,54 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
                 Assert.That(metrics.BallisticCollisionCancellations, Is.Zero);
                 Assert.That(metrics.BallisticInvalidCancellations, Is.Zero);
                 Assert.That(metrics.BallisticContactFlushes, Is.EqualTo(2));
+            });
+        });
+    }
+
+    [Test]
+    public async Task ActiveFlightOffsetsDriveBallisticCrossingTiming()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid projectile = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            Configure(testMap);
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var source = Spawn(testMap, "ZLevelBallisticFlyer", new Vector2(0.25f, 0.5f), 2);
+            var target = Spawn(testMap, "ZLevelBallisticFlyingTarget", new Vector2(4.25f, 0.5f), 0);
+            projectile = Spawn(testMap, "ZLevelBallisticProbeProjectile", new Vector2(0.25f, 0.5f), 2);
+            SEntMan.EnsureComponent<TestListenerComponent>(projectile);
+
+            Assert.That(zLevels.SetZLevelPosition(source, 2, 0.01f), Is.True);
+            Assert.That(zLevels.SetZLevelPosition(target, 0, 0.99f), Is.True);
+            Assert.That(zLevels.TryStartFlight(source, 2, 0.01f), Is.EqualTo(ZLevelFlightResult.Success));
+            Assert.That(zLevels.TryStartFlight(target, 0, 0.99f), Is.EqualTo(ZLevelFlightResult.Success));
+            CloseBoundary(testMap, new Vector2i(0, 0), 1, ZLevelBoundaryChannels.Projectile);
+
+            FireProjectile(projectile, source, target, NormalSpeed);
+            var trajectory = SEntMan.GetComponent<ZLevelBallisticTrajectoryComponent>(projectile);
+            Assert.Multiple(() =>
+            {
+                Assert.That(trajectory.SourceLocalZOffset, Is.EqualTo(0.01f).Within(0.0001f));
+                Assert.That(trajectory.TargetLocalZOffset, Is.EqualTo(0.99f).Within(0.0001f));
+                Assert.That(SEntMan.GetComponent<ZLevelPositionComponent>(projectile).LocalZOffset,
+                    Is.EqualTo(0.01f).Within(0.0001f));
+            });
+        });
+
+        await ObserveProjectileUntilSpent(projectile);
+
+        await Server.WaitAssertion(() =>
+        {
+            var boundaryHits = SEntMan.System<BoundaryHitListenerSystem>().GetEvents(projectile).ToArray();
+            Assert.Multiple(() =>
+            {
+                Assert.That(boundaryHits, Has.Length.EqualTo(1));
+                Assert.That(boundaryHits[0].Tile, Is.EqualTo(new Vector2i(0, 0)));
+                Assert.That(boundaryHits[0].FromLocalZ, Is.EqualTo(2));
+                Assert.That(boundaryHits[0].ToLocalZ, Is.EqualTo(1));
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(projectile), Is.EqualTo(2));
             });
         });
     }
@@ -1801,7 +1864,9 @@ public sealed class ZLevelBallisticTrajectoryTest : GameTest
                 Assert.That(Vector2.DistanceSquared(actual.Direction, expected.Direction), Is.LessThan(0.0001f));
                 Assert.That(actual.PlanarDistance, Is.EqualTo(expected.PlanarDistance).Within(0.0001f));
                 Assert.That(actual.SourceLocalZ, Is.EqualTo(2));
+                Assert.That(actual.SourceLocalZOffset, Is.EqualTo(ZLevelTracePoint.DefaultZOffset));
                 Assert.That(actual.TargetLocalZ, Is.EqualTo(0));
+                Assert.That(actual.TargetLocalZOffset, Is.EqualTo(ZLevelTracePoint.DefaultZOffset));
                 Assert.That(actual.NextCrossing, Is.Zero);
             });
         });

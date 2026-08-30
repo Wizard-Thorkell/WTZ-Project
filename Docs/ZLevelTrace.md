@@ -11,9 +11,15 @@ consumers.
 Every `ZLevelTracePoint` contains:
 
 - `WorldCoordinates`: map XY, discrete world Z, and map ID.
+- `WorldZOffset`: continuous height inside the discrete world floor.
 - `GridUid`: the optional grid frame used to create the point.
 - `LocalPosition`: XY in that frame, or map XY for a map-only point.
 - `LocalZ`: Z relative to that frame, or world Z for a map-only point.
+- `LocalZOffset`: continuous height inside the local floor.
+
+`WorldHeight` and `LocalHeight` combine their discrete floor and offset. Offsets
+must be finite and inside `[0, 1)`. Existing callers that omit the offset retain
+the established floor-center value of `0.5`.
 
 Use `TryCreateGridPoint` for a grid-relative endpoint. Its local XY and local Z
 are authoritative: `Trace` resolves them through the grid's current transform
@@ -36,10 +42,11 @@ composition is a separate future capability.
 
 ## Vertical Geometry
 
-Discrete world levels are modeled as planes one world unit apart. A continuous
-XYZ line is split at every half-level plane, such as the boundary between Z 4
-and Z 5 at Z 4.5. XY is interpolated in both world and grid-local space at that
-same parameter, so translated and rotated frames resolve the correct local tile.
+Discrete world levels occupy half-open slabs `[Z, Z + 1)`. A continuous XYZ line
+is split at every integer plane, such as the boundary between Z 4 and Z 5 at
+height 5. XY is interpolated in both world and grid-local space at that same
+parameter, so translated and rotated frames resolve the correct local tile.
+The default center offset reproduces the original crossing positions exactly.
 
 Each floor portion becomes one ordered `ZLevelTraceSegment`. Distances are
 Euclidean XYZ distances from the request origin, with one Z level equal to one
@@ -49,7 +56,8 @@ for segments, tile entries, entity hits, and crossings.
 Every crossing resolves the adjacent local Z pair through
 `SharedZLevelBoundarySystem`. The first closed boundary is included in the
 result, but no tile or entity geometry beyond it is evaluated. `FinalPoint`
-stays on the side that the trace reached.
+stays on the side that the trace reached. Contact points use offset zero on the
+upper side and the greatest representable offset below one on the lower side.
 
 Segments with horizontal extent use the existing engine 2D physics ray and
 filter candidates by effective world Z. A perfectly vertical segment performs
@@ -184,9 +192,11 @@ enabled together, so authored portals alone cannot make a hidden entity usable.
   caller-owned buffer, `Projectile` boundaries, server-owned target validation,
   and consumer-specific hit selection described in
   [ZLevelHitscan.md](ZLevelHitscan.md). Physical projectile and throw lifecycle
-  now preserve authoritative world Z as described in
-  [ZLevelProjectiles.md](ZLevelProjectiles.md); bounded vertical physical flight
-  remains the active migration.
+  preserve authoritative world Z and continuous flight endpoints as described
+  in [ZLevelProjectiles.md](ZLevelProjectiles.md).
+- Planar fixtures remain discrete by effective world Z. Continuous endpoint
+  height changes boundary timing and three-dimensional distance; it does not
+  introduce fractional fixture layers.
 
 ## Verification
 
@@ -208,3 +218,6 @@ coordinates, reusable-buffer equivalence, metrics/reset behavior, and four
 machine-readable allocation workloads. See
 [ZLevelTraceBenchmarkReport.md](ZLevelTraceBenchmarkReport.md) for the captured
 method, results, and comparison limits.
+
+P7.4b2a adds continuous endpoint coverage for asymmetric active-flight heights,
+reverse traversal, exact legacy-center parity, and invalid offset rejection.

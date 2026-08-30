@@ -110,8 +110,10 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
             direction /= directionLength;
 
         var originWorldZ = _zLevels.GetWorldZLevel(shooter);
+        var originZOffset = _zLevels.GetFlightTraceZOffset(shooter);
         var destinationPosition = originMap.Position + direction * maxDistance;
         var destinationWorldZ = originWorldZ;
+        var destinationZOffset = originZOffset;
         var frameUid = shooterTransform.GridUid;
 
         if (args.Target is { } target)
@@ -140,7 +142,9 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
                     return false;
 
                 var planarDistance = Vector2.Distance(originMap.Position, targetMap.Position);
-                var verticalDistance = (double) targetWorldZ - originWorldZ;
+                destinationZOffset = _zLevels.GetFlightTraceZOffset(target);
+                var verticalDistance = targetWorldZ + (double) destinationZOffset -
+                                       (originWorldZ + (double) originZOffset);
                 var traceDistance = Math.Sqrt(
                     (double) planarDistance * planarDistance + verticalDistance * verticalDistance);
                 if (!double.IsFinite(traceDistance) || traceDistance > maxDistance)
@@ -178,7 +182,9 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
             }
 
             var planarDistance = Vector2.Distance(originMap.Position, targetMap.Position);
-            var verticalDistance = (double) targetWorldZ - originWorldZ;
+            destinationZOffset = ZLevelTracePoint.DefaultZOffset;
+            var verticalDistance = targetWorldZ + (double) destinationZOffset -
+                                   (originWorldZ + (double) originZOffset);
             var traceDistance = Math.Sqrt(
                 (double) planarDistance * planarDistance + verticalDistance * verticalDistance);
             if (!double.IsFinite(traceDistance) || traceDistance > maxDistance)
@@ -190,10 +196,11 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
             destinationWorldZ = targetWorldZ;
         }
 
-        if (!TryCreatePoint(originMap, originWorldZ, frameUid, out var origin) ||
+        if (!TryCreatePoint(originMap, originWorldZ, originZOffset, frameUid, out var origin) ||
             !TryCreatePoint(
                 new MapCoordinates(destinationPosition, originMap.MapId),
                 destinationWorldZ,
+                destinationZOffset,
                 frameUid,
                 out var destination))
         {
@@ -214,6 +221,7 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
     private bool TryCreatePoint(
         MapCoordinates coordinates,
         int worldZ,
+        float worldZOffset,
         EntityUid? frameUid,
         out ZLevelTracePoint point)
     {
@@ -224,13 +232,15 @@ public sealed class HitscanBasicRaycastSystem : EntitySystem
                 gridUid,
                 local.Position,
                 _transform.WorldToLocalZLevel(gridUid, worldZ),
+                worldZOffset,
                 out point);
         }
 
         point = ZLevelTracePoint.FromMap(new ZLevelMapCoordinates(
             coordinates.Position,
             worldZ,
-            coordinates.MapId));
+            coordinates.MapId),
+            worldZOffset);
         return true;
     }
 
