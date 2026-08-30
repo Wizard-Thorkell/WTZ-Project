@@ -548,6 +548,15 @@ concurrent humans, 120 minutes, and twelve exact gameplay/operations checks.
 Dependency advisories, target-host calibration, filesystem recovery, monitoring,
 backups, and final launch approval remain operator responsibilities.
 
+Strict clean run `20260830T193313Z-25516-dbcddb0f` passes the complete contract
+on published WTZ Project `7457f8239bc...` and exact WTZ Engine/gitlink
+`7cbd778024e...`: release 41/41 plus 3/3 composites, recovery 1/1, health 4/4,
+performance 4/4, and real-client visual 24/24. Parent report SHA-256 is
+`0ccaa8cd5c74f05d3c4a602c557c9cedaf8fb65afa50664abc3eca504f550940`.
+The resulting deployment class is `ControlledPublicPilot`; unrestricted public
+operation remains `NotCertified` pending the external conditions in the
+operations runbook.
+
 The first strict final run exposed a useful instrumentation mismatch introduced
 with immediate viewer-floor replication: the endurance fixture correctly
 performed one synchronous refresh at each real floor transition in addition to
@@ -588,8 +597,8 @@ earlier simulation batch.
   initialized-map autosave/checkpoint telemetry.
 - **P8.4d2:** complete. Validated manual checkpoints and the clean-source
   executable recovery rehearsal pass their protected contract.
-- **P8.4d3:** active. Its operations guide and final gate are implemented; the
-  strict rerun and closing evidence remain before the final P0-P8 decision.
+- **P8.4d3:** complete. The strict final gate passes all protected contracts and
+  closes P8 and the P0-P8 technical roadmap for a controlled public pilot.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,

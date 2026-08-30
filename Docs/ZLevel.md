@@ -1244,8 +1244,7 @@ known-good artifact, followed by two structurally identical recovery loads.
 This remains authored-map recovery rather than live-round persistence or an
 automatic in-memory rollback. P8.4d2 is complete after strict clean run
 `20260830T175112Z-42960-2a6a957e` passed 1/1 against published project revision
-`a2474f66d46...` and paired engine/gitlink `7cbd778024e...`. P8.4d3 now owns the
-operator runbook, representative deployment evidence, and final P0-P8 gate.
+`a2474f66d46...` and paired engine/gitlink `7cbd778024e...`.
 
 P8.4d3 defines `WTZ-P0-P8-1` as the fail-closed composition of release,
 recovery, operational health, Server GC lifecycle, 32-session endurance,
@@ -1254,6 +1253,13 @@ operator runbook and separates technical roadmap completion from unrestricted
 public-server certification. A strict automated pass permits a controlled
 public pilot; revision-bound human evidence and target-host operations remain
 required for a public candidate.
+
+P8.4d3 and the P0-P8 technical roadmap are complete. Strict clean run
+`20260830T193313Z-25516-dbcddb0f` passes release 41/41 plus 3/3 composites,
+recovery 1/1, health 4/4, performance 4/4, and visual 24/24 on published project
+`7457f8239bc...` and engine/gitlink `7cbd778024e...`. The accepted deployment
+class is `ControlledPublicPilot`; unrestricted public operation remains outside
+the automated claim until target-host and human-pilot conditions are satisfied.
 
 ## Definition Of Done
 
@@ -1268,4 +1274,7 @@ ZLevel becomes production-quality when:
 - The feature has enough tests to prevent accidental regression.
 - Existing 2D maps and gameplay keep working without requiring ZLevel content.
 
-Until then, this remains a strong prototype with a clear path forward.
+The P0-P8 technical definition above is satisfied. Production operation now
+moves to the controlled pilot, target-host calibration, dependency review,
+monitoring/backup setup, and revision-bound human validation described in
+`Docs/ZLevelOperations.md`.

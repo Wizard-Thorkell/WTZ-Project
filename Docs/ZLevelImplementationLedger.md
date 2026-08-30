@@ -1,15 +1,15 @@
 # WTZ Z-Level Implementation Ledger
 
-This file is the resumable source of truth for the active Z-level implementation
-goal. Update it in the same commit as every completed work package.
+This file is the resumable source of truth for the completed P0-P8 Z-level
+implementation goal. Update it with every later maintenance package.
 
 ## Goal Status
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4d3 operations guide and final P0-P8 gate`.
-- Overall status: active.
+- Active package: none; P0-P8 is complete.
+- Overall status: complete; accepted for `ControlledPublicPilot`.
 
 ## Mandatory Completion Gate
 
@@ -48,7 +48,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Complete |
-| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.4 active) |
+| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Complete |
 
 ## Phase P4 Packages
 
@@ -108,7 +108,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Complete |
 | P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Complete |
 | P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Complete |
-| P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Active |
+| P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Complete |
 
 ## Phase P8.4 Packages
 
@@ -119,7 +119,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Complete |
 | P8.4d1 | Operational health snapshot and initialized-map autosave telemetry | Complete |
 | P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Complete |
-| P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Active |
+| P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Complete |
 
 ## Phase P8.2 Packages
 
@@ -8709,7 +8709,7 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4d3 composes health, recovery, release, Z 0, porting, visual,
   soak, baseline, and manual operations evidence into the final P0-P8 gate.
 
-## Active Package: P8.4d3 Operations Guide And Final P0-P8 Gate
+## Completed Package: P8.4d3 Operations Guide And Final P0-P8 Gate
 
 ### Scope
 
@@ -8773,8 +8773,8 @@ allocation is inside Robust physics enumeration.
   acceptance threshold changed.
 - Release verification passes a zero-error build, 2/2 focused integration,
   345 broad integration cases with one conditional skip, and 17/17 Z-level
-  unit/mapping cases. The corrected official
-  32-session, 10-floor, 1,024-iteration endurance profile passes with 88.91%
+  unit/mapping cases. The corrected official 32-session, 10-floor,
+  1,024-iteration endurance profile passes with 88.91%
   scheduled cache hits, p95/p99/max 6.538/31.344/65.224 ms, 17,557 allocated
   bytes per iteration, and zero deferred or exhausted work. Its 28,525,291
   scheduled plus 28,530,312 direct visibility observations exactly equal
@@ -8783,30 +8783,78 @@ allocation is inside Robust physics enumeration.
   hits, p95/p99/max 12.410/63.718/67.710 ms, 32,187 allocated bytes per
   iteration, and zero deferred or exhausted work.
 
+### Official Evidence
+
+- Strict clean run `20260830T193313Z-25516-dbcddb0f` passes `WTZ-P0-P8-1`
+  schema 1 in 824,845.2163 ms on published project revision
+  `7457f8239bc9b68a1913e3a0695d5ba5a4f5c771` and exact WTZ Engine/gitlink
+  `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`. Local and remote project hashes
+  match, both worktrees are clean before/after, and every development flag is
+  false.
+- Release passes 41/41 exact tests, 3/3 composites, Z 0 18/18, port pairing
+  50/50, and real-client visual 24/24. Recovery passes 1/1 with two checkpoints,
+  one required refusal, two loads, and exact structural identity. Operational
+  health passes 4/4.
+- Server GC lifecycle passes at p95/p99 21.499/26.814 ms, 865,569 allocated
+  bytes per cycle, and 293,720 retained bytes. Endurance passes at
+  p95/p99 4.859/23.774 ms, 88.91% scheduled cache hits, and 17,552 allocated
+  bytes per iteration. Capacity passes at p95/p99 18.090/53.534 ms, 95.31%
+  cache hits, and 32,265 allocated bytes per iteration. Every profile has zero
+  scheduler debt or relevant budget exhaustion.
+- Neutral 3/6/10-floor baselines pass at 4,320 measured bytes each with the
+  protected warm-cache and no-exhaustion invariants.
+- Parent report SHA-256 is
+  `0ccaa8cd5c74f05d3c4a602c557c9cedaf8fb65afa50664abc3eca504f550940`;
+  release and recovery child hashes are respectively
+  `dd9aa1f0f4d80808c12a083ae95816cfc794b1879dc16047b96eaa84b67f1514`
+  and `8ce1dd194f92646861ee8be01580046c4ab6d517b851955bfd67dc05d14c4684`.
+
+### Mini Review
+
+- Finding: the fail-closed final gate found a stale soak assumption after the
+  P8.4c immediate PVS refresh change. Separate direct/scheduled telemetry fixed
+  accounting without weakening behavior, budgets, cadence, or thresholds.
+- Finding: strict run `20260830T191826Z-8308-fa0fc3ea` was rejected when host
+  jitter put lifecycle p95/p99 at 30.300/40.332 ms. An identical isolated rerun
+  passed at 25.122/27.398 ms, and the complete accepted rerun passed at
+  21.499/26.814 ms. Both rejected and accepted artifacts are retained.
+- Readiness decision: P0-P8 is technically complete and accepted for a
+  controlled public pilot. It is not an unrestricted public-server
+  certification.
+- Residual conditions: dependency-advisory review, target-host capacity
+  calibration, target-filesystem recovery rehearsal, monitoring/backups/evidence
+  retention, and the revision-bound eight-player/120-minute human pilot remain
+  external operational work.
+- Post-roadmap maintenance starts as a new package. It must not silently expand
+  this completed goal or reinterpret a passing gate as universal host capacity.
+
 ### Completion Gate
 
-- [ ] Scope check: final changes are confined to operations, acceptance tooling,
+- [x] Scope check: final changes are confined to operations, acceptance tooling,
       representative evidence, synchronized documentation, and required fixes.
-- [ ] Invariant review: Z 0, local/world frames, moving grids, server authority,
+- [x] Invariant review: Z 0, local/world frames, moving grids, server authority,
       boundary channels, persistence limits, and operator failure modes pass.
-- [ ] Automated verification: the final contract and all composed protected
+- [x] Automated verification: the final contract and all composed protected
       contracts pass from clean paired published source.
-- [ ] Performance evidence: release, Server GC, soak, baseline, cache, and budget
+- [x] Performance evidence: release, Server GC, soak, baseline, cache, and budget
       envelopes are current and bound to the accepted source pair.
-- [ ] Documentation: runbook, commands, thresholds, recovery, known limits,
+- [x] Documentation: runbook, commands, thresholds, recovery, known limits,
       evidence, and final readiness decision are complete and mutually consistent.
-- [ ] Dependency check: WTZ Project, WTZ Engine checkout, gitlink, and remotes are
+- [x] Dependency check: WTZ Project, WTZ Engine checkout, gitlink, and remotes are
       paired at the accepted revisions.
-- [ ] Git check: whitespace, scope, clean-tree, commit, push, and remote hashes
+- [x] Git check: whitespace, scope, clean-tree, commit, push, and remote hashes
       are verified after the final gate.
-- [ ] Mini review: findings, residual risks, deployment conditions, and any
+- [x] Mini review: findings, residual risks, deployment conditions, and any
       post-roadmap backlog are recorded before closure.
-- [ ] Commit: the final package and closing evidence are saved and pushed.
+- [x] Commit: implementation commits `Add final Z-level operations gate` and
+      `Account for immediate Z-level PVS refreshes`, plus this closing evidence,
+      are saved and pushed.
 
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4d3 / P8 / P0-P8 gate | `Add final Z-level operations gate` / `Account for immediate Z-level PVS refreshes` / `Close WTZ Z-level P0-P8 roadmap` | strict WTZ-P0-P8-1: release 41/41 + 3/3, recovery 1/1, health 4/4, performance 4/4, visual 24/24, Z 0 18/18, port 50/50, exact published source/engine/gitlink/remote and clean-tree review; 345 broad + 1 conditional skip, 17 unit/mapping, rejected-run diagnosis retained | Complete (`ControlledPublicPilot`) |
 | 2026-08-30 | P8.4d2 | `Add validated Z-level recovery checkpoints` | strict WTZ-RECOVERY-1 1/1 with 2 checkpoints, 1 refusal, 2 loads, exact structural match; 14 focused unit, 27 unit/mapping, 13 persistence, 344 pass + 2 conditional skips broad, 3 baseline, full build, exact source/report/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4d1 | `Expose Z-level operational health` | 4 evaluator/JSON, 13 focused unit, 26 unit/mapping, 1 autosave, 12 persistence, 343 pass + 2 conditional skips broad, 3 baseline, full build, semantics/performance/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4c | `Close executable WTZ Z-level release matrix` | strict WTZ-RELEASE-1 41/41 + 3/3, 8 self-tests, 343 pass + 2 conditional skips broad, 22 unit/mapping, 3 baseline, full builds, exact source/report/diff/dependency/remote review | Complete |

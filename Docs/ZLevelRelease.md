@@ -214,7 +214,19 @@ are the durable repository record.
 - Existing package advisories include `System.Security.Cryptography.Xml 9.0.0`
   and legacy Pow3r runtime dependencies. They are upstream dependency risk and
   are not waived by this contract.
-- Passing P8.4c alone does not close P8. `WTZ-P0-P8-1` additionally requires
-  diagnostics, validated recovery, Server GC lifecycle, endurance/capacity,
-  neutral baselines, deployment procedures, and final source/remote checks.
-  See `Docs/ZLevelOperations.md` for the composed gate and readiness classes.
+- P8.4c alone is not a public-server certification. The later `WTZ-P0-P8-1`
+  record composes diagnostics, validated recovery, Server GC lifecycle,
+  endurance/capacity, neutral baselines, deployment procedures, and final
+  source/remote checks. See `Docs/ZLevelOperations.md` for readiness classes.
+
+## Official P0-P8 Evidence
+
+Strict final run `20260830T193313Z-25516-dbcddb0f` passes the composed
+`WTZ-P0-P8-1` contract on project `7457f8239bc...` and engine/gitlink
+`7cbd778024e...`. It re-runs this release contract at 41/41 tests, 3/3
+composites, and real-client visual 24/24, then passes recovery 1/1, operational
+health 4/4, and all four performance profiles. The parent report SHA-256 is
+`0ccaa8cd5c74f05d3c4a602c557c9cedaf8fb65afa50664abc3eca504f550940`.
+
+This closes P8 and the technical P0-P8 roadmap. The accepted class is
+`ControlledPublicPilot`, not unrestricted public-server certification.

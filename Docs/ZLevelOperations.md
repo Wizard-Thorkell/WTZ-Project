@@ -48,7 +48,7 @@ supply-chain attestation.
 
 ## Final Acceptance Gate
 
-Validate the immutable manifest and its eleven rejection cases first:
+Validate the immutable manifest and its twelve rejection cases first:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_final_gate.ps1 -ValidateOnly
@@ -93,6 +93,20 @@ Every child report and required design document is hashed into
 - two passed composite gates, four health tests, and four performance profiles;
   and
 - `failure == null`.
+
+### Accepted Roadmap Record
+
+Strict run `20260830T193313Z-25516-dbcddb0f` passed on published WTZ Project
+`7457f8239bc9b68a1913e3a0695d5ba5a4f5c771` and WTZ Engine/gitlink
+`7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`, with no development bypass. It
+reports release 41/41 and 3/3 composites, recovery 1/1, health 4/4, performance
+4/4, Z 0 18/18, port probes 50/50, and visual checks 24/24. Parent report
+SHA-256 is
+`0ccaa8cd5c74f05d3c4a602c557c9cedaf8fb65afa50664abc3eca504f550940`.
+
+This record closes the technical P0-P8 roadmap at `ControlledPublicPilot`. It
+does not satisfy the target-host or human-pilot steps below and does not change
+the unrestricted-server status from `NotCertified`.
 
 ## Deployment Preflight
 
