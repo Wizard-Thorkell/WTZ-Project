@@ -90,6 +90,11 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"sources={metrics.GravityBuildSources}, avg={metrics.GravityAverageBuildMilliseconds:0.000}ms, " +
             $"last={metrics.GravityLastBuildMilliseconds:0.000}ms, max={metrics.GravityMaxBuildMilliseconds:0.000}ms");
         shell.WriteLine(
+            $"  flight: active={_entityManager.System<SharedZLevelSystem>().ActiveFlightCount}, " +
+            $"starts/stops/targets={metrics.FlightStarts}/{metrics.FlightStops}/{metrics.FlightTargetChanges}, " +
+            $"updates/crossings/blocks={metrics.FlightUpdates}/{metrics.FlightBoundaryCrossings}/" +
+            $"{metrics.FlightBoundaryBlocks}, invalidations={metrics.FlightInvalidations}");
+        shell.WriteLine(
             $"  pvs: refreshes={metrics.PvsRefreshes}, viewers={metrics.PvsViewers}, " +
             $"candidates={metrics.PvsCandidates}, visible={metrics.PvsVisible}, culled={metrics.PvsCulled}, " +
             $"checks={metrics.PvsVisibilityChecks}/{pvs.VisibilityCheckBudget}, " +

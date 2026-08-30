@@ -60,6 +60,14 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _gravityLastBuildTimestampTicks;
     private long _gravityMaxBuildTimestampTicks;
 
+    private long _flightStarts;
+    private long _flightStops;
+    private long _flightTargetChanges;
+    private long _flightInvalidations;
+    private long _flightUpdates;
+    private long _flightBoundaryCrossings;
+    private long _flightBoundaryBlocks;
+
     private long _pvsRefreshes;
     private long _pvsViewers;
     private long _pvsCandidates;
@@ -260,6 +268,38 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _gravityBuildTimestampTicks += elapsedTimestampTicks;
         _gravityLastBuildTimestampTicks = elapsedTimestampTicks;
         _gravityMaxBuildTimestampTicks = Math.Max(_gravityMaxBuildTimestampTicks, elapsedTimestampTicks);
+    }
+
+    public void RecordFlightStarted()
+    {
+        _flightStarts++;
+    }
+
+    public void RecordFlightStopped(bool invalidated)
+    {
+        _flightStops++;
+        if (invalidated)
+            _flightInvalidations++;
+    }
+
+    public void RecordFlightTargetChanged()
+    {
+        _flightTargetChanges++;
+    }
+
+    public void RecordFlightUpdate()
+    {
+        _flightUpdates++;
+    }
+
+    public void RecordFlightBoundaryCrossing()
+    {
+        _flightBoundaryCrossings++;
+    }
+
+    public void RecordFlightBoundaryBlocked()
+    {
+        _flightBoundaryBlocks++;
     }
 
     public void RecordPvsRefresh(
@@ -507,6 +547,13 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             TimestampTicksToMilliseconds(_gravityBuildTimestampTicks),
             TimestampTicksToMilliseconds(_gravityLastBuildTimestampTicks),
             TimestampTicksToMilliseconds(_gravityMaxBuildTimestampTicks),
+            _flightStarts,
+            _flightStops,
+            _flightTargetChanges,
+            _flightInvalidations,
+            _flightUpdates,
+            _flightBoundaryCrossings,
+            _flightBoundaryBlocks,
             _pvsRefreshes,
             _pvsViewers,
             _pvsCandidates,
@@ -615,6 +662,13 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _gravityBuildTimestampTicks = 0;
         _gravityLastBuildTimestampTicks = 0;
         _gravityMaxBuildTimestampTicks = 0;
+        _flightStarts = 0;
+        _flightStops = 0;
+        _flightTargetChanges = 0;
+        _flightInvalidations = 0;
+        _flightUpdates = 0;
+        _flightBoundaryCrossings = 0;
+        _flightBoundaryBlocks = 0;
         _pvsRefreshes = 0;
         _pvsViewers = 0;
         _pvsCandidates = 0;
@@ -728,6 +782,13 @@ public readonly record struct ZLevelMetricsSnapshot(
     double GravityBuildMilliseconds,
     double GravityLastBuildMilliseconds,
     double GravityMaxBuildMilliseconds,
+    long FlightStarts,
+    long FlightStops,
+    long FlightTargetChanges,
+    long FlightInvalidations,
+    long FlightUpdates,
+    long FlightBoundaryCrossings,
+    long FlightBoundaryBlocks,
     long PvsRefreshes,
     long PvsViewers,
     long PvsCandidates,

@@ -219,7 +219,7 @@ debug overlay add client-local weather plan, grid, tile, run, render, audio,
 timing, fail-closed, and effective-budget counters. Resetting render metrics
 also resets the weather counters.
 
-Stress snapshots use schema version 4 and include effective sky budgets plus
+Stress snapshots use schema version 5 and include effective sky budgets plus
 query/cache/outcome counters. The 3/6/10-floor measured workload must remain hot
 after warm-up when it fits the configured cache.
 
@@ -278,3 +278,14 @@ only when their content explicitly requests all channels.
 - A non-incremental full-solution build completes in 2m28s with zero errors and
   the same 695 established warnings as P7.3a. Dedicated non-incremental client
   and integration scans attribute no warning to a modified production/test file.
+
+## Flight Foundation
+
+P7.4a adds an opt-in native flight capability inside the existing vertical
+solver. Targets are grid-local floor/offset pairs, movement crosses the shared
+`Body` boundary channel, active flight overrides artificial gravity, and
+stopping returns control to the connected gravity plane. Closed boundaries
+clamp and retarget once, while ordinary fixtures continue to collide by
+discrete world floor. Runtime active/target state is replicated but excluded
+from map serialization. Full API, lifecycle, collision, and consumer boundaries
+are documented in `ZLevelFlight.md`.

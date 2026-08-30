@@ -6763,10 +6763,141 @@ allocation is inside Robust physics enumeration.
 - Next package after the gate: P7.4a defines flight movement, gravity, and
   collision semantics before trace, projectile, AI, content, and mapping work.
 
+## Completed Package: P7.4a Flight Movement, Gravity, And Collision Contract
+
+### Scope
+
+- Define one shared opt-in capability and typed API for controlled movement
+  between native local Z floors.
+- Integrate flight with the existing vertical solver, artificial gravity,
+  weightlessness, `Body` boundaries, planar fixture isolation, moving frames,
+  replication, lifecycle invalidation, and observability.
+- Preserve map safety by serializing authored capability parameters while
+  excluding active flight and target runtime state.
+- Leave controls, species, jetpacks, stamina, visuals, trace/projectile policy,
+  AI execution, and demo mapping to the P7.4b consumer package.
+
+### Implementation
+
+- `ZLevelFlightComponent` authors hover offset, vertical acceleration, and
+  maximum speed. Its active flag and grid-local floor/offset target are
+  networked without `DataField`, so normal saves always load the capability
+  inactive.
+- `SharedZLevelSystem` exposes typed start, local/world target, stop, query, and
+  active-count APIs plus cancellable start, started, target-changed, stopped,
+  and boundary-blocked events. Invalid configuration, current position,
+  target, map, grid, body, anchor, and container states have distinct results.
+- Start attempts validate before mutation and preserve inherited local height
+  when explicit Z state is materialized. A cancelled attempt creates no
+  position or kinematics component.
+- Active movement uses bounded acceleration and stopping speed inside the
+  existing continuous `LocalZOffset` integrator. Each crossing consults the
+  shared `Body` channel; a closed boundary clamps and retargets to contact once,
+  allowing the body to sleep without a per-tick retry loop.
+- Flight forces weightlessness and permits ordinary XY weightless movement.
+  Stopping clears controlled velocity, refreshes native gravity, and wakes the
+  body so a connected generator plane can regain control. Managed gravity now
+  also honors independent weightlessness overrides.
+- Targets remain local when `ZLevelFrameComponent.Origin` moves. Fixtures keep
+  the established discrete-world-floor collision contract: hovering does not
+  create fractional cross-floor contacts.
+- Active flight ends on capability removal, anchoring, containment, invalid
+  body type, grid reparenting, malformed state, or a map-range change that
+  invalidates its target.
+- The no-flight hot path checks the active-flight index before touching the
+  component query. Metrics, `zlevelmetrics`, and the debug overlay expose
+  starts, stops, targets, updates, crossings, blocks, invalidations, and active
+  count. Stress artifacts advance to schema version 5.
+
+### Verification Evidence
+
+- Eight connected flight tests pass. They cover hover under powered artificial
+  gravity, two open crossings, moving-frame target stability and replication,
+  one-shot closed-boundary contact, gravity restoration, external weightless
+  precedence, typed validation and cancellation with no side effects,
+  map-range invalidation, anchor/container rejection, and collision by
+  discrete world floor.
+- Flight plus metrics pass 10/10. The combined movement, map-format, and flight
+  regression set passes 31/31. The final complete Content Z-level/placement
+  matrix passes 322/322 with no failures or skips.
+- The final Content unit/mapping filter passes 11/11. The freshly compiled
+  schema-version 5 baseline passes 3/3 with 100% measured boundary, sky, and
+  gravity cache hits, zero measured misses, zero PVS budget exhaustion, and
+  zero flight starts or updates in the neutral workload.
+- The final 3/6/10-floor measurements are 10.7544, 16.1705, and 25.6144 ms with
+  6,560/6,336/6,336 bytes. A repeated fast-path capture measures 10.6339,
+  15.6298, and 22.6518 ms with 6,336 bytes at every depth; the 224-byte
+  first-case variation is initialization noise rather than steady-state flight
+  cost.
+- A final non-incremental `SpaceStation14.slnx` build completes in 1m28s with
+  zero errors and 706 established solution warnings. Dedicated attribution
+  finds no warning in any modified production or test file.
+- `git diff --check` passes. The WTZ Engine worktree is clean and remains pinned
+  to published revision `7cbd778024`; this package requires no engine change.
+
+### Decisions
+
+- Flight is a consumer mode inside the native local-Z solver, not a separate-map
+  teleport system or a second physics controller.
+- The target is grid-local by default. World-target callers must request the
+  explicit conversion so moving ships retain ship-relative flight plans.
+- `Body` remains the only movement boundary channel. Projectile, visibility,
+  interaction, and other channels do not inherit flight rules implicitly.
+- Active flight is runtime state. Mapping stores capability parameters only;
+  controls and content may not make an authored entity load already airborne.
+- Collision stays discrete by world floor. Visual interpolation and vertical
+  trace consumers must not reinterpret the hover offset as a planar fixture Z.
+
+### Completion Gate
+
+- [x] Scope check: movement/gravity/collision capability, API, metrics, tests,
+      and documentation only; P7.4b consumers remain separate.
+- [x] Invariant review: Z 0 compatibility, local/world frames, inherited height,
+      moving grids, finite/range validation, cancellation, open/closed `Body`
+      boundaries, gravity resumption, independent weightlessness, and
+      discrete-floor collision were reviewed.
+- [x] Automated verification: 10 focused, 31 movement/map, 322 broad, 11
+      unit/mapping, and 3 final baseline cases pass.
+- [x] Performance evidence: the no-flight indexed fast path restores the
+      6,336-byte steady-state baseline and reports zero neutral flight work.
+- [x] Documentation: state, APIs, lifecycle, collision, save boundary,
+      observability, evidence, and P7.4b ownership are recorded here and in
+      `ZLevelFlight.md`, `ZLevelVerticalContent.md`, and `ZLevel.md`.
+- [x] Dependency check: no WTZ Engine change; clean submodule remains pinned to
+      published revision `7cbd778024`.
+- [x] Git check: non-incremental build, warning attribution, generated-artifact
+      ignore state, diff whitespace, tree scope, and dependency state pass.
+- [x] Mini review: cancellation side effects, inherited height, malformed/out-of-
+      range origins, closed-boundary sleep, neutral hot-path allocation, and
+      consumer boundaries were reviewed and corrected or recorded.
+- [x] Commit: prepared as isolated `Define native Z-level flight physics` on
+      `zlevel/vertical-content`; push and local/remote hash verification follow.
+
+### Mini Review
+
+- Finding: checking the active-flight index before the component query removes
+  all steady-state capability overhead from worlds with no flyers.
+- Finding: start validation must precede `EnsureZLevelEntity`; otherwise a
+  cancelled content policy silently mutates vertical state and velocity.
+- Finding: preserving inherited local height avoids snapping a parented entity
+  to local Z 0 when flight materializes its explicit position.
+- Finding: retargeting to a blocked contact is necessary for bounded work. An
+  unchanged unreachable target would keep the body awake forever.
+- Residual risk: there is intentionally no player-facing action, species,
+  jetpack, stamina, sprite, or demo map yet; ordinary players cannot activate
+  this capability until P7.4b supplies content and authoritative controls.
+- Residual risk: flight-aware trace/projectile behavior, AI execution, visual
+  height presentation, and explicit mapping round-trip content tests remain
+  P7.4b work. The runtime fields are structurally non-serializable already.
+- Next package: P7.4b integrates controls/content/mapping, trace and projectile
+  consumers, AI execution, and gameplay interruption policy through the typed
+  API and events established here.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P7.4a | `Define native Z-level flight physics` | 10 focused, 31 movement/map, 322 broad, 11 unit/mapping, 3 baseline, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3b | `Present weather on active Z levels` | 8 focused, all 314 broad covered, 14 unit/mapping, 3 baseline, 24 real GL, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3a | `Define shared Z-level weather exposure` | 3 focused, all 309 broad covered, 9 unit, 3 baseline, full build, allocation/diff review | Complete |
 | 2026-08-29 | P7.2b | `Integrate physical elevators with Z-level navigation` | 14 elevator, 3 focused consumers, 306 broad, 9 unit, 3 baseline, full build, warning/performance/diff review | Complete |

@@ -1128,6 +1128,10 @@ documented in `Docs/ZLevelTrace.md`. Keep damage, attenuation, target selection,
 and presentation in specialized systems rather than adding those policies to
 `SharedZLevelTraceSystem`.
 
+Native flight's movement, gravity, collision, lifecycle, and save-state
+contracts are documented in `Docs/ZLevelFlight.md`. Player controls, content,
+projectile behavior, and AI execution remain the P7.4b consumer package.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

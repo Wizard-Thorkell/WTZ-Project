@@ -27,7 +27,7 @@ namespace Content.Shared.ZLevel.Systems;
 /// ZLevel experimental vertical support and falling resolver.
 /// This keeps sparse layer semantics opt-in and leaves horizontal movement fully 2D for now.
 /// </summary>
-public sealed class SharedZLevelSystem : VirtualController
+public sealed partial class SharedZLevelSystem : VirtualController
 {
     [Dependency] private readonly SharedGravitySystem _gravity = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
@@ -68,6 +68,8 @@ public sealed class SharedZLevelSystem : VirtualController
         _projectileQuery = GetEntityQuery<ProjectileComponent>();
         _thrownQuery = GetEntityQuery<ThrownItemComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
+
+        InitializeFlight();
 
         SubscribeLocalEvent<ZLevelPositionComponent, ComponentStartup>(OnStartup);
         SubscribeLocalEvent<ZLevelKinematicsComponent, ComponentStartup>(OnStartup);
@@ -573,6 +575,8 @@ public sealed class SharedZLevelSystem : VirtualController
 
         var gridUid = transform.GridUid.Value;
         var xy = _map.TileIndicesFor(gridUid, grid, transform.Coordinates);
+        ZLevelFlightComponent flight = default!;
+        var activeFlight = _activeFlights.Contains(uid) && TryGetActiveFlight(uid, gridUid, out flight);
         var managedGravity = _zLevelGravity.IsManagedGrid(gridUid);
         var gravityTarget = 0;
         var hasGravityTarget = managedGravity && _zLevelGravity.TryGetGravityTarget(
@@ -581,7 +585,8 @@ public sealed class SharedZLevelSystem : VirtualController
             xy,
             dzPosition.ZLevel + dzPosition.LocalZOffset,
             out gravityTarget);
-        var weightless = managedGravity ? !hasGravityTarget : _gravity.IsWeightless(uid);
+        var externallyWeightless = _gravity.IsWeightless(uid);
+        var weightless = managedGravity ? !hasGravityTarget || externallyWeightless : externallyWeightless;
         var activelyThrown = _thrownQuery.TryComp(uid, out var thrown) &&
             !thrown.Landed &&
             thrown.LandTime > _timing.CurTime;
@@ -606,7 +611,30 @@ public sealed class SharedZLevelSystem : VirtualController
             ? IsStandingAgainstUpperBoundary(gridUid, grid, xy, dzPosition)
             : IsStandingOnCurrentLayer(gridUid, grid, xy, dzPosition);
 
-        if (gravityDirection == 0 && hasGravityTarget)
+        var flightTargetHeight = activeFlight
+            ? flight.TargetLocalZLevel + flight.TargetLocalZOffset
+            : 0f;
+        if (activeFlight)
+        {
+            var distance = flightTargetHeight - previousWorldHeight;
+            if (MathF.Abs(distance) < 0.001f)
+            {
+                dzPosition.ZLevel = flight.TargetLocalZLevel;
+                dzPosition.LocalZOffset = flight.TargetLocalZOffset;
+                dzKinematics.VerticalVelocity = 0f;
+            }
+            else
+            {
+                var desiredSpeed = MathF.Min(
+                    flight.MaximumVerticalSpeed,
+                    MathF.Sqrt(2f * flight.VerticalAcceleration * MathF.Abs(distance)));
+                dzKinematics.VerticalVelocity = MoveTowards(
+                    dzKinematics.VerticalVelocity,
+                    MathF.CopySign(desiredSpeed, distance),
+                    flight.VerticalAcceleration * frameTime);
+            }
+        }
+        else if (gravityDirection == 0 && hasGravityTarget)
         {
             dzKinematics.VerticalVelocity = 0f;
         }
@@ -634,11 +662,15 @@ public sealed class SharedZLevelSystem : VirtualController
                 dzKinematics.VerticalVelocity = 0f;
                 traversing = false;
                 blockedDirection = -1;
+                if (activeFlight)
+                    BlockFlightAtBoundary(uid, flight, dzPosition, blockedDirection);
                 break;
             }
 
             dzPosition.ZLevel -= 1;
             dzPosition.LocalZOffset += 1f;
+            if (activeFlight)
+                _metrics.RecordFlightBoundaryCrossing();
         }
 
         while (traversing && dzPosition.LocalZOffset >= 1f)
@@ -649,16 +681,30 @@ public sealed class SharedZLevelSystem : VirtualController
                 dzKinematics.VerticalVelocity = 0f;
                 traversing = false;
                 blockedDirection = 1;
+                if (activeFlight)
+                    BlockFlightAtBoundary(uid, flight, dzPosition, blockedDirection);
                 break;
             }
 
             dzPosition.ZLevel += 1;
             dzPosition.LocalZOffset -= 1f;
+            if (activeFlight)
+                _metrics.RecordFlightBoundaryCrossing();
         }
 
         NormalizeVerticalPosition(dzPosition);
+        if (activeFlight)
+            flightTargetHeight = flight.TargetLocalZLevel + flight.TargetLocalZOffset;
+
         var currentWorldHeight = dzPosition.ZLevel + dzPosition.LocalZOffset;
-        if (hasGravityTarget && traversing && CrossedTarget(previousWorldHeight, currentWorldHeight, gravityTarget))
+        if (activeFlight && traversing && CrossedTarget(previousWorldHeight, currentWorldHeight, flightTargetHeight))
+        {
+            dzPosition.ZLevel = flight.TargetLocalZLevel;
+            dzPosition.LocalZOffset = flight.TargetLocalZOffset;
+            dzKinematics.VerticalVelocity = 0f;
+            currentWorldHeight = flightTargetHeight;
+        }
+        else if (!activeFlight && hasGravityTarget && traversing && CrossedTarget(previousWorldHeight, currentWorldHeight, gravityTarget))
         {
             dzPosition.ZLevel = gravityTarget;
             dzPosition.LocalZOffset = 0f;
@@ -667,7 +713,12 @@ public sealed class SharedZLevelSystem : VirtualController
             gravityDirection = 0;
         }
 
-        if (gravityDirection > 0 &&
+        if (activeFlight)
+        {
+            SetGrounded(uid, physics, dzKinematics, false);
+            _metrics.RecordFlightUpdate();
+        }
+        else if (gravityDirection > 0 &&
             (blockedDirection > 0 || IsStandingAgainstUpperBoundary(gridUid, grid, xy, dzPosition)))
         {
             SetGrounded(uid, physics, dzKinematics, true);
@@ -686,8 +737,14 @@ public sealed class SharedZLevelSystem : VirtualController
             SetGrounded(uid, physics, dzKinematics, false);
         }
 
-        if (dzKinematics.Grounded ||
-            MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f && (weightless || gravityDirection == 0))
+        if (activeFlight &&
+            MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f &&
+            MathF.Abs(currentWorldHeight - flightTargetHeight) < 0.001f)
+        {
+            _activeBodies.Remove(uid);
+        }
+        else if (!activeFlight && (dzKinematics.Grounded ||
+            MathF.Abs(dzKinematics.VerticalVelocity) < 0.001f && (weightless || gravityDirection == 0)))
         {
             _activeBodies.Remove(uid);
         }
@@ -839,7 +896,7 @@ public sealed class SharedZLevelSystem : VirtualController
         return worldHeight < targetLevel ? 1 : -1;
     }
 
-    private static bool CrossedTarget(float previousHeight, float currentHeight, int targetLevel)
+    private static bool CrossedTarget(float previousHeight, float currentHeight, float targetLevel)
     {
         return previousHeight < targetLevel && currentHeight >= targetLevel ||
                previousHeight > targetLevel && currentHeight <= targetLevel;

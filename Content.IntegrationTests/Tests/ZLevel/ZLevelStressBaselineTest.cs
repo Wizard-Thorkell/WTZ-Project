@@ -158,7 +158,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
                 Assert.That(transform.GetWorldPosition(stressFixture.MovingGridUid), Is.Not.EqualTo(movingGridStart));
 
                 baseline = new ZLevelStressBaseline(
-                    4,
+                    5,
                     new ZLevelStressBudgetSnapshot(
                         boundaries.BoundaryCacheCapacity,
                         skyExposure.CacheCapacity,

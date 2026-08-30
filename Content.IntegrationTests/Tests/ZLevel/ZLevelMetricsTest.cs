@@ -76,6 +76,12 @@ public sealed class ZLevelMetricsTest : GameTest
                 iterationBudgetExhausted: false,
                 elapsedTimestampTicks: 0);
             metrics.RecordExplosionCameraShake(candidates: 5, applied: 3, worldZRejected: 2);
+            metrics.RecordFlightStarted();
+            metrics.RecordFlightTargetChanged();
+            metrics.RecordFlightUpdate();
+            metrics.RecordFlightBoundaryCrossing();
+            metrics.RecordFlightBoundaryBlocked();
+            metrics.RecordFlightStopped(invalidated: true);
             var explosionSnapshot = metrics.Snapshot();
             Assert.Multiple(() =>
             {
@@ -92,6 +98,13 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(explosionSnapshot.ExplosionCameraShakeCandidates, Is.EqualTo(5));
                 Assert.That(explosionSnapshot.ExplosionCameraShakesApplied, Is.EqualTo(3));
                 Assert.That(explosionSnapshot.ExplosionCameraShakesWorldZRejected, Is.EqualTo(2));
+                Assert.That(explosionSnapshot.FlightStarts, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightStops, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightTargetChanges, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightInvalidations, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightUpdates, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightBoundaryCrossings, Is.EqualTo(1));
+                Assert.That(explosionSnapshot.FlightBoundaryBlocks, Is.EqualTo(1));
             });
 
             metrics.ResetCounters();
@@ -113,6 +126,13 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.SkyExposureEvictions, Is.Zero);
                 Assert.That(resetSnapshot.VisibilityTileQueries, Is.Zero);
                 Assert.That(resetSnapshot.GravityQueries, Is.Zero);
+                Assert.That(resetSnapshot.FlightStarts, Is.Zero);
+                Assert.That(resetSnapshot.FlightStops, Is.Zero);
+                Assert.That(resetSnapshot.FlightTargetChanges, Is.Zero);
+                Assert.That(resetSnapshot.FlightInvalidations, Is.Zero);
+                Assert.That(resetSnapshot.FlightUpdates, Is.Zero);
+                Assert.That(resetSnapshot.FlightBoundaryCrossings, Is.Zero);
+                Assert.That(resetSnapshot.FlightBoundaryBlocks, Is.Zero);
                 Assert.That(resetSnapshot.PvsRefreshes, Is.Zero);
                 Assert.That(resetSnapshot.InteractionQueries, Is.Zero);
                 Assert.That(resetSnapshot.InteractionRemoteOriginQueries, Is.Zero);

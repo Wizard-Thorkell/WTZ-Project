@@ -39,6 +39,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly SharedZLevelGravitySystem _gravitySystem;
     private readonly SharedZLevelMetricsSystem _metricsSystem;
     private readonly SharedZLevelSkyExposureSystem _skyExposureSystem;
+    private readonly SharedZLevelSystem _zLevelSystem;
     private readonly SharedZLevelTraceSystem _traceSystem;
     private readonly SharedTransformSystem _transformSystem;
     private readonly SharedZLevelVisibilitySystem _visibilitySystem;
@@ -66,6 +67,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _gravitySystem = _entityManager.System<SharedZLevelGravitySystem>();
         _metricsSystem = _entityManager.System<SharedZLevelMetricsSystem>();
         _skyExposureSystem = _entityManager.System<SharedZLevelSkyExposureSystem>();
+        _zLevelSystem = _entityManager.System<SharedZLevelSystem>();
         _traceSystem = _entityManager.System<SharedZLevelTraceSystem>();
         _transformSystem = _entityManager.System<SharedTransformSystem>();
         _visibilitySystem = _entityManager.System<SharedZLevelVisibilitySystem>();
@@ -291,6 +293,14 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"{weather.AudioTileChecks} {weather.AudioDirectExposures}/" +
             $"{weather.AudioNearbyExposures}/{weather.AudioBlockedQueries} " +
             $"budget:{weather.AudioBudgetExhaustions}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 308f),
+            $"flight active/start/stop:{_zLevelSystem.ActiveFlightCount}/" +
+            $"{metrics.FlightStarts}/{metrics.FlightStops} target/update:" +
+            $"{metrics.FlightTargetChanges}/{metrics.FlightUpdates} cross/block/invalid:" +
+            $"{metrics.FlightBoundaryCrossings}/{metrics.FlightBoundaryBlocks}/{metrics.FlightInvalidations}",
             metricsColor);
     }
 
