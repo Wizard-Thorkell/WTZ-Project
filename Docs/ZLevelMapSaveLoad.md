@@ -300,6 +300,8 @@ Its validated report SHA-256 is
 The rehearsal does not turn the checkpoint command into an in-memory rollback
 transaction. Loading a known-good artifact and retiring the damaged map remain
 explicit operator actions, and the checkpoint still excludes live-round state.
+The production incident sequence, evidence retention, and deployment-filesystem
+drill are defined in `Docs/ZLevelOperations.md`.
 
 ## Current Limitations
 

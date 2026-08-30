@@ -7,8 +7,8 @@ port-pairing, and real-client visual contracts.
 
 The contract is deliberately narrower than "all tests passed" or "ready for
 every public server." It provides deterministic evidence for the declared
-domains and revisions. P8.4d still owns operational diagnostics, recovery
-procedures, representative deployment checks, and the final P0-P8 decision.
+domains and revisions. P8.4d1 and P8.4d2 add operational diagnostics and
+validated recovery. P8.4d3 composes all three into the final P0-P8 decision.
 
 ## Protected Source Identity
 
@@ -214,5 +214,7 @@ are the durable repository record.
 - Existing package advisories include `System.Security.Cryptography.Xml 9.0.0`
   and legacy Pow3r runtime dependencies. They are upstream dependency risk and
   are not waived by this contract.
-- Passing P8.4c does not close P8. P8.4d must still prove diagnostics, recovery,
-  deployment procedures, representative operation, and the final roadmap gate.
+- Passing P8.4c alone does not close P8. `WTZ-P0-P8-1` additionally requires
+  diagnostics, validated recovery, Server GC lifecycle, endurance/capacity,
+  neutral baselines, deployment procedures, and final source/remote checks.
+  See `Docs/ZLevelOperations.md` for the composed gate and readiness classes.

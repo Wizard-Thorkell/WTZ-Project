@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "WTZ-P0-P8-1",
+  "configuration": "Release",
+  "readiness": {
+    "roadmapStatus": "Complete",
+    "deploymentClass": "ControlledPublicPilot",
+    "unrestrictedPublicServer": "RequiresExternalOperationalEvidence"
+  },
+  "sourcePolicy": {
+    "minimumProjectRevision": "bf673e572cdcd4602c9280356ff2bf6df542bdd1",
+    "engineRevision": "7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2",
+    "engineSubmodulePath": "RobustToolbox",
+    "remote": "origin",
+    "branch": "zlevel/server-hardening",
+    "requireRemoteMatch": true,
+    "requireCleanProject": true,
+    "requireCleanEngine": true
+  },
+  "requiredPhases": [
+    "P0",
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P5",
+    "P6",
+    "P7",
+    "P8"
+  ],
+  "requiredDocuments": [
+    "Docs/ZLevel.md",
+    "Docs/ZLevelElevators.md",
+    "Docs/ZLevelFlight.md",
+    "Docs/ZLevelImplementationLedger.md",
+    "Docs/ZLevelLighting.md",
+    "Docs/ZLevelMapSaveLoad.md",
+    "Docs/ZLevelOperations.md",
+    "Docs/ZLevelPathfinding.md",
+    "Docs/ZLevelPorting.md",
+    "Docs/ZLevelProjectiles.md",
+    "Docs/ZLevelRelease.md",
+    "Docs/ZLevelServerHardening.md",
+    "Docs/ZLevelSound.md",
+    "Docs/ZLevelTrace.md",
+    "Docs/ZLevelVerticalContent.md",
+    "Docs/ZLevelZZeroCompatibility.md"
+  ],
+  "compositeGates": [
+    {
+      "id": "release",
+      "contractVersion": "WTZ-RELEASE-1",
+      "script": "Tools/run_zlevel_release_gate.ps1",
+      "report": "zlevel-release.json"
+    },
+    {
+      "id": "recovery",
+      "contractVersion": "WTZ-RECOVERY-1",
+      "script": "Tools/run_zlevel_recovery_rehearsal.ps1",
+      "report": "zlevel-recovery.json"
+    }
+  ],
+  "operationalHealthTests": [
+    "Content.Tests.Server.ZLevelOperationalHealthTest.HealthySignalsHaveNoFindings",
+    "Content.Tests.Server.ZLevelOperationalHealthTest.IntegrityAndFailOpenSignalsAreCritical",
+    "Content.Tests.Server.ZLevelOperationalHealthTest.JsonOutputPreservesMachineReadableContract",
+    "Content.Tests.Server.ZLevelOperationalHealthTest.RecoverableSignalsAreDegradedWithStableActions"
+  ],
+  "performanceProfiles": [
+    {
+      "id": "server-lifecycle",
+      "script": "Tools/run_zlevel_server_lifecycle.ps1",
+      "report": "zlevel-server-lifecycle.json",
+      "schemaVersion": 1,
+      "settings": {
+        "warmupCycles": 8,
+        "measuredCycles": 128
+      },
+      "limits": {
+        "maximumP95Milliseconds": 30.0,
+        "maximumP99Milliseconds": 40.0,
+        "maximumMilliseconds": 66.667,
+        "maximumAllocatedBytesPerCycle": 1048576,
+        "maximumRetainedHeapDeltaBytes": 2097152
+      }
+    },
+    {
+      "id": "server-soak-endurance",
+      "script": "Tools/run_zlevel_server_soak.ps1",
+      "report": "zlevel-server-soak.json",
+      "schemaVersion": 6,
+      "settings": {
+        "floorCount": 10,
+        "sessionCount": 32,
+        "warmupIterations": 8,
+        "measuredIterations": 1024,
+        "candidateCopiesPerTile": 8
+      },
+      "limits": {
+        "maximumP95Milliseconds": 30.0,
+        "maximumP99Milliseconds": 33.333,
+        "maximumMilliseconds": 66.667,
+        "minimumContextCacheHitPercent": 85.0,
+        "maximumAllocatedBytesPerIteration": 24576,
+        "maximumDeferredRefreshes": 0,
+        "maximumBudgetExhaustions": 0
+      }
+    },
+    {
+      "id": "server-soak-capacity",
+      "script": "Tools/run_zlevel_server_soak.ps1",
+      "report": "zlevel-server-soak.json",
+      "schemaVersion": 6,
+      "settings": {
+        "floorCount": 10,
+        "sessionCount": 64,
+        "warmupIterations": 8,
+        "measuredIterations": 128,
+        "candidateCopiesPerTile": 8
+      },
+      "limits": {
+        "maximumP95Milliseconds": 55.0,
+        "maximumP99Milliseconds": 66.667,
+        "maximumMilliseconds": 125.0,
+        "minimumContextCacheHitPercent": 90.0,
+        "maximumAllocatedBytesPerIteration": 40960,
+        "maximumDeferredRefreshes": 0,
+        "maximumBudgetExhaustions": 0
+      }
+    },
+    {
+      "id": "neutral-baseline",
+      "script": "Tools/run_zlevel_baseline.ps1",
+      "report": "zlevel-baseline-{floor}-floors.json",
+      "schemaVersion": 5,
+      "settings": {
+        "floorCounts": [3, 6, 10],
+        "measuredIterations": 3
+      },
+      "limits": {
+        "maximumAllocatedBytes": 8192,
+        "minimumWarmCacheHitPercent": 100.0,
+        "maximumPvsBudgetExhaustions": 0,
+        "maximumSkyBudgetExhaustions": 0,
+        "maximumBoundaryEvictions": 0,
+        "maximumSkyEvictions": 0
+      }
+    }
+  ],
+  "pilotContract": {
+    "contractVersion": "WTZ-PILOT-1",
+    "minimumConcurrentHumanPlayers": 8,
+    "minimumDurationMinutes": 120,
+    "requireCheckNotes": true,
+    "requiredChecks": [
+      "atmosphere-open-close",
+      "combat-projectiles-explosions",
+      "construction-deconstruction",
+      "elevator-power-navigation",
+      "gravity-fall-flight",
+      "health-checkpoint-recovery",
+      "join-latejoin-observer",
+      "lighting-fov-weather",
+      "mapping-save-reload",
+      "round-start-map-load",
+      "sound-vertical-sealed",
+      "traversal-grouped-ladders"
+    ]
+  },
+  "externalLaunchConditions": [
+    "dependency-advisory-review",
+    "deployment-filesystem-recovery-drill",
+    "human-multiplayer-pilot",
+    "monitoring-backup-retention",
+    "target-host-capacity-calibration"
+  ]
+}

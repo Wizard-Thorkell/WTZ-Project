@@ -524,6 +524,30 @@ known-good path, and loading it through the normal map lifecycle. Players,
 minds, sessions, active simulation queues, and other live-round state are not
 part of the checkpoint contract.
 
+## P8.4d3 Final Operations Contract
+
+`Docs/ZLevelOperations.md` is the operator runbook for accepted source pairing,
+preflight, startup smoke, health/metrics interpretation, mapper checkpoints,
+recovery, incidents, rollback, evidence retention, and human pilot sign-off.
+`Docs/ZLevelFinalManifest.json` and `Tools/run_zlevel_final_gate.ps1` define the
+executable `WTZ-P0-P8-1` schema 1 contract.
+
+The final runner composes the complete `WTZ-RELEASE-1` and `WTZ-RECOVERY-1`
+reports, four exact `WTZ-OPS-HEALTH-1` tests, the Server GC lifecycle envelope,
+32-session/1,024-iteration endurance, 64-session capacity, and 3/6/10-floor
+neutral baselines. It verifies every report independently, hashes all child
+evidence and sixteen required documents, and requires clean project/engine
+source, exact gitlink, exact branch, and local HEAD equal to the published
+remote before a strict `Passed` result.
+
+The acceptance decision is deliberately layered. `Passed` completes the P0-P8
+technical roadmap and authorizes a controlled public pilot. It does not certify
+an unrestricted server. An optional revision-bound `WTZ-PILOT-1` record can
+promote the deployment class to `PublicCandidate` only after at least eight
+concurrent humans, 120 minutes, and twelve exact gameplay/operations checks.
+Dependency advisories, target-host calibration, filesystem recovery, monitoring,
+backups, and final launch approval remain operator responsibilities.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,

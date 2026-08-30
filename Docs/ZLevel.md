@@ -1247,6 +1247,14 @@ automatic in-memory rollback. P8.4d2 is complete after strict clean run
 `a2474f66d46...` and paired engine/gitlink `7cbd778024e...`. P8.4d3 now owns the
 operator runbook, representative deployment evidence, and final P0-P8 gate.
 
+P8.4d3 defines `WTZ-P0-P8-1` as the fail-closed composition of release,
+recovery, operational health, Server GC lifecycle, 32-session endurance,
+64-session capacity, and neutral baseline evidence. It also publishes the
+operator runbook and separates technical roadmap completion from unrestricted
+public-server certification. A strict automated pass permits a controlled
+public pilot; revision-bound human evidence and target-host operations remain
+required for a public candidate.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

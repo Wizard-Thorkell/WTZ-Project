@@ -8722,6 +8722,45 @@ allocation is inside Robust physics enumeration.
 - Audit every P0-P8 package, operational limitation, document, repository state,
   and remote revision before making the final public-server readiness decision.
 
+### Architecture And Decision
+
+- `Docs/ZLevelFinalManifest.json` defines `WTZ-P0-P8-1`, schema 1, and protects
+  nine phases, sixteen design/operations documents, two versioned composite
+  gates, four health tests, four performance profiles, exact source/remote
+  policy, and the external pilot contract.
+- `Tools/run_zlevel_final_gate.ps1` independently validates child report schema,
+  revisions, counts, hashes, thresholds, source cleanliness, remote equality,
+  and process cleanup. A child exit code without matching report content is not
+  accepted.
+- Release and recovery remain separate versioned contracts. The final gate
+  composes them rather than copying their gameplay or serializer logic.
+- A strict automated pass declares the technical roadmap complete and permits a
+  controlled public pilot. It does not certify an unrestricted public server.
+  Target-host operations and human multiplayer evidence remain explicit.
+- Optional `WTZ-PILOT-1` evidence must bind at least eight concurrent humans,
+  120 minutes, and twelve exact gameplay/operations checks to the accepted
+  project, engine, and gitlink revisions before the report can say
+  `PublicCandidate`.
+
+### Development Evidence
+
+- The canonical manifest validates at 9 phases, 16 documents, 2 composite gates,
+  4 exact health tests, and 4 performance profiles.
+- The fail-closed mutation suite passes 12/12, rejecting removed phases,
+  documents, composites, health/pilot checks, source protections, external
+  launch conditions, weakened endurance limits or pilot-note evidence, and
+  false unrestricted-server claims.
+- A strict invocation from the intentionally dirty implementation tree exits
+  nonzero before running child evidence, proving that development source cannot
+  be promoted accidentally.
+- PowerShell 5.1 AST parsing reports zero syntax errors for both new tools; the
+  manifest parses as valid schema 1 JSON.
+- Development composition run `20260830T182504Z-36092-85d8c91c` passed release
+  `41/41`, Z 0 `18/18`, port probes `50/50`, recovery `1/1` with exact
+  structural identity, and operational health `4/4`. Build, visual, and
+  performance reuse were explicitly marked development-only; parent report
+  SHA-256 is `450676a35e942f984921b0dd651cf87f5f905565a95c0df954fe5921d4b34d58`.
+
 ### Completion Gate
 
 - [ ] Scope check: final changes are confined to operations, acceptance tooling,
