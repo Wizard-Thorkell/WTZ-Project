@@ -130,6 +130,38 @@ missing protected build, and engine head outside the declared series. It also
 requires `Portable` mode to accept an unresolvable official project hash only
 with an explicit rewritten-history warning.
 
+## Clean Port Rehearsal
+
+P8.3's end-to-end rehearsal runs both policies from isolated project and engine
+worktrees, with Release builds enabled by default:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Tools\run_zlevel_port_rehearsal.ps1
+```
+
+The runner first requires clean source project/engine worktrees and executes a
+strict official-pair preflight. Its two scenarios are:
+
+1. `paired-clean-clone`: full project and engine histories with independent
+   worktrees and indexes, backed by read-only local object alternates. The exact
+   revisions, gitlink, subjects, probes, and Release builds must pass `Paired`.
+2. `portable-shallow-heads`: depth-one project and engine clones followed by
+   distinct empty commits and an updated project gitlink. The official project
+   minimum and engine base must be unavailable, both expected history warnings
+   must appear, and all probes and Release builds must still pass `Portable`.
+
+Every nested engine submodule is initialized from the already paired local
+checkout. Source revisions and worktree status are compared again after both
+scenarios. Temporary clones live under a uniquely marked `%TEMP%` directory and
+are recursively removed only after ownership/path validation; `-KeepWorktrees`
+is the explicit diagnostic opt-out.
+
+The ignored per-run and latest reports under
+`artifacts/zlevel-port-rehearsal/` record source revisions, mode, synthetic
+heads, shallow/history assertions, warnings, probe/build results, duration, and
+cleanup outcome. `-SkipBuild` and `-AllowDirtySourceForDevelopment` support a
+local dry run, but neither is valid evidence for closing P8.3 or a release gate.
+
 ## Destination Workflow
 
 1. Identify the destination project's RobustToolbox base and create dedicated
