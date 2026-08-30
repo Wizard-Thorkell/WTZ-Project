@@ -514,9 +514,9 @@ without an over-capacity alert.
 - **P8.4c:** complete. The executable `WTZ-RELEASE-1` contract passes its strict
   clean gate at 41/41 exact tests, 3/3 composites, and zero development
   bypasses on the published source pair.
-- **P8.4d1:** active pending its Git gate. It adds versioned on-demand health
-  diagnostics and initialized-map autosave/checkpoint telemetry.
-- **P8.4d2:** planned. It owns validated manual checkpoints and executable
+- **P8.4d1:** complete. It adds versioned on-demand health diagnostics and
+  initialized-map autosave/checkpoint telemetry.
+- **P8.4d2:** active. It owns validated manual checkpoints and executable
   recovery rehearsal.
 - **P8.4d3:** planned. It owns the operations guide, representative deployment
   checks, and final P0-P8 public-server checklist.

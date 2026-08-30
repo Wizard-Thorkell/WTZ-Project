@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4d1 operational health snapshot and autosave telemetry`.
+- Active package: `P8.4d2 validated checkpoint and executable recovery rehearsal`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -117,8 +117,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.4a | Batch-local PVS context reuse and 32-session Release envelope | Complete |
 | P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Complete |
 | P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Complete |
-| P8.4d1 | Operational health snapshot and initialized-map autosave telemetry | Active |
-| P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Planned |
+| P8.4d1 | Operational health snapshot and initialized-map autosave telemetry | Complete |
+| P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Active |
 | P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Planned |
 
 ## Phase P8.2 Packages
@@ -8500,7 +8500,7 @@ allocation is inside Robust physics enumeration.
   exercises representative deployment and failure recovery, audits the complete
   P0-P8 evidence chain, and makes the final public-server readiness decision.
 
-## Active Package: P8.4d1 Operational Health And Autosave Telemetry
+## Completed Package: P8.4d1 Operational Health And Autosave Telemetry
 
 ### Scope
 
@@ -8534,6 +8534,9 @@ allocation is inside Robust physics enumeration.
   eviction.
 - A non-incremental single-worker Debug solution build succeeds in 2m39.75s
   with zero errors and 688 established warnings.
+- Implementation revision `8ca03af39e91fc4a0e2f6225d6616a5c33d43cc5`
+  is published on `origin/zlevel/server-hardening`, and the remote branch
+  resolves to the exact same hash.
 
 ### Decisions
 
@@ -8568,11 +8571,13 @@ allocation is inside Robust physics enumeration.
       overview, and ledger.
 - [x] Dependency check: WTZ Engine source is unchanged and the checkout/gitlink
       remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
-- [ ] Git check: run final whitespace/status review, publish the implementation,
-      verify the remote hash, and confirm both repositories are clean.
+- [x] Git check: whitespace and staged scope checks pass; implementation
+      revision `8ca03af39e9...` is published and matches the remote; WTZ Project
+      and WTZ Engine are clean at closure.
 - [x] Mini review: collection cost, severity policy, map validation, reset
       scope, serialization stability, and false-positive risks were reviewed.
-- [ ] Commit: save and push the package as an isolated implementation revision.
+- [x] Commit: package implementation is saved and pushed as
+      `Expose Z-level operational health`.
 
 ### Mini Review
 
@@ -8597,6 +8602,7 @@ allocation is inside Robust physics enumeration.
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4d1 | `Expose Z-level operational health` | 4 evaluator/JSON, 13 focused unit, 26 unit/mapping, 1 autosave, 12 persistence, 343 pass + 2 conditional skips broad, 3 baseline, full build, semantics/performance/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4c | `Close executable WTZ Z-level release matrix` | strict WTZ-RELEASE-1 41/41 + 3/3, 8 self-tests, 343 pass + 2 conditional skips broad, 22 unit/mapping, 3 baseline, full builds, exact source/report/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4b | `Bound Z-level cache ownership across server lifecycles` | 3 targeted, all 344 broad covered, 328 namespace, 22 unit/mapping, 3 baseline, 2 lifecycle + 3 Server GC profiles, full build, ownership/performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.4a | `Reuse PVS geometry across Z-level viewers` | 11 focused, all 342 broad covered, 22 unit/mapping, 3 baseline, 2 repeated + 1 envelope Release soak, full build, performance/diff/dependency review | Complete |

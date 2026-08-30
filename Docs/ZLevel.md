@@ -1226,8 +1226,8 @@ contract, commands, report hashes, interpretation, and limits are documented
 in `Docs/ZLevelRelease.md`. P8.4c is complete. P8.4d now owns operational
 diagnostics, recovery, and the final public-server roadmap gate.
 
-P8.4d1 adds the on-demand `zlevelhealth [json]` command and the versioned
-`WTZ-OPS-HEALTH-1` schema. It validates configured maps and composes existing
+P8.4d1 is complete and adds the on-demand `zlevelhealth [json]` command and the
+versioned `WTZ-OPS-HEALTH-1` schema. It validates configured maps and composes existing
 runtime, autosave, budget, cache, gravity, traversal, flight, and elevator
 signals into `Healthy`, `Degraded`, or `Critical` findings with operator
 actions. Initialized-map autosave now retains process-local attempt, outcome,
