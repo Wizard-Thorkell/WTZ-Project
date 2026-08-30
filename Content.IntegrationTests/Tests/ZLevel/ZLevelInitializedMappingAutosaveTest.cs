@@ -10,6 +10,7 @@ using System.Text;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
 using Content.Server.Mapping;
+using Content.Server.ZLevel.Operations;
 using Content.Shared.CCVar;
 using Content.Shared.Mapping;
 using Content.Shared.ZLevel;
@@ -42,6 +43,7 @@ public sealed class ZLevelInitializedMappingAutosaveTest : GameTest
         var format = entMan.System<SharedZLevelMapSystem>();
         var zLevel = entMan.System<SharedZLevelSystem>();
         var autosave = entMan.System<MappingSystem>();
+        var operations = entMan.System<ZLevelOperationalHealthSystem>();
         var loader = entMan.System<MapLoaderSystem>();
         var name = $"zlevel-initialized-autosave-{Guid.NewGuid():N}.yml";
         var saveDirectory = new ResPath("/Autosaves") / name;
@@ -92,6 +94,7 @@ public sealed class ZLevelInitializedMappingAutosaveTest : GameTest
             Assert.That(autosave.IsAutosaving(grid.Owner), Is.False,
                 "An initialized grid cannot be persisted without its map root.");
 
+            var autosaveBefore = autosave.SnapshotAutosaveMetrics();
             entMan.GetComponent<ZLevelPositionComponent>(authored).ZLevel = 2;
             Assert.That(autosave.TryAutosaveNow(
                 sourceMapUid,
@@ -105,6 +108,20 @@ public sealed class ZLevelInitializedMappingAutosaveTest : GameTest
                 Assert.That(validationError, Does.Contain("outside the declared range"));
                 Assert.That(resources.UserData.DirectoryEntries(saveDirectory), Is.Empty,
                     "Validation failure must not expose a destination or temporary file.");
+            });
+            var failedMetrics = autosave.SnapshotAutosaveMetrics();
+            var failedHealth = operations.Capture();
+            Assert.Multiple(() =>
+            {
+                Assert.That(failedMetrics.Attempts, Is.EqualTo(autosaveBefore.Attempts + 1));
+                Assert.That(failedMetrics.Failures, Is.EqualTo(autosaveBefore.Failures + 1));
+                Assert.That(failedMetrics.LastAttemptSucceeded, Is.False);
+                Assert.That(failedMetrics.LastError, Does.Contain("outside the declared range"));
+                Assert.That(failedHealth.Status, Is.EqualTo(ZLevelOperationalHealthStatus.Critical));
+                Assert.That(failedHealth.Findings.Select(finding => finding.Code),
+                    Does.Contain("map.invalid-state"));
+                Assert.That(failedHealth.Findings.Select(finding => finding.Code),
+                    Does.Contain("autosave.last-attempt-failed"));
             });
 
             entMan.GetComponent<ZLevelPositionComponent>(authored).ZLevel = 1;
@@ -135,9 +152,41 @@ public sealed class ZLevelInitializedMappingAutosaveTest : GameTest
                 Assert.That(entMan.EntityExists(actor), Is.True);
                 Assert.That(entMan.EntityExists(transient), Is.True);
             });
+            var recoveredMetrics = autosave.SnapshotAutosaveMetrics();
+            var recoveredHealth = operations.Capture();
+            Assert.Multiple(() =>
+            {
+                Assert.That(recoveredMetrics.Attempts, Is.EqualTo(autosaveBefore.Attempts + 2));
+                Assert.That(recoveredMetrics.Successes, Is.EqualTo(autosaveBefore.Successes + 1));
+                Assert.That(recoveredMetrics.Failures, Is.EqualTo(autosaveBefore.Failures + 1));
+                Assert.That(recoveredMetrics.LastAttemptSucceeded, Is.True);
+                Assert.That(recoveredMetrics.LastPath, Is.EqualTo(savedPath.ToString()));
+                Assert.That(recoveredMetrics.LastError, Is.Null);
+                Assert.That(recoveredMetrics.LastValidatedEntities,
+                    Is.EqualTo(savedReport.ValidatedEntities));
+                Assert.That(recoveredHealth.Findings.Select(finding => finding.Code),
+                    Does.Not.Contain("map.invalid-state"));
+                Assert.That(recoveredHealth.Findings.Select(finding => finding.Code),
+                    Does.Not.Contain("autosave.last-attempt-failed"));
+                Assert.That(recoveredHealth.Findings.Select(finding => finding.Code),
+                    Does.Contain("autosave.recovered-failures"));
+            });
 
             autosave.ToggleAutosave(sourceMapUid);
             Assert.That(autosave.IsAutosaving(sourceMapUid), Is.False);
+            autosave.ResetAutosaveMetrics();
+            var resetMetrics = autosave.SnapshotAutosaveMetrics();
+            Assert.Multiple(() =>
+            {
+                Assert.That(resetMetrics.ActiveSchedules, Is.Zero);
+                Assert.That(resetMetrics.Attempts, Is.Zero);
+                Assert.That(resetMetrics.Successes, Is.Zero);
+                Assert.That(resetMetrics.Failures, Is.Zero);
+                Assert.That(resetMetrics.LastAttemptUtc, Is.Null);
+                Assert.That(resetMetrics.LastAttemptSucceeded, Is.Null);
+                Assert.That(resetMetrics.LastPath, Is.Null);
+                Assert.That(resetMetrics.LastError, Is.Null);
+            });
         });
 
         Entity<MapComponent> loadedMap = default;

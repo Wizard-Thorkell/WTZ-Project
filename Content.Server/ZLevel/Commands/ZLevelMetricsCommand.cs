@@ -3,6 +3,7 @@
 
 using Content.Server.Administration;
 using Content.Server.Explosion.EntitySystems;
+using Content.Server.Mapping;
 using Content.Server.NPC.Pathfinding;
 using Content.Server.NPC.Systems;
 using Content.Server.ZLevel.Navigation;
@@ -36,6 +37,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<ZLevelElevatorSystem>().ResetMetrics();
             _entityManager.System<PathfindingSystem>().ResetZLevelMetrics();
             _entityManager.System<NPCSteeringSystem>().ResetZLevelMetrics();
+            _entityManager.System<MappingSystem>().ResetAutosaveMetrics();
             shell.WriteLine("Reset native Z-level performance counters.");
             return;
         }
@@ -49,6 +51,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var metrics = metricsSystem.Snapshot();
         var boundaries = _entityManager.System<SharedZLevelBoundarySystem>();
         var gravity = _entityManager.System<SharedZLevelGravitySystem>();
+        var mapping = _entityManager.System<MappingSystem>();
         var explosion = _entityManager.System<ExplosionSystem>();
         var elevators = _entityManager.System<ZLevelElevatorSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
@@ -96,6 +99,12 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"tiles={metrics.GravityBuildTiles}, " +
             $"sources={metrics.GravityBuildSources}, avg={metrics.GravityAverageBuildMilliseconds:0.000}ms, " +
             $"last={metrics.GravityLastBuildMilliseconds:0.000}ms, max={metrics.GravityMaxBuildMilliseconds:0.000}ms");
+        var autosave = mapping.SnapshotAutosaveMetrics();
+        shell.WriteLine(
+            $"  autosave: active={autosave.ActiveSchedules}, " +
+            $"attempts/success/failure={autosave.Attempts}/{autosave.Successes}/{autosave.Failures}, " +
+            $"last-success={autosave.LastAttemptSucceeded?.ToString() ?? "none"}, " +
+            $"validated/excluded={autosave.LastValidatedEntities}/{autosave.LastExcludedRoots}");
         shell.WriteLine(
             $"  flight: active={_entityManager.System<SharedZLevelSystem>().ActiveFlightCount}, " +
             $"starts/stops/targets={metrics.FlightStarts}/{metrics.FlightStops}/{metrics.FlightTargetChanges}, " +

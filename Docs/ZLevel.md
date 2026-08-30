@@ -1226,6 +1226,16 @@ contract, commands, report hashes, interpretation, and limits are documented
 in `Docs/ZLevelRelease.md`. P8.4c is complete. P8.4d now owns operational
 diagnostics, recovery, and the final public-server roadmap gate.
 
+P8.4d1 adds the on-demand `zlevelhealth [json]` command and the versioned
+`WTZ-OPS-HEALTH-1` schema. It validates configured maps and composes existing
+runtime, autosave, budget, cache, gravity, traversal, flight, and elevator
+signals into `Healthy`, `Degraded`, or `Critical` findings with operator
+actions. Initialized-map autosave now retains process-local attempt, outcome,
+path, error, and validation telemetry, also visible through `zlevelmetrics`.
+Collection remains administrator-triggered, so normal server ticks and the
+3/6/10-floor performance baseline are unchanged. P8.4d2 next owns explicit
+validated checkpoints and executable recovery rehearsal.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

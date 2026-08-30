@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4d operational diagnostics, recovery guide, and final P0-P8 gate`.
+- Active package: `P8.4d1 operational health snapshot and autosave telemetry`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -117,7 +117,9 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.4a | Batch-local PVS context reuse and 32-session Release envelope | Complete |
 | P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Complete |
 | P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Complete |
-| P8.4d | Operational diagnostics, recovery guide, and final P0-P8 gate | Active |
+| P8.4d1 | Operational health snapshot and initialized-map autosave telemetry | Active |
+| P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Planned |
+| P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Planned |
 
 ## Phase P8.2 Packages
 
@@ -8497,6 +8499,99 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4d adds operator-facing diagnostics and recovery procedures,
   exercises representative deployment and failure recovery, audits the complete
   P0-P8 evidence chain, and makes the final public-server readiness decision.
+
+## Active Package: P8.4d1 Operational Health And Autosave Telemetry
+
+### Scope
+
+- Add process-local initialized-map autosave/checkpoint counters and retain the
+  latest attempt, successful path, validation report, and failure diagnostic.
+- Expose an on-demand, server-authoritative operational health snapshot with a
+  stable machine-readable contract and actionable findings.
+- Compose existing map validation, PVS, trace, sky, explosion, sound,
+  pathfinding, cache-ownership, gravity, flight, elevator, session, and Server
+  GC signals without adding normal tick work.
+- Integrate autosave counters into `zlevelmetrics` output and its explicit
+  process-local reset.
+
+### Evidence
+
+- Four pure evaluator/JSON contract cases pass, including exact schema and
+  finding codes for healthy, degraded, and critical reports.
+- The focused health/autosave/mapping unit set passes 13/13. The complete
+  comparable Z-level/mapping unit matrix passes 26/26 with no skip.
+- The initialized-map autosave scenario passes 1/1 after proving an invalid
+  authored floor records a critical validation/autosave failure, a corrected
+  atomic snapshot records recovery, and reset clears telemetry without
+  changing schedules.
+- Six persistence classes pass 12/12 across initialized autosave, mutation,
+  double snapshot, map format, correlated save protocol, and flight mapping.
+- The broad Debug Z-level integration run passes 343, conditionally skips the
+  same two fixture-dependent cases, and fails zero of 345 total cases.
+- Generated 3/6/10-floor baselines pass 3/3 at 11.2849, 17.0720, and 24.9303
+  ms. Every measured workload allocates 6,336 bytes, retains 100 percent warm
+  boundary/sky/gravity cache hits, and records zero relevant exhaustion or
+  eviction.
+- A non-incremental single-worker Debug solution build succeeds in 2m39.75s
+  with zero errors and 688 established warnings.
+
+### Decisions
+
+- `WTZ-OPS-HEALTH-1` schema 1 is a snapshot of process-local evidence, not a
+  remote monitoring protocol or a substitute for the executable release gate.
+- Capture and full map validation occur only when an administrator invokes
+  `zlevelhealth`; normal server updates receive no new scan or allocation.
+- Invalid authored maps, failed latest checkpoints, PVS fail-open pressure,
+  hard trace exhaustion, and impossible bounded-cache ownership are critical.
+  Recovered incidents and bounded subsystem debt remain degraded warnings with
+  explicit operator actions.
+- Do not invent host-specific latency thresholds in the health evaluator.
+  P8.4a/P8.4b executable envelopes remain authoritative for latency, allocation,
+  GC, and player-count evidence.
+- `zlevelmetrics reset` clears observations only. It never changes active
+  autosave schedules, deletes checkpoints, or repairs map state.
+
+### Completion Gate
+
+- [x] Scope check: source changes are confined to on-demand health reporting,
+      autosave telemetry, command presentation, and their tests/docs.
+- [x] Invariant review: map state remains server authoritative; validation uses
+      world-Z-aware existing map rules; no boundary or moving-frame behavior is
+      changed.
+- [x] Automated verification: 13/13 focused unit, 26/26 comparable unit,
+      1/1 autosave, 12/12 persistence, 343 pass plus two conditional skips
+      broad, 3/3 baseline, and the full solution build pass.
+- [x] Performance evidence: on-demand collection adds no tick work, while the
+      unchanged warmed baseline remains at 6,336 bytes with fully hot caches.
+- [x] Documentation: command, schema, status policy, reset semantics, limits,
+      evidence, and residual risks are recorded in the hardening guide,
+      overview, and ledger.
+- [x] Dependency check: WTZ Engine source is unchanged and the checkout/gitlink
+      remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [ ] Git check: run final whitespace/status review, publish the implementation,
+      verify the remote hash, and confirm both repositories are clean.
+- [x] Mini review: collection cost, severity policy, map validation, reset
+      scope, serialization stability, and false-positive risks were reviewed.
+- [ ] Commit: save and push the package as an isolated implementation revision.
+
+### Mini Review
+
+- Finding: autosave previously exposed only a boolean schedule and ephemeral
+  error return, so an operator could not distinguish no attempt, current
+  failure, or successful recovery after an incident.
+- Finding: PVS `VisibilityContextCacheMaxEntries` is a historical peak, not a
+  configured capacity. It remains diagnostic and must not produce a false
+  over-capacity finding.
+- Finding: complete Z-level map validation scans authored state and is too
+  expensive for a periodic tick. Keeping it command-triggered preserves the
+  measured gameplay path.
+- Residual risk: counters and latest diagnostics are process-local and reset on
+  restart; durable incident history belongs in external logs/reports.
+- Residual risk: command output can contain checkpoint paths and validation
+  details, so `zlevelhealth` remains restricted to administrators with Debug
+  permission.
+- Next package: P8.4d2 adds an explicit validated checkpoint operation and an
+  executable save/load recovery rehearsal with a versioned result contract.
 
 ## Package History
 

@@ -41,6 +41,16 @@ public sealed class MappingSystem : EntitySystem
     private readonly Dictionary<EntityUid, (TimeSpan next, string fileName)> _currentlyAutosaving = new();
 
     private bool _autosaveEnabled;
+    private long _autosaveAttempts;
+    private long _autosaveSuccesses;
+    private long _autosaveFailures;
+    private DateTimeOffset? _lastAutosaveAttemptUtc;
+    private DateTimeOffset? _lastAutosaveSuccessUtc;
+    private bool? _lastAutosaveSucceeded;
+    private string? _lastAutosavePath;
+    private string? _lastAutosaveError;
+    private int _lastAutosaveValidatedEntities;
+    private int _lastAutosaveExcludedRoots;
 
     public override void Initialize()
     {
@@ -145,11 +155,12 @@ public sealed class MappingSystem : EntitySystem
         savedPath = default;
         report = default;
         error = string.Empty;
+        RecordAutosaveAttempt();
 
         if (Deleted(uid))
         {
             error = $"Entity {uid} no longer exists.";
-            return false;
+            return RecordAutosaveFailure(error);
         }
 
         var isMap = HasComp<MapComponent>(uid);
@@ -157,20 +168,20 @@ public sealed class MappingSystem : EntitySystem
         if (!isMap && !isGrid)
         {
             error = $"{ToPrettyString(uid)} is neither a map nor a grid.";
-            return false;
+            return RecordAutosaveFailure(error);
         }
 
         if (LifeStage(uid) >= EntityLifeStage.MapInitialized && !isMap)
         {
             error = "Initialized autosave requires the complete map root; grid-only snapshots are unsupported.";
-            return false;
+            return RecordAutosaveFailure(error);
         }
 
         var name = Path.GetFileName(originalFileName);
         if (string.IsNullOrWhiteSpace(name) || !ResPath.IsValidFilename(name))
         {
             error = $"'{originalFileName}' is not a valid autosave name.";
-            return false;
+            return RecordAutosaveFailure(error);
         }
 
         try
@@ -184,7 +195,7 @@ public sealed class MappingSystem : EntitySystem
             if (LifeStage(uid) >= EntityLifeStage.MapInitialized)
             {
                 if (!_snapshots.TryCreateMapSnapshotText(uid, out var yaml, out report, out error))
-                    return false;
+                    return RecordAutosaveFailure(error);
 
                 var encoded = AutosaveEncoding.GetBytes(yaml);
                 if (!MappingAutosaveFileWriter.TryWrite(
@@ -193,7 +204,7 @@ public sealed class MappingSystem : EntitySystem
                         encoded,
                         out error))
                 {
-                    return false;
+                    return RecordAutosaveFailure(error);
                 }
             }
             else
@@ -205,18 +216,75 @@ public sealed class MappingSystem : EntitySystem
                 {
                     _resMan.UserData.Delete(destination);
                     error = $"The legacy serializer failed to save {ToPrettyString(uid)}.";
-                    return false;
+                    return RecordAutosaveFailure(error);
                 }
             }
 
             savedPath = destination;
+            RecordAutosaveSuccess(savedPath, report);
             return true;
         }
         catch (Exception exception)
         {
             error = exception.Message;
-            return false;
+            return RecordAutosaveFailure(error);
         }
+    }
+
+    internal MappingAutosaveMetricsSnapshot SnapshotAutosaveMetrics()
+    {
+        return new MappingAutosaveMetricsSnapshot(
+            _currentlyAutosaving.Count,
+            _autosaveAttempts,
+            _autosaveSuccesses,
+            _autosaveFailures,
+            _lastAutosaveAttemptUtc,
+            _lastAutosaveSuccessUtc,
+            _lastAutosaveSucceeded,
+            _lastAutosavePath,
+            _lastAutosaveError,
+            _lastAutosaveValidatedEntities,
+            _lastAutosaveExcludedRoots);
+    }
+
+    internal void ResetAutosaveMetrics()
+    {
+        _autosaveAttempts = 0;
+        _autosaveSuccesses = 0;
+        _autosaveFailures = 0;
+        _lastAutosaveAttemptUtc = null;
+        _lastAutosaveSuccessUtc = null;
+        _lastAutosaveSucceeded = null;
+        _lastAutosavePath = null;
+        _lastAutosaveError = null;
+        _lastAutosaveValidatedEntities = 0;
+        _lastAutosaveExcludedRoots = 0;
+    }
+
+    private void RecordAutosaveAttempt()
+    {
+        _autosaveAttempts++;
+        _lastAutosaveAttemptUtc = DateTimeOffset.UtcNow;
+        _lastAutosaveSucceeded = null;
+    }
+
+    private bool RecordAutosaveFailure(string error)
+    {
+        _autosaveFailures++;
+        _lastAutosaveSucceeded = false;
+        _lastAutosaveError = error;
+        return false;
+    }
+
+    private void RecordAutosaveSuccess(ResPath path, in MappingSnapshotReport report)
+    {
+        _autosaveSuccesses++;
+        _lastAutosaveSucceeded = true;
+        _lastAutosaveSuccessUtc = DateTimeOffset.UtcNow;
+        _lastAutosavePath = path.ToString();
+        _lastAutosaveError = null;
+        _lastAutosaveValidatedEntities = report.ValidatedEntities;
+        _lastAutosaveExcludedRoots = report.ExcludedRoots;
     }
 
     internal static ResPath GetAvailableAutosavePath(
@@ -304,3 +372,16 @@ public sealed class MappingSystem : EntitySystem
 
     #endregion
 }
+
+internal readonly record struct MappingAutosaveMetricsSnapshot(
+    int ActiveSchedules,
+    long Attempts,
+    long Successes,
+    long Failures,
+    DateTimeOffset? LastAttemptUtc,
+    DateTimeOffset? LastSuccessUtc,
+    bool? LastAttemptSucceeded,
+    string? LastPath,
+    string? LastError,
+    int LastValidatedEntities,
+    int LastExcludedRoots);

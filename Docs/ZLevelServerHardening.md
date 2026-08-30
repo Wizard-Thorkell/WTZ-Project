@@ -450,6 +450,44 @@ source, no development bypasses, and verified child hashes. Commands, report
 schema, exact hashes, evidence, and residual risks are in
 `Docs/ZLevelRelease.md`.
 
+## P8.4d1 Operational Health Contract
+
+`zlevelhealth [json]` captures one server-authoritative operational snapshot on
+administrator request. Human output is intended for immediate triage. The
+optional compact JSON form is `WTZ-OPS-HEALTH-1`, schema version 1, with stable
+camel-case fields, string enum values, finding codes, messages, and actions.
+The command requires the Debug administration flag.
+
+The snapshot validates every configured Z-level map and composes current
+sessions, active flight/elevator/autosave work, initialized-map autosave
+attempts, subsystem budget/exhaustion counters, cache entries/order pressure,
+gravity refresh state, and PVS context-cache observations. It performs no work
+from `Update()`: full authored-map validation and report allocation occur only
+when the command is invoked.
+
+Status interpretation is deliberately fail-closed for integrity failures:
+
+- `Healthy` means no finding has been observed since the process-local counters
+  were started or reset.
+- `Degraded` means recoverable evidence exists, such as workstation GC, an
+  earlier checkpoint failure followed by success, PVS scheduler debt, or a
+  bounded subsystem warning.
+- `Critical` means current map/checkpoint integrity is unsafe or a hard
+  fail-open/budget/cache invariant was violated. Operators should stop risky
+  structural changes, preserve evidence, and restore a validated checkpoint.
+
+Initialized-map autosave telemetry records every synchronous attempt, success,
+failure, latest attempt/success time, latest successful destination, latest
+error, and the latest validation/exclusion counts. `zlevelmetrics` presents the
+summary, and `zlevelmetrics reset` clears only observations. It does not alter
+autosave schedules, map state, or files.
+
+The report is process-local and is not durable incident history. It also avoids
+host-specific timing heuristics: the P8.4a scheduler and P8.4b Server GC
+envelopes remain the performance authority. A PVS context-cache maximum is a
+historical peak rather than a configured capacity and is therefore reported
+without an over-capacity alert.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -476,9 +514,12 @@ schema, exact hashes, evidence, and residual risks are in
 - **P8.4c:** complete. The executable `WTZ-RELEASE-1` contract passes its strict
   clean gate at 41/41 exact tests, 3/3 composites, and zero development
   bypasses on the published source pair.
-- **P8.4d:** active. It owns operational diagnostics, recovery guidance,
-  representative deployment checks, and the final P0-P8 public-server
-  checklist.
+- **P8.4d1:** active pending its Git gate. It adds versioned on-demand health
+  diagnostics and initialized-map autosave/checkpoint telemetry.
+- **P8.4d2:** planned. It owns validated manual checkpoints and executable
+  recovery rehearsal.
+- **P8.4d3:** planned. It owns the operations guide, representative deployment
+  checks, and final P0-P8 public-server checklist.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,
