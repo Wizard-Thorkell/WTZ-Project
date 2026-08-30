@@ -169,8 +169,39 @@ The broader Release `FullyQualifiedName~ZLevel` regression run passed 343 cases,
 conditionally skipped two fixture-dependent long workloads, and failed zero of
 345 total cases. The initialized-map/unit filter passed 22/22, the 3/6/10-floor
 baseline passed 3/3, and a non-incremental single-worker Debug solution build
-completed with zero errors and 688 established warnings. The strict clean
-`WTZ-RELEASE-1` run remains the package completion authority.
+completed with zero errors and 688 established warnings. These development and
+broad runs support diagnosis but do not replace the strict record below.
+
+## Official P8.4c Evidence
+
+Strict run `20260830T161628Z-2640-16179cd2` starts from published WTZ Project
+`63d1b7ac91caed1ac41211a9f2b900177b700153` and exact WTZ Engine/gitlink
+`7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`. Both worktrees are clean and all
+development flags are false. The full Release solution build succeeds with
+zero errors and 701 established warnings.
+
+The run reports `Passed` after 443,721.9441 ms with 41/41 exact tests across all
+19 domains and 3/3 composite gates: Z 0 is 18/18, port pairing is 50/50, and the
+real client produces exactly 15 captures with 24/24 checks. All child report
+hashes were recomputed successfully and no game process remained after cleanup.
+
+The immutable identities recorded at package completion are:
+
+- manifest SHA-256
+  `23e69f353123a226fe863a961a3806c335b08dd70263d3c699c90b663d932e14`;
+- parent report SHA-256
+  `c134477e9d970294179b5cd305ed4ff67df51b423609a1bb89d1ec5dd92cf5d0`;
+- Z 0 report SHA-256
+  `aab235d638d45c4b0d4d0714742d9c146e3235cc86addf53285a591ced2fe2a4`;
+- port report SHA-256
+  `c5371905b46ffa39ebdbe89f625d4a0e8072520971077da6813e7cbc07028e00`;
+  and
+- visual report SHA-256
+  `7ec8448f2b5d934a3453fc3d085b8b8eb50cc30583cfd9bab98252f607f938a5`.
+
+Generated artifacts remain ignored build evidence under
+`artifacts/zlevel-release/`; the source revision, manifest, and recorded hashes
+are the durable repository record.
 
 ## Limits And Residual Risk
 

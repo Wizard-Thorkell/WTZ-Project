@@ -443,9 +443,12 @@ conservation.
 The full development matrix passes 41/41 exact tests and all three composites.
 Broader evidence passes 343 cases with two explicit conditional skips and zero
 failures, 22/22 unit/mapping cases, the 3/6/10-floor baseline, and a full Debug
-solution build with zero errors. Package completion still requires a strict
-clean run from the first published package revision. Commands, report schema,
-evidence, and residual risks are in `Docs/ZLevelRelease.md`.
+solution build with zero errors. Strict clean run
+`20260830T161628Z-2640-16179cd2` then passes on published project revision
+`63d1b7ac91ca...`: full Release build, 41/41 tests, all three composites, clean
+source, no development bypasses, and verified child hashes. Commands, report
+schema, exact hashes, evidence, and residual risks are in
+`Docs/ZLevelRelease.md`.
 
 ## P8 Package Gates
 
@@ -470,10 +473,10 @@ evidence, and residual risks are in `Docs/ZLevelRelease.md`.
 - **P8.4b:** complete. True
   Server GC lifecycle, 32-session endurance, and 64-session capacity envelopes
   pass with exact cache ownership restored after every map cycle.
-- **P8.4c:** active, ready for its strict clean gate. The executable
-  `WTZ-RELEASE-1` contract and broad development evidence pass; no development
-  bypass is acceptable as completion evidence.
-- **P8.4d:** planned. It owns operational diagnostics, recovery guidance,
+- **P8.4c:** complete. The executable `WTZ-RELEASE-1` contract passes its strict
+  clean gate at 41/41 exact tests, 3/3 composites, and zero development
+  bypasses on the published source pair.
+- **P8.4d:** active. It owns operational diagnostics, recovery guidance,
   representative deployment checks, and the final P0-P8 public-server
   checklist.
 

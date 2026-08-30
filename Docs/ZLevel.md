@@ -1220,10 +1220,11 @@ tests across 19 gameplay, mapping, and persistence domains. It composes the
 18-test Z 0 contract, 50-probe engine/project contract, and 15-capture,
 24-check real-client visual contract while binding clean source and the exact
 WTZ Engine gitlink. Development and broad regression evidence pass; the strict
-clean run remains the package completion authority. The complete contract,
-commands, report interpretation, and limits are documented in
-`Docs/ZLevelRelease.md`. P8.4d then owns operational diagnostics, recovery, and
-the final public-server roadmap gate.
+clean run `20260830T161628Z-2640-16179cd2` also passes at 41/41 tests and 3/3
+composites on published project revision `63d1b7ac91ca...`. The complete
+contract, commands, report hashes, interpretation, and limits are documented
+in `Docs/ZLevelRelease.md`. P8.4c is complete. P8.4d now owns operational
+diagnostics, recovery, and the final public-server roadmap gate.
 
 ## Definition Of Done
 

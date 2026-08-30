@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4c executable WTZ-RELEASE-1 gameplay, mapping, and persistence matrix (implementation verified; strict clean gate pending)`.
+- Active package: `P8.4d operational diagnostics, recovery guide, and final P0-P8 gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -116,8 +116,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P8.4a | Batch-local PVS context reuse and 32-session Release envelope | Complete |
 | P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Complete |
-| P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Active |
-| P8.4d | Operational diagnostics, recovery guide, and final P0-P8 gate | Planned |
+| P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Complete |
+| P8.4d | Operational diagnostics, recovery guide, and final P0-P8 gate | Active |
 
 ## Phase P8.2 Packages
 
@@ -8360,7 +8360,7 @@ allocation is inside Robust physics enumeration.
   for gameplay, mapping, initialized save/load, rendering evidence, Z 0, and
   engine/project pairing.
 
-## Active Package: P8.4c Executable WTZ-RELEASE-1 Matrix
+## Completed Package: P8.4c Executable WTZ-RELEASE-1 Matrix
 
 ### Scope
 
@@ -8398,6 +8398,35 @@ allocation is inside Robust physics enumeration.
 - The non-incremental, single-worker Debug solution build succeeds in 2m54.07s
   with zero errors and 688 established warnings.
 
+### Strict Evidence
+
+- The implementation is published as
+  `63d1b7ac91caed1ac41211a9f2b900177b700153`; the remote branch resolves to the
+  same hash before the strict run begins. WTZ Project and WTZ Engine are clean,
+  and the engine checkout/gitlink remain exactly
+  `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- Strict run `20260830T161628Z-2640-16179cd2` reports `Passed` after
+  443,721.9441 ms. Its full Release `SpaceStation14.slnx` build succeeds with
+  zero errors and 701 established warnings.
+- All 19 domains execute exactly 41 declared tests and pass 41/41 with no skip,
+  failure, duplicate, or undeclared TRX result. The 38 integration and 3 unit
+  contracts both pass independently.
+- All 3 composite gates pass: `WTZ-Z0-1` at 18/18, `WTZ-PORT-1` at 50/50, and
+  `WTZ-VISUAL-1` at exactly 15 captures and 24/24 checks. The visual child
+  completes in 37.19041 seconds.
+- The parent report confirms clean project/engine trees and all three
+  development flags false. Recomputed child hashes match the parent, and zero
+  game server/client processes remain after cleanup.
+- Manifest SHA-256 is
+  `23e69f353123a226fe863a961a3806c335b08dd70263d3c699c90b663d932e14`;
+  parent report SHA-256 is
+  `c134477e9d970294179b5cd305ed4ff67df51b423609a1bb89d1ec5dd92cf5d0`.
+  Child hashes are `aab235d638d45c4b0d4d0714742d9c146e3235cc86addf53285a591ced2fe2a4`
+  for Z 0, `c5371905b46ffa39ebdbe89f625d4a0e8072520971077da6813e7cbc07028e00`
+  for port pairing, and
+  `7ec8448f2b5d934a3453fc3d085b8b8eb50cc30583cfd9bab98252f607f938a5`
+  for the real-client visual record.
+
 ### Decisions
 
 - Protect exact fully-qualified tests and reject extra TRX results. A broad
@@ -8418,7 +8447,7 @@ allocation is inside Robust physics enumeration.
 - Make the visual fixture deterministic with Sandbox and explicit admin state;
   do not weaken pixel checks to accommodate unrelated round variation.
 
-### Pending Completion Gate
+### Completion Gate
 
 - [x] Scope check: the focused source, manifest, runners, tests, and synchronized
       documentation are confined to the executable release contract and the
@@ -8437,13 +8466,14 @@ allocation is inside Robust physics enumeration.
       overview, hardening guide, porting guide, and ledger.
 - [x] Dependency check: no WTZ Engine source changed; the checkout and gitlink
       remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
-- [ ] Git check: publish the implementation revision, verify its remote hash,
+- [x] Git check: publish the implementation revision, verify its remote hash,
       and run the strict gate from the resulting clean project and engine trees.
 - [x] Mini review: fail-closed validation, exact test ownership, report hashes,
       source identity, PVS hierarchy, metrics conservation, fixture determinism,
       and residual package advisories were reviewed.
-- [ ] Commit: close only after strict `WTZ-RELEASE-1` reports `Passed` with
-      41/41 tests, 3/3 composites, clean trees, and no development bypasses.
+- [x] Commit: package closes as `Close executable WTZ Z-level release matrix`
+      after strict `WTZ-RELEASE-1` reports `Passed` with 41/41 tests, 3/3
+      composites, clean trees, and no development bypasses.
 
 ### Mini Review
 
@@ -8464,13 +8494,15 @@ allocation is inside Robust physics enumeration.
 - Residual risk: established advisories in cryptography and legacy Pow3r
   dependencies remain upstream package work; this release matrix records but
   does not waive them.
-- Next action: publish this implementation, execute the strict clean gate on
-  that exact revision, record its report and hashes, then begin P8.4d.
+- Next package: P8.4d adds operator-facing diagnostics and recovery procedures,
+  exercises representative deployment and failure recovery, audits the complete
+  P0-P8 evidence chain, and makes the final public-server readiness decision.
 
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4c | `Close executable WTZ Z-level release matrix` | strict WTZ-RELEASE-1 41/41 + 3/3, 8 self-tests, 343 pass + 2 conditional skips broad, 22 unit/mapping, 3 baseline, full builds, exact source/report/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4b | `Bound Z-level cache ownership across server lifecycles` | 3 targeted, all 344 broad covered, 328 namespace, 22 unit/mapping, 3 baseline, 2 lifecycle + 3 Server GC profiles, full build, ownership/performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.4a | `Reuse PVS geometry across Z-level viewers` | 11 focused, all 342 broad covered, 22 unit/mapping, 3 baseline, 2 repeated + 1 envelope Release soak, full build, performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.3c / P8.3 gate | `Close the WTZ Z-level porting phase` | 2 clean modes, 100 probes, 4 Release builds, 6 self-tests, 18 Z 0, all 342 broad covered, 22 unit/mapping, 3 baseline, full build, cleanup/diff/dependency/remote review | Complete |
