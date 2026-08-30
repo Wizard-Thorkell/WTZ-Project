@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.3c clean-worktree port rehearsal and P8.3 phase gate`.
+- Active package: `P8.4 public-server release matrix and final roadmap gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -48,7 +48,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Complete |
-| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.3 active) |
+| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.4 active) |
 
 ## Phase P4 Packages
 
@@ -107,8 +107,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Complete |
 | P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Complete |
-| P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Active |
-| P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Pending |
+| P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Complete |
+| P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Active |
 
 ## Phase P8.2 Packages
 
@@ -124,7 +124,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P8.3a | Executable Z 0 compatibility inventory and regression matrix | Complete |
 | P8.3b | Versioned engine/content porting manifest and compatibility verifier | Complete |
-| P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Active |
+| P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Complete |
 
 ## Phase P0 Packages
 
@@ -8013,10 +8013,120 @@ allocation is inside Robust physics enumeration.
   worktrees, verify both modes in Release, record the destination-style result,
   and close the consolidated P8.3 phase gate.
 
+## Completed Package: P8.3c Clean Port Rehearsal And P8.3 Gate
+
+### Scope
+
+- Add one end-to-end runner that exercises both `WTZ-PORT-1` policies from
+  independent clean project and engine checkouts with Release builds enabled.
+- Prove the exact official pair from complete history, then prove a destination-
+  style portable pair whose depth-one histories cannot resolve the official
+  project minimum or engine base and whose heads are intentionally distinct.
+- Preserve source checkout state, initialize nested engine dependencies locally,
+  emit structured evidence, and remove temporary trees through an ownership-
+  checked cleanup lifecycle.
+- Consolidate the P8.3 executable Z 0, port-contract, broad regression,
+  baseline, solution-build, dependency, publication, and documentation gates.
+
+### Evidence
+
+- Official rehearsal `20260830T112201Z-25440-aebc6af8` passes in 421,567.688 ms
+  from clean source revision `26c9c9f21c1155c47f8e7257dd9dc4eecb06b8f9`
+  paired with WTZ Engine `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+  Development-only dirty-source and skip-build switches are both disabled.
+- `paired-clean-clone` proves complete history, exact revisions and gitlink,
+  the official 20-capability series, 50/50 probes, and 2/2 Release builds with
+  zero verifier warnings or failures.
+- `portable-shallow-heads` proves depth-one project and engine histories,
+  unavailable official minimum/base objects, distinct synthetic heads, 50/50
+  probes, and 2/2 Release builds. Its only output warnings are the two required
+  portable-history warnings.
+- Both scenario trees are clean before and after verification. The source
+  revisions and statuses remain unchanged, the marked temporary root is safely
+  removed, and no `wtz-zpr-*` directory remains under `%TEMP%`.
+- The verifier mutation suite passes 6/6 and the exact Z 0 contract passes 18/18
+  across all 15 mandatory domains. The broad Debug matrix passes 341 cases and
+  its one fixture-conditioned concurrent-NPC case passes 1/1 in isolation,
+  covering all 342 cases without a failed assertion.
+- Content Z-level/mapping unit coverage passes 22/22. The 3/6/10-floor baseline
+  passes 3/3 at 14.8139, 20.4496, and 23.0671 ms with exactly 6,336 allocated
+  bytes and 100 percent warm-cache hits at every depth.
+- The non-incremental single-worker Debug `SpaceStation14.slnx` build passes in
+  2m39.24s with zero errors and 704 established warnings. The rehearsal also
+  supplies four successful protected Release builds in isolated checkouts.
+
+### Decisions
+
+- Use shared read-only local Git object alternates for the complete-history
+  scenario. The local WTZ Engine source is a partial/promisor clone, so forcing
+  a fully materialized `--no-local` clone incorrectly requires unavailable
+  historical blobs; an isolated index/worktree is the property this gate needs.
+- Make the portable proof structurally stronger than a different branch name:
+  the official history objects must be absent, both heads must differ, and both
+  expected warnings must be observed before source probes or builds can count.
+- Keep reports and temporary clones outside tracked source. Every recursive
+  cleanup validates an absolute `%TEMP%` path, the `wtz-zpr-` prefix, and a
+  run-owned marker; `-KeepWorktrees` is the only diagnostic retention path.
+- Treat `-SkipBuild` and `-AllowDirtySourceForDevelopment` as dry-run aids only.
+  The runner records them and refuses to present such a run as phase evidence.
+- Close P8.3 on official-pair and rewritten-history portability evidence, while
+  leaving foreign-fork runtime semantics and public-server readiness to P8.4.
+
+### Completion Gate
+
+- [x] Scope check: one rehearsal runner and synchronized porting, roadmap,
+      hardening, and ledger documentation; runtime and engine source are
+      unchanged.
+- [x] Invariant review: exact pairing, rewritten history, submodule gitlinks,
+      nested dependencies, source immutability, clean trees, and bounded cleanup
+      are explicitly asserted.
+- [x] Automated verification: 2/2 isolated scenarios, 50/50 probes plus 2/2
+      builds in each mode, 6 self-tests, 18 Z 0 contracts, all 342 broad cases
+      covered, 22 unit/mapping cases, 3 baselines, and the full solution build
+      pass.
+- [x] Performance evidence: no runtime path changed; the neutral baseline stays
+      at 6,336 bytes at every depth and the complete rehearsal records its
+      421,567.688 ms wall time and per-build reports.
+- [x] Documentation: clean rehearsal, scenario guarantees, evidence location,
+      development-switch limits, cleanup behavior, and semantic boundary are
+      documented.
+- [x] Dependency check: project gitlink and clean WTZ Engine checkout both equal
+      published revision `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [x] Git check: implementation revision `26c9c9f21c1155c47f8e7257dd9dc4eecb06b8f9`
+      is pushed and equals the remote branch; whitespace, ignored artifacts,
+      source status, temporary worktrees, and dependency pairing pass review.
+- [x] Mini review: clone materialization, native-output isolation, shallow
+      history, failure cleanup, source immutability, and report assertions were
+      exercised before phase closure.
+- [x] Commit: package closes as `Close the WTZ Z-level porting phase` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: a useful portable proof must remove the historical objects that can
+  accidentally make ancestry checks pass. Depth-one file clones plus synthetic
+  paired commits establish that condition without reaching external remotes.
+- Finding: PowerShell pipeline output is part of function return values. Routing
+  child verifier output directly to the host keeps structured JSON as the sole
+  return value and prevents report parsing from becoming order-dependent.
+- Finding: the official pair and portable pair now pass from disposable trees,
+  not because of untracked files, build products, indexes, or object reachability
+  inherited from the development checkout.
+- Residual risk: a source/compile-compatible foreign fork can still change
+  runtime behavior around gameplay, rendering, networking, or maps. P8.4 owns
+  representative runtime and release evidence.
+- Residual risk: local shared alternates isolate worktrees and indexes but depend
+  on the source object store for the duration of the rehearsal. This is suitable
+  for a repeatable local gate, not an archival or supply-chain independence test.
+- Next package: P8.4 defines measurable public-server acceptance thresholds,
+  runs prolonged/release-sized and representative gameplay/mapping evidence,
+  publishes operator diagnostics and recovery steps, and closes the roadmap.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.3c / P8.3 gate | `Close the WTZ Z-level porting phase` | 2 clean modes, 100 probes, 4 Release builds, 6 self-tests, 18 Z 0, all 342 broad covered, 22 unit/mapping, 3 baseline, full build, cleanup/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.3b | `Define the WTZ Z-level port contract` | 6 self-tests, 20 capabilities, 50 probes, 2 builds, 18 Z 0, 342 broad, 22 unit/mapping, 2x3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.3a | `Make Z 0 compatibility executable` | 3 new, 18 contract, all 342 broad covered, 2 isolated pooled, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2c | `Reuse Z-level gravity field workspaces` | 4 focused, 1 Debug + 2 Release soaks, 339 broad covered, isolated cache, 22 unit/mapping, 3 baseline, full build, allocation/diff/dependency review | Complete |

@@ -162,6 +162,17 @@ heads, shallow/history assertions, warnings, probe/build results, duration, and
 cleanup outcome. `-SkipBuild` and `-AllowDirtySourceForDevelopment` support a
 local dry run, but neither is valid evidence for closing P8.3 or a release gate.
 
+### Official P8.3 Evidence
+
+Clean run `20260830T112201Z-25440-aebc6af8` starts from WTZ Project
+`26c9c9f21c1155c47f8e7257dd9dc4eecb06b8f9` and WTZ Engine
+`7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`. It passes both scenarios, 50/50
+probes and 2/2 Release builds in each mode, exact official ancestry in `Paired`,
+missing official base/minimum objects plus the two required warnings in
+`Portable`, and source/worktree/cleanup checks in 421,567.688 ms. The paired
+scenario uses shared read-only local object alternates because the source engine
+is a partial/promisor clone; its index and worktree remain independent.
+
 ## Destination Workflow
 
 1. Identify the destination project's RobustToolbox base and create dedicated
@@ -195,5 +206,6 @@ local dry run, but neither is valid evidence for closing P8.3 or a release gate.
 
 Source probes detect missing or renamed contracts and compilation detects type-
 level incompatibility. They do not prove runtime semantics on a foreign engine.
-P8.3c owns a clean-worktree rehearsal of this process. P8.4 still owns broad
-gameplay, visual, mapping, soak, and public-server release evidence.
+P8.3c proves a clean-worktree rehearsal of both supported history policies.
+P8.4 still owns broad gameplay, visual, mapping, soak, and public-server release
+evidence.

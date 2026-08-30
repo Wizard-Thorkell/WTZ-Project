@@ -284,6 +284,31 @@ and two 3/6/10-floor baseline runs. The final baseline allocates 6,336 bytes at
 every depth, and the full non-incremental single-worker solution build finishes
 in 2m30.59s with zero errors and 688 established warnings.
 
+## P8.3c Clean Port Rehearsal
+
+`Tools/run_zlevel_port_rehearsal.ps1` closes the porting phase from disposable
+project and engine checkouts instead of relying on the development tree. The
+official clean run `20260830T112201Z-25440-aebc6af8` starts at project revision
+`26c9c9f21c1155c47f8e7257dd9dc4eecb06b8f9` and engine revision
+`7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`, with builds and clean-source
+enforcement enabled.
+
+The exact paired-history scenario passes 50/50 probes and 2/2 Release builds
+without warnings. A second depth-one scenario creates distinct paired heads,
+proves that the official project minimum and engine base are unavailable, then
+passes the same 50/50 probes and 2/2 Release builds with exactly the two expected
+portable-history warnings. Both scenario worktrees remain clean; source status
+and revisions remain unchanged; the ownership-marked temporary root is removed.
+The complete rehearsal takes 421,567.688 ms.
+
+The consolidated phase gate also passes 6/6 verifier self-tests, 18/18 Z 0
+contracts, all 342 broad integration cases with one fixture-conditioned case
+confirmed in isolation, 22/22 unit/mapping cases, and the 3/6/10-floor baseline
+at 6,336 allocated bytes per depth. The non-incremental single-worker Debug
+solution build completes in 2m39.24s with zero errors and 704 established
+warnings. P8.3 is complete; these source and compile proofs intentionally do not
+replace P8.4's representative runtime and public-server evidence.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -299,10 +324,11 @@ in 2m30.59s with zero errors and 688 established warnings.
   18 exact project/engine tests and a fail-closed TRX-verifying runner.
 - **P8.3b:** complete. `WTZ-PORT-1` protects the ordered 20-capability engine
   series with 50 source/consumer probes, two builds, and fail-closed self-tests.
-- **P8.3c:** active. Rehearse the documented port on clean project/engine
-  worktrees and close the phase gate.
-- **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
-  regression, operational diagnostics, and the final public-server checklist.
+- **P8.3c:** complete. Both exact-history and rewritten shallow-history pairs
+  pass from disposable clean trees with four protected Release builds.
+- **P8.4:** active. Run prolonged and release-sized profiles, broad
+  gameplay/mapping regression, operational diagnostics, and the final
+  public-server checklist.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,

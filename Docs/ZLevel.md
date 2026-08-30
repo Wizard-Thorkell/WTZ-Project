@@ -1182,8 +1182,11 @@ preserving exact connected-component results. P8.3a now binds 18 exact tests in
 WTZ Project and WTZ Engine to a machine-readable compatibility matrix covering
 15 required Z 0 domains. P8.3b now binds the 20-commit WTZ Engine extension
 series to 20 named capabilities, 50 engine/consumer probes, two protected build
-targets, and a fail-closed compatibility verifier. P8.3c owns the clean-worktree
-portable rehearsal and the consolidated P8.3 phase gate.
+targets, and a fail-closed compatibility verifier. P8.3c now proves both the
+exact pair and a rewritten depth-one pair from disposable clean checkouts with
+50/50 probes and 2/2 Release builds per mode. The consolidated P8.3 gate is
+complete; P8.4 owns representative runtime, operations, and public-server
+release evidence.
 
 ## Definition Of Done
 
