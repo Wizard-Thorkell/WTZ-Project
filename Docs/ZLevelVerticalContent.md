@@ -116,6 +116,34 @@ The result is `ZLevelSkyExposureState` with one typed termination:
 
 Only `Exposed` sets `IsExposed`. Every incomplete or invalid result fails closed.
 
+## Weather Exposure Policy
+
+`SharedWeatherSystem.GetWeatherExposure()` is the shared gameplay policy layered
+over the geometric sky query. It returns a typed `WeatherExposureState` instead
+of making callers reconstruct roof, tile, blocker, and column rules.
+
+Unconfigured maps preserve the original planar contract exactly: only local Z 0
+is valid, empty tiles remain exposed, and non-empty tiles consult
+`RoofComponent`/`IsRoofComponent`, the tile definition's `Weather` flag, and
+anchored `BlockWeatherComponent` entities.
+
+Configured Z-level maps apply the following ordered policy:
+
+1. The requested local floor must be inside the authored map range.
+2. A non-empty tile on that exact floor must permit weather.
+3. An anchored weather blocker must share both XY and local Z with the query.
+4. The complete `Weather` boundary column above the floor must reach open sky.
+
+Planar `RoofComponent` data is intentionally ignored on configured maps because
+it cannot identify a floor and would otherwise block every Z at one XY. Authored
+tiles and `ZLevelRoofMarker` provide the dimensional boundary policy instead.
+
+`GetWeatherExposureAtWorldZ()` converts through the moving grid frame, while the
+entity overload uses inherited grid and local-floor state. Valid map-space
+entities without a grid are exposed; nullspace and malformed requests fail
+closed. Terminations distinguish local tile rejection, planar roof, same-floor
+blocker, sky blockage, and invalid coordinates/grid/level.
+
 ## Cache And Budgets
 
 The process-local cache is keyed by grid UID and local tile/floor origin. It is
@@ -164,16 +192,18 @@ after warm-up when it fits the configured cache.
 
 ## Current Consumer Boundary
 
-P7.1b does not yet change production weather rendering or gameplay. Robust's legacy
-`RoofComponent`, `IsRoofComponent`, and planar weather query remain unchanged.
-They are not silently treated as Z-aware surfaces.
+P7.3a defines the shared Z-aware weather gameplay query without changing the
+current production presentation. Robust's legacy `RoofComponent`,
+`IsRoofComponent`, and planar behavior remain intact on unconfigured maps; they
+are not silently treated as dimensional surfaces.
 
 The new content is already consumed by atmosphere, visibility, sound,
 projectiles, explosions, effects, falling, support, and navigation through their
-existing specialized boundary channels. P7.3 will migrate weather presentation
-and gameplay to the sky query and define exposure policy for entities, effects,
-and moving grids. Interaction and authored traversal remain closed on grates;
-shafts open them only when their content explicitly requests all channels.
+existing specialized boundary channels. P7.3b will migrate the client stencil
+and ambient audio to the shared policy with visible-tile budgets and diagnostics.
+No arbitrary weather damage is introduced where upstream has no weather gameplay
+consumer. Interaction and authored traversal remain closed on grates; shafts
+open them only when their content explicitly requests all channels.
 
 ## Verification
 
@@ -189,3 +219,10 @@ shafts open them only when their content explicitly requests all channels.
 - Stress baseline: 3/3 passed at 10.5917, 15.9291, and 22.8443 ms for 3, 6, and
   10 floors, with 6,336 measured bytes, 100% warm boundary/sky hits, and zero
   measured boundary or sky evictions at every depth.
+- P7.3a weather-policy cases: 3/3 passed for legacy Z 0, exact-floor blockers,
+  full sky columns, entity queries, and moving frames. One thousand hot policy
+  queries allocate no more than 512 bytes in total.
+- Complete Content Z-level coverage has passing evidence for all 309 cases;
+  308 passed in one broad run and its one pooled skip passed in isolation.
+- The P7.3a baseline passed at 11.0122, 15.4494, and 23.2621 ms for 3, 6, and 10
+  floors, with 6,336 measured bytes and 100% warm boundary/sky/gravity hits.

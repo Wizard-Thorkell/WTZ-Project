@@ -97,6 +97,9 @@ Implemented movement and gameplay basics:
 - `SharedZLevelSkyExposureSystem` resolves a bounded local column through the
   independent `Weather` boundary channel, including the boundary above the
   highest authored floor, with a bounded LRU cache and fail-closed budget.
+- `SharedWeatherSystem` exposes one typed local/world/entity policy that combines
+  exact-floor tile eligibility and blockers with the complete sky column while
+  preserving planar Z 0 behavior on unconfigured maps.
 - Vertical movement updates `PhysicsComponent.BodyStatus`.
 - Collisions between entities on different Z levels are prevented.
 - Tile friction and footstep lookup can use the support floor.
@@ -573,7 +576,8 @@ Major unfinished areas:
 - Wall/cutaway rendering is prototype quality.
 - Production lattice, interior grates, shafts, catwalk bridges, ordinary
   inter-floor roofs, mapper-authored top caps, and first-pass powered elevators
-  are available. Elevator mapping/pathfinding hardening, ramps, player-built top
+  are available. Elevator mapping, initialized save/load, pathfinding, and AI
+  execution are integrated. Weather rendering/audio, ramps, player-built top
   caps, and flight content remain pending.
 - Many anchored entities and construction systems still assume one tile stack.
 - FTL docking aligns grid frames, but arbitrary transit-map entry, planet

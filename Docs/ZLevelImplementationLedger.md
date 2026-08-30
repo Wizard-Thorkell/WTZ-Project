@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.3 Z-aware weather presentation and gameplay`.
+- Active package: `P7.3b bounded Z-aware weather presentation`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.3 active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.3b active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -93,7 +93,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.1b | Roofs, grates, catwalks, and shafts with mapping and construction | Complete |
 | P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Complete |
 | P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Complete |
-| P7.3 | Z-aware sky exposure and weather presentation/gameplay | Active |
+| P7.3a | Shared Z-aware weather exposure policy | Complete |
+| P7.3b | Bounded Z-aware weather rendering, audio, and diagnostics | Active |
 | P7.4a | Flight movement, gravity, and collision contract | Pending |
 | P7.4b | Flight trace, projectile, AI, content, and mapping integration | Pending |
 | P7 gate | End-to-end vertical-content and scope review | Pending |
@@ -6540,10 +6541,111 @@ allocation is inside Robust physics enumeration.
 - Next package: P7.3 applies the completed sky-column contract to Z-aware weather
   presentation and gameplay, including roof changes and moving frames.
 
+## Completed Package: P7.3a Shared Weather Exposure Policy
+
+### Scope
+
+- Define one shared typed policy for weather exposure at a local tile, world
+  floor, or entity without coupling rendering or audio into sky geometry.
+- Preserve the exact planar behavior of legacy maps while making configured
+  maps dimensional and fail closed.
+- Prove local tile eligibility, same-floor blockers, complete sky columns, and
+  moving-frame conversion before production presentation consumes the API.
+
+### Implementation
+
+- `WeatherExposureState` reports exposed, invalid coordinate/grid/level, local
+  tile rejection, planar roof, anchored blocker, and sky-blocked outcomes. A
+  sky rejection also retains the underlying typed sky termination.
+- The historical `TileRef` overload follows its original empty-tile, planar
+  roof, tile-weather, and anchored-blocker order on unconfigured maps.
+- Configured maps resolve the exact `ZLevelTileIndices`, reject out-of-range
+  floors, check the local tile definition, filter the planar anchored lookup by
+  inherited local Z, and then require a complete exposed Weather column.
+- Planar roof data is deliberately ignored after a map opts into Z levels. It
+  has no floor coordinate, so applying it would incorrectly roof every level at
+  the same XY; authored tile boundaries and roof markers own that policy.
+- World-floor queries convert through the current grid frame. Entity queries
+  derive the inherited grid and local floor, treat valid unobstructed map space
+  as exposed, and reject nullspace or malformed state.
+
+### Verification
+
+- The focused weather-policy fixture passes 3/3. It covers legacy Z 0 roofs and
+  dry tiles, configured grates and roof markers, exact-floor anchored blockers,
+  entity queries, invalid levels, complete columns, and moving frame origins.
+- A hot loop of 1,000 configured exposure queries allocates no more than 512
+  bytes in total, proving no allocation proportional to visible-tile count.
+- The complete Content integration filter containing `ZLevel` passes 308 cases
+  with one pooled skip; the skipped aperture-cache case passes 1/1 in isolation,
+  giving passing evidence for all 309 cases. Content unit/analyzer coverage
+  passes 9/9.
+- The schema-version 4 stress baseline passes 3/3. Measured 3/6/10-floor times
+  are 11.0122, 15.4494, and 23.2621 ms with 6,336 bytes at every depth, 100% warm
+  boundary/sky/gravity cache hits, and zero measured evictions.
+- A non-incremental `SpaceStation14.slnx` build completes in 2m41s with zero
+  errors and the same 695 established warnings as P7.2b. No warning references
+  a new or modified weather-policy file.
+
+### Decisions
+
+- Weather exposure is policy layered over `SharedZLevelSkyExposureSystem`, not
+  another geometric cache or a new `ZLevelTrace` channel implementation.
+- Local tile eligibility is checked before the column. An empty local tile keeps
+  Robust's exposed-space behavior, while a non-empty dry floor rejects weather
+  even under open sky.
+- `BlockWeatherComponent` remains planar storage but is filtered by inherited
+  local Z on configured maps. This preserves existing content without allowing
+  a blocker on one floor to suppress every floor at that XY.
+- P7.3a does not invent weather damage where upstream has no gameplay consumer.
+  P7.3b migrates the real stencil and ambient-audio consumers under explicit
+  budgets and observability.
+
+### Completion Gate
+
+- [x] Scope check: the diff is limited to the shared policy/result, focused
+      tests, and weather/roadmap documentation.
+- [x] Invariant review: legacy Z 0 ordering, local/world frames, moving grids,
+      exact-floor blockers, independent Weather boundaries, and fail-closed
+      invalid state were reviewed.
+- [x] Automated verification: 3 focused, all 309 broad cases covered, 9
+      unit/analyzer, 3 baseline, and the full non-incremental solution build pass.
+- [x] Performance evidence: 1,000 hot policy calls remain within 512 bytes; the
+      3/6/10-floor baseline retains bounded allocations and fully hot caches.
+- [x] Documentation: policy order, legacy/configured boundary, APIs, rationale,
+      limitations, tests, and next consumer package are recorded here and in the
+      vertical-content and main Z-level documents.
+- [x] Dependency check: P7.3a requires no WTZ Engine change; the clean engine
+      remains pinned to published revision `7cbd778024`.
+- [x] Git check: `git diff --check`, tree scope, and dependency state are checked
+      before the isolated commit; generated baseline snapshots remain ignored.
+- [x] Mini review: overload compatibility, nullable grid resolution, dimensional
+      roof policy, exact blocker floors, and a missing direct allocation proof
+      were reviewed and corrected.
+- [x] Commit: prepared as isolated `Define shared Z-level weather exposure`
+      commit on `zlevel/vertical-content`; remote verification follows it.
+
+### Mini Review
+
+- Finding: keeping `WeatherExposureState` in shared Content gives gameplay,
+  rendering, and audio one policy while leaving the bounded sky cache reusable
+  and geometrically focused.
+- Finding: the old `TileRef` overload must retain its passed tile on legacy maps;
+  reconstructing it unconditionally would be a subtle Z 0 compatibility change.
+- Finding: same-XY anchored enumeration is safe only after filtering by inherited
+  local Z, because engine snap grids remain planar.
+- Residual risk: production weather still uses the legacy stencil and a planar
+  radius-three audio flood fill until P7.3b migrates those consumers.
+- Residual risk: map-space exposure has no tile/roof policy by definition; future
+  planet weather volumes would need an explicit non-grid spatial contract.
+- Next package: P7.3b builds a bounded active-world-floor weather mask, migrates
+  ambient audio to entity exposure, and adds presentation metrics and visual QA.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P7.3a | `Define shared Z-level weather exposure` | 3 focused, all 309 broad covered, 9 unit, 3 baseline, full build, allocation/diff review | Complete |
 | 2026-08-29 | P7.2b | `Integrate physical elevators with Z-level navigation` | 14 elevator, 3 focused consumers, 306 broad, 9 unit, 3 baseline, full build, warning/performance/diff review | Complete |
 | 2026-08-29 | P7.2a | `Add powered Z-level elevator cabins` | 6 focused, 297 broad, 9 unit, 3 baseline, full build, authority/performance/diff review | Complete |
 | 2026-08-29 | P7.1b | `Add authored Z-level vertical surfaces` | 6 focused, 27 path/content, 38 consumers, 291 cases covered, 9 unit, 3 baseline, full build, analyzer/diff review | Complete |

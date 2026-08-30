@@ -4,6 +4,8 @@ using Content.Shared.Light.EntitySystems;
 using Content.Shared.Maps;
 using Content.Shared.StatusEffectNew;
 using Content.Shared.StatusEffectNew.Components;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Audio.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -21,6 +23,10 @@ public abstract class SharedWeatherSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _mapSystem = default!;
     [Dependency] private readonly SharedRoofSystem _roof = default!;
     [Dependency] private readonly StatusEffectsSystem _statusEffects = default!;
+    [Dependency] private readonly SharedTransformSystem _transform = default!;
+    [Dependency] private readonly SharedZLevelMapSystem _zLevelMaps = default!;
+    [Dependency] private readonly SharedZLevelSkyExposureSystem _zLevelSky = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     [Dependency] private readonly EntityQuery<BlockWeatherComponent> _blockQuery = default!;
     [Dependency] private readonly EntityQuery<WeatherStatusEffectComponent> _weatherQuery = default!;
@@ -30,29 +36,207 @@ public abstract class SharedWeatherSystem : EntitySystem
 
     public bool CanWeatherAffect(Entity<MapGridComponent?, RoofComponent?> ent, TileRef tileRef)
     {
-        if (tileRef.Tile.IsEmpty)
-            return true;
+        if (!_zLevelMaps.TryGetConfig(ent.Owner, out _))
+            return GetLegacyWeatherExposure(ent, tileRef).IsExposed;
+
+        return GetWeatherExposure(
+            ent,
+            new ZLevelTileIndices(tileRef.GridIndices.X, tileRef.GridIndices.Y, 0)).IsExposed;
+    }
+
+    public bool CanWeatherAffect(
+        Entity<MapGridComponent?, RoofComponent?> ent,
+        ZLevelTileIndices tile)
+    {
+        return GetWeatherExposure(ent, tile).IsExposed;
+    }
+
+    public bool CanWeatherAffectAtWorldZ(
+        Entity<MapGridComponent?, RoofComponent?> ent,
+        Vector2i tile,
+        int worldZ)
+    {
+        return GetWeatherExposureAtWorldZ(ent, tile, worldZ).IsExposed;
+    }
+
+    /// <summary>
+    /// Resolves weather against legacy planar roofs on unconfigured maps and
+    /// against the complete sky column on configured Z-level maps.
+    /// </summary>
+    public WeatherExposureState GetWeatherExposure(
+        Entity<MapGridComponent?, RoofComponent?> ent,
+        ZLevelTileIndices tile)
+    {
+        if (!_zLevelMaps.TryGetConfig(ent.Owner, out var config))
+        {
+            if (tile.Z != 0)
+            {
+                return new WeatherExposureState(
+                    WeatherExposureTermination.InvalidLevel,
+                    ent.Owner,
+                    tile);
+            }
+
+            if (!Resolve(ent, ref ent.Comp1))
+            {
+                return new WeatherExposureState(
+                    WeatherExposureTermination.InvalidGrid,
+                    ent.Owner,
+                    tile);
+            }
+
+            var legacyTile = new Vector2i(tile.X, tile.Y);
+            var legacy = _mapSystem.GetTileRef(ent.Owner, ent.Comp1, legacyTile);
+            return GetLegacyWeatherExposure(ent, legacy);
+        }
 
         if (!Resolve(ent, ref ent.Comp1))
-            return false;
+        {
+            return new WeatherExposureState(
+                WeatherExposureTermination.InvalidGrid,
+                ent.Owner,
+                tile);
+        }
+
+        if (tile.Z < config.Comp.MinimumLevel || tile.Z > config.Comp.MaximumLevel)
+        {
+            return new WeatherExposureState(
+                WeatherExposureTermination.InvalidLevel,
+                ent.Owner,
+                tile);
+        }
+
+        var tileRef = _mapSystem.GetZLevelTileRef(ent.Owner, ent.Comp1, tile);
+        if (!tileRef.Tile.IsEmpty)
+        {
+            var tileDef = (ContentTileDefinition) _tileDefManager[tileRef.Tile.TypeId];
+            if (!tileDef.Weather)
+            {
+                return new WeatherExposureState(
+                    WeatherExposureTermination.TileDisallowsWeather,
+                    ent.Owner,
+                    tile);
+            }
+        }
+
+        if (HasAnchoredWeatherBlocker(
+                (ent.Owner, ent.Comp1),
+                new Vector2i(tile.X, tile.Y),
+                tile.Z))
+        {
+            return new WeatherExposureState(
+                WeatherExposureTermination.AnchoredBlocker,
+                ent.Owner,
+                tile);
+        }
+
+        var sky = _zLevelSky.GetExposure((ent.Owner, ent.Comp1), tile);
+        if (!sky.IsExposed)
+        {
+            return new WeatherExposureState(
+                WeatherExposureTermination.SkyBlocked,
+                ent.Owner,
+                tile,
+                sky.Termination);
+        }
+
+        return new WeatherExposureState(WeatherExposureTermination.Exposed, ent.Owner, tile);
+    }
+
+    /// <summary>
+    /// Converts a world floor through the grid's current frame before applying
+    /// local weather policy. Moving grids therefore reuse local sky geometry.
+    /// </summary>
+    public WeatherExposureState GetWeatherExposureAtWorldZ(
+        Entity<MapGridComponent?, RoofComponent?> ent,
+        Vector2i tile,
+        int worldZ)
+    {
+        if (!Resolve(ent, ref ent.Comp1))
+        {
+            return new WeatherExposureState(
+                WeatherExposureTermination.InvalidGrid,
+                ent.Owner);
+        }
+
+        var localZ = _transform.WorldToLocalZLevel(ent.Owner, worldZ);
+        return GetWeatherExposure(ent, new ZLevelTileIndices(tile.X, tile.Y, localZ));
+    }
+
+    /// <summary>
+    /// Shared gameplay query for an entity's inherited grid and local floor.
+    /// Entities in unobstructed map space are exposed; nullspace is invalid.
+    /// </summary>
+    public WeatherExposureState GetWeatherExposure(EntityUid uid)
+    {
+        if (!TryComp(uid, out TransformComponent? transform) ||
+            transform.MapID == MapId.Nullspace)
+        {
+            return new WeatherExposureState(WeatherExposureTermination.InvalidCoordinates);
+        }
+
+        if (transform.GridUid is not { } gridUid)
+            return new WeatherExposureState(WeatherExposureTermination.Exposed);
+
+        if (!TryComp<MapGridComponent>(gridUid, out var grid))
+            return new WeatherExposureState(WeatherExposureTermination.InvalidGrid, gridUid);
+
+        var tile = _mapSystem.TileIndicesFor(gridUid, grid, transform.Coordinates);
+        var localZ = _zLevels.GetZLevel(uid);
+        return GetWeatherExposure(
+            (gridUid, grid, CompOrNull<RoofComponent>(gridUid)),
+            new ZLevelTileIndices(tile.X, tile.Y, localZ));
+    }
+
+    public bool CanWeatherAffect(EntityUid uid)
+    {
+        return GetWeatherExposure(uid).IsExposed;
+    }
+
+    private WeatherExposureState GetLegacyWeatherExposure(
+        Entity<MapGridComponent?, RoofComponent?> ent,
+        TileRef tileRef)
+    {
+        var tile = new ZLevelTileIndices(tileRef.GridIndices.X, tileRef.GridIndices.Y, 0);
+        if (tileRef.Tile.IsEmpty)
+            return new WeatherExposureState(WeatherExposureTermination.Exposed, ent.Owner, tile);
+
+        if (!Resolve(ent, ref ent.Comp1))
+            return new WeatherExposureState(WeatherExposureTermination.InvalidGrid, ent.Owner, tile);
 
         if (Resolve(ent, ref ent.Comp2, false) && _roof.IsRooved((ent, ent.Comp1, ent.Comp2), tileRef.GridIndices))
-            return false;
+            return new WeatherExposureState(WeatherExposureTermination.PlanarRoof, ent.Owner, tile);
 
         var tileDef = (ContentTileDefinition)_tileDefManager[tileRef.Tile.TypeId];
 
         if (!tileDef.Weather)
-            return false;
+            return new WeatherExposureState(WeatherExposureTermination.TileDisallowsWeather, ent.Owner, tile);
 
-        var anchoredEntities = _mapSystem.GetAnchoredEntitiesEnumerator(ent, ent.Comp1, tileRef.GridIndices);
+        if (HasAnchoredWeatherBlocker((ent.Owner, ent.Comp1), tileRef.GridIndices, null))
+            return new WeatherExposureState(WeatherExposureTermination.AnchoredBlocker, ent.Owner, tile);
+
+        return new WeatherExposureState(WeatherExposureTermination.Exposed, ent.Owner, tile);
+    }
+
+    private bool HasAnchoredWeatherBlocker(
+        Entity<MapGridComponent> grid,
+        Vector2i tile,
+        int? localZ)
+    {
+        var anchoredEntities = _mapSystem.GetAnchoredEntitiesEnumerator(grid, grid.Comp, tile);
 
         while (anchoredEntities.MoveNext(out var anchored))
         {
-            if (_blockQuery.HasComponent(anchored.Value))
-                return false;
+            if (!_blockQuery.HasComponent(anchored.Value) ||
+                localZ is { } z && _zLevels.GetZLevel(anchored.Value) != z)
+            {
+                continue;
+            }
+
+            return true;
         }
 
-        return true;
+        return false;
     }
 
     /// <summary>
