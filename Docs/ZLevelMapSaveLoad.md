@@ -292,6 +292,11 @@ unexpected counts; and leftover temporary files. A clean run reports `Passed`.
 Development-only dirty-source or skipped-build flags can report only
 `DevelopmentPassed`.
 
+Strict run `20260830T175112Z-42960-2a6a957e` passes 1/1 from clean published
+project revision `a2474f66d46...` and paired engine/gitlink `7cbd778024e...`.
+Its validated report SHA-256 is
+`dc7d22623dd56c71f66e84a561f2f61c2fd9c409c658ba7c3f80c8af2d940b39`.
+
 The rehearsal does not turn the checkpoint command into an in-memory rollback
 transaction. Loading a known-good artifact and retiring the damaged map remain
 explicit operator actions, and the checkpoint still excludes live-round state.

@@ -504,6 +504,11 @@ requires clean paired project/engine source and performs a real build. During
 implementation only, `-AllowDirtySourceForDevelopment` and
 `-SkipBuildForDevelopment` downgrade the result to `DevelopmentPassed`.
 
+Strict run `20260830T175112Z-42960-2a6a957e` reports `Passed` at 1/1 with report
+SHA-256 `dc7d22623dd56c71f66e84a561f2f61c2fd9c409c658ba7c3f80c8af2d940b39`.
+It binds published WTZ Project revision `a2474f66d46...` to WTZ Engine checkout
+and gitlink `7cbd778024e...`, both clean, with no development bypass.
+
 The rehearsal creates a three-floor initialized map with persistent and
 transient content, proves pre-init and grid-only refusal, and creates a known-good
 checkpoint through the command while autosave is disabled. It then introduces
@@ -547,9 +552,9 @@ part of the checkpoint contract.
   bypasses on the published source pair.
 - **P8.4d1:** complete. It adds versioned on-demand health diagnostics and
   initialized-map autosave/checkpoint telemetry.
-- **P8.4d2:** active. It owns validated manual checkpoints and executable
-  recovery rehearsal.
-- **P8.4d3:** planned. It owns the operations guide, representative deployment
+- **P8.4d2:** complete. Validated manual checkpoints and the clean-source
+  executable recovery rehearsal pass their protected contract.
+- **P8.4d3:** active. It owns the operations guide, representative deployment
   checks, and final P0-P8 public-server checklist.
 
 Each package closes only after its source diff, focused and broad tests,

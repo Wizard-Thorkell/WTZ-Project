@@ -1233,8 +1233,7 @@ signals into `Healthy`, `Degraded`, or `Critical` findings with operator
 actions. Initialized-map autosave now retains process-local attempt, outcome,
 path, error, and validation telemetry, also visible through `zlevelmetrics`.
 Collection remains administrator-triggered, so normal server ticks and the
-3/6/10-floor performance baseline are unchanged. P8.4d2 next owns explicit
-validated checkpoints and executable recovery rehearsal.
+3/6/10-floor performance baseline are unchanged.
 
 P8.4d2 now provides `zlevelcheckpoint <map-id> <checkpoint-name>` for a complete
 initialized map root and the fail-closed `WTZ-RECOVERY-1` rehearsal. Checkpoints
@@ -1243,7 +1242,10 @@ use a distinct `-CHECKPOINT.yml` suffix, and never replace an existing file.
 The rehearsal proves refusal of invalid authored state without damaging the
 known-good artifact, followed by two structurally identical recovery loads.
 This remains authored-map recovery rather than live-round persistence or an
-automatic in-memory rollback.
+automatic in-memory rollback. P8.4d2 is complete after strict clean run
+`20260830T175112Z-42960-2a6a957e` passed 1/1 against published project revision
+`a2474f66d46...` and paired engine/gitlink `7cbd778024e...`. P8.4d3 now owns the
+operator runbook, representative deployment evidence, and final P0-P8 gate.
 
 ## Definition Of Done
 

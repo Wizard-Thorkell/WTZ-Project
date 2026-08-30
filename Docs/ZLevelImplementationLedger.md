@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4d2 validated checkpoint and executable recovery rehearsal`.
+- Active package: `P8.4d3 operations guide and final P0-P8 gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -118,8 +118,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Complete |
 | P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Complete |
 | P8.4d1 | Operational health snapshot and initialized-map autosave telemetry | Complete |
-| P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Active |
-| P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Planned |
+| P8.4d2 | Validated checkpoint command and executable recovery rehearsal | Complete |
+| P8.4d3 | Operations guide, representative evidence, and final P0-P8 gate | Active |
 
 ## Phase P8.2 Packages
 
@@ -8598,7 +8598,7 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4d2 adds an explicit validated checkpoint operation and an
   executable save/load recovery rehearsal with a versioned result contract.
 
-## Active Package: P8.4d2 Validated Checkpoint And Recovery Rehearsal
+## Completed Package: P8.4d2 Validated Checkpoint And Recovery Rehearsal
 
 ### Scope
 
@@ -8626,6 +8626,13 @@ allocation is inside Robust physics enumeration.
   all report checks with report SHA-256
   `5241b13ac7ca63646ab97cc3c66539ee98212e8942091d3319fdd20592c01aa5`.
   A separate negative invocation rejects dirty source before test execution.
+- Strict clean-source runner `20260830T175112Z-42960-2a6a957e` passes 1/1 with
+  report SHA-256
+  `dc7d22623dd56c71f66e84a561f2f61c2fd9c409c658ba7c3f80c8af2d940b39`.
+  It binds published WTZ Project revision
+  `a2474f66d46ae035aeba9fe649eb75893b49ba6e` to WTZ Engine checkout and gitlink
+  `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`, with both source trees clean and
+  no development bypass.
 - Focused mapping/health units pass 14/14; the comparable Z-level/mapping unit
   matrix passes 27/27. The expanded persistence matrix passes 13/13.
 - The broad Debug Z-level suite passes 344, conditionally skips two pooled
@@ -8662,8 +8669,9 @@ allocation is inside Robust physics enumeration.
 - [x] Invariant review: complete initialized map ownership, authored Z range,
       Z 0 compatibility, transient filtering, atomic visibility, and structural
       double-round-trip identity are covered.
-- [ ] Automated verification: all development matrices pass; publish the
-      implementation and require one clean-source `WTZ-RECOVERY-1 Passed` run.
+- [x] Automated verification: all development matrices pass and the published
+      clean-source `WTZ-RECOVERY-1` gate reports `Passed` at 1/1 with every
+      protected step and report assertion satisfied.
 - [x] Performance evidence: checkpoint work is command-triggered and the
       neutral 3/6/10 baseline remains at 6,336 bytes with fully warm caches.
 - [x] Documentation: command, storage, recovery sequence, report contract,
@@ -8671,12 +8679,14 @@ allocation is inside Robust physics enumeration.
       hardening, overview, and ledger documents.
 - [x] Dependency check: WTZ Engine source is unchanged and checkout/gitlink
       remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
-- [ ] Git check: run final diff/status review, publish, verify the remote hash,
-      and rerun the gate from clean paired source.
+- [x] Git check: diff/staged scope checks pass; implementation revision
+      `a2474f66d46...` is published and matches the remote; the strict gate began
+      from clean paired project/engine source.
 - [x] Mini review: serializer reuse, command authority, expected failure
       handling, append-only naming, source identity, and recovery semantics
       were reviewed.
-- [ ] Commit: save and push the package as an isolated implementation revision.
+- [x] Commit: package implementation is saved and pushed as
+      `Add validated Z-level recovery checkpoints`.
 
 ### Mini Review
 
@@ -8699,10 +8709,44 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4d3 composes health, recovery, release, Z 0, porting, visual,
   soak, baseline, and manual operations evidence into the final P0-P8 gate.
 
+## Active Package: P8.4d3 Operations Guide And Final P0-P8 Gate
+
+### Scope
+
+- Write one operator runbook for preflight, startup, monitoring, checkpoint,
+  recovery, incident response, rollback, and evidence retention.
+- Compose the existing health, recovery, release, Z 0, porting, visual, Server
+  GC, soak, and baseline contracts into one fail-closed final acceptance gate.
+- Bind representative deployment and manual-gameplay evidence to exact paired
+  WTZ Project/Engine revisions without development bypasses.
+- Audit every P0-P8 package, operational limitation, document, repository state,
+  and remote revision before making the final public-server readiness decision.
+
+### Completion Gate
+
+- [ ] Scope check: final changes are confined to operations, acceptance tooling,
+      representative evidence, synchronized documentation, and required fixes.
+- [ ] Invariant review: Z 0, local/world frames, moving grids, server authority,
+      boundary channels, persistence limits, and operator failure modes pass.
+- [ ] Automated verification: the final contract and all composed protected
+      contracts pass from clean paired published source.
+- [ ] Performance evidence: release, Server GC, soak, baseline, cache, and budget
+      envelopes are current and bound to the accepted source pair.
+- [ ] Documentation: runbook, commands, thresholds, recovery, known limits,
+      evidence, and final readiness decision are complete and mutually consistent.
+- [ ] Dependency check: WTZ Project, WTZ Engine checkout, gitlink, and remotes are
+      paired at the accepted revisions.
+- [ ] Git check: whitespace, scope, clean-tree, commit, push, and remote hashes
+      are verified after the final gate.
+- [ ] Mini review: findings, residual risks, deployment conditions, and any
+      post-roadmap backlog are recorded before closure.
+- [ ] Commit: the final package and closing evidence are saved and pushed.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4d2 | `Add validated Z-level recovery checkpoints` | strict WTZ-RECOVERY-1 1/1 with 2 checkpoints, 1 refusal, 2 loads, exact structural match; 14 focused unit, 27 unit/mapping, 13 persistence, 344 pass + 2 conditional skips broad, 3 baseline, full build, exact source/report/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4d1 | `Expose Z-level operational health` | 4 evaluator/JSON, 13 focused unit, 26 unit/mapping, 1 autosave, 12 persistence, 343 pass + 2 conditional skips broad, 3 baseline, full build, semantics/performance/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4c | `Close executable WTZ Z-level release matrix` | strict WTZ-RELEASE-1 41/41 + 3/3, 8 self-tests, 343 pass + 2 conditional skips broad, 22 unit/mapping, 3 baseline, full builds, exact source/report/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.4b | `Bound Z-level cache ownership across server lifecycles` | 3 targeted, all 344 broad covered, 328 namespace, 22 unit/mapping, 3 baseline, 2 lifecycle + 3 Server GC profiles, full build, ownership/performance/diff/dependency review | Complete |
