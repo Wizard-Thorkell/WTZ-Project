@@ -177,7 +177,8 @@ public sealed class ZLevelServerSoakTest : GameTest
                     sessions,
                     viewers,
                     fixtureFloor,
-                    settings.WarmupIterations);
+                    settings.WarmupIterations,
+                    out _);
 
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
@@ -189,8 +190,9 @@ public sealed class ZLevelServerSoakTest : GameTest
                     sessions,
                     viewers,
                     fixtureFloor,
-                    settings.MeasuredIterations);
-                AssertRun(settings, stressFixture, measured);
+                    settings.MeasuredIterations,
+                    out var immediatePvsRefreshes);
+                AssertRun(settings, stressFixture, measured, immediatePvsRefreshes);
                 AssertRestored(stressFixture);
 
                 report = new ZLevelServerSoakReport(
@@ -312,7 +314,8 @@ public sealed class ZLevelServerSoakTest : GameTest
         IReadOnlyList<ICommonSession> sessions,
         IReadOnlyList<EntityUid> viewers,
         Tile floorTile,
-        int iterations)
+        int iterations,
+        out long immediatePvsRefreshes)
     {
         var boundaries = entityManager.System<SharedZLevelBoundarySystem>();
         var graph = entityManager.System<ZLevelTraversalGraphSystem>();
@@ -340,6 +343,7 @@ public sealed class ZLevelServerSoakTest : GameTest
         var pvsSchedulerFrameLatencyIndex = 0;
         Action<long> observePvsRefreshLatency = ticks =>
             pvsRefreshLatencyTicks[pvsLatencyIndex++] = ticks;
+        immediatePvsRefreshes = 0;
 
         metrics.ResetCounters();
         portals.ResetMetrics();
@@ -366,7 +370,7 @@ public sealed class ZLevelServerSoakTest : GameTest
 
             var stageStarted = stageRecorder.Start();
             MoveGrid(entityManager, fixture, iteration);
-            PositionViewers(entityManager, fixture, viewers, iteration);
+            immediatePvsRefreshes += PositionViewers(entityManager, fixture, viewers, iteration);
             stageRecorder.Record(ZLevelServerSoakStage.FrameAndViewerUpdate, iteration, stageStarted);
 
             var mutationTile = MutationTiles[iteration % MutationTiles.Length];
@@ -641,7 +645,7 @@ public sealed class ZLevelServerSoakTest : GameTest
             gridTransform.LocalRotation + Angle.FromDegrees(0.5f));
     }
 
-    private static void PositionViewers(
+    private static int PositionViewers(
         IEntityManager entityManager,
         ZLevelStressFixture fixture,
         IReadOnlyList<EntityUid> viewers,
@@ -649,6 +653,7 @@ public sealed class ZLevelServerSoakTest : GameTest
     {
         var transform = entityManager.System<SharedTransformSystem>();
         var zLevels = entityManager.System<SharedZLevelSystem>();
+        var changedLevels = 0;
 
         for (var index = 0; index < viewers.Count; index++)
         {
@@ -657,17 +662,23 @@ public sealed class ZLevelServerSoakTest : GameTest
             var x = onMovingGrid ? 2.5f + index % 3 : 9.5f + index % 6;
             var y = onMovingGrid ? 2.5f + index % 2 : 10.5f + (index / 2) % 4;
             var localZ = (index * 3 + iteration) % fixture.FloorCount;
+            if (zLevels.GetZLevel(viewers[index]) != localZ)
+                changedLevels++;
             transform.SetCoordinates(viewers[index], new EntityCoordinates(gridUid, new Vector2(x, y)));
             Assert.That(zLevels.SetZLevelPosition(viewers[index], localZ), Is.True);
         }
+
+        return changedLevels;
     }
 
     private static void AssertRun(
         ZLevelServerSoakSettings settings,
         ZLevelStressFixture fixture,
-        ZLevelServerSoakRunSnapshot run)
+        ZLevelServerSoakRunSnapshot run,
+        long immediatePvsRefreshes)
     {
-        var expectedRefreshes = (long) settings.SessionCount * settings.MeasuredIterations;
+        var expectedScheduledRefreshes = (long) settings.SessionCount * settings.MeasuredIterations;
+        var expectedRefreshes = expectedScheduledRefreshes + immediatePvsRefreshes;
         var metrics = run.SharedMetrics;
         var portals = run.SoundPortals;
         var routes = run.SoundRoutes;
@@ -692,7 +703,8 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(run.GenerationOneCollections, Is.GreaterThanOrEqualTo(0));
             Assert.That(run.GenerationTwoCollections, Is.GreaterThanOrEqualTo(0));
             Assert.That(run.IterationLatency.Samples, Is.EqualTo(settings.MeasuredIterations));
-            Assert.That(run.PvsRefreshLatency.Samples, Is.EqualTo(expectedRefreshes));
+            Assert.That(immediatePvsRefreshes, Is.GreaterThan(0));
+            Assert.That(run.PvsRefreshLatency.Samples, Is.EqualTo(expectedScheduledRefreshes));
             Assert.That(run.PvsSchedulerFrameLatency.Samples, Is.EqualTo(expectedSchedulerUpdates));
             Assert.That(run.Stages, Has.Count.EqualTo(Enum.GetValues<ZLevelServerSoakStage>().Length));
             Assert.That(run.Stages.Select(stage => stage.Name), Is.Unique);
@@ -743,8 +755,8 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(scheduler.Updates, Is.EqualTo(expectedSchedulerUpdates));
             Assert.That(scheduler.ActiveSessionSamples,
                 Is.EqualTo(expectedSchedulerUpdates * settings.SessionCount));
-            Assert.That(scheduler.DueRefreshes, Is.EqualTo(expectedRefreshes));
-            Assert.That(scheduler.ScheduledRefreshes, Is.EqualTo(expectedRefreshes));
+            Assert.That(scheduler.DueRefreshes, Is.EqualTo(expectedScheduledRefreshes));
+            Assert.That(scheduler.ScheduledRefreshes, Is.EqualTo(expectedScheduledRefreshes));
             Assert.That(scheduler.DeferredRefreshes, Is.Zero);
             Assert.That(scheduler.BudgetExhaustions, Is.Zero);
             Assert.That(scheduler.MaxActiveSessions, Is.EqualTo(settings.SessionCount));
@@ -757,12 +769,24 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(scheduler.VisibilityContextCacheHitPercent, Is.GreaterThan(0d));
             Assert.That(
                 scheduler.VisibilityContextCacheHits + scheduler.VisibilityContextCacheMisses,
+                Is.LessThan(metrics.PvsVisibilityChecks));
+            Assert.That(scheduler.DirectVisibilityContextCacheMisses, Is.GreaterThan(0));
+            Assert.That(
+                scheduler.VisibilityContextCacheHits +
+                scheduler.VisibilityContextCacheMisses +
+                scheduler.DirectVisibilityContextCacheHits +
+                scheduler.DirectVisibilityContextCacheMisses,
                 Is.EqualTo(metrics.PvsVisibilityChecks));
             Assert.That(scheduler.VisibilityContextCacheEntries, Is.GreaterThan(0));
             Assert.That(scheduler.VisibilityContextCacheEntries,
                 Is.LessThanOrEqualTo(scheduler.VisibilityContextCacheMaxEntries));
             Assert.That(scheduler.VisibilityContextCacheMaxEntries,
                 Is.LessThanOrEqualTo(scheduler.VisibilityContextCacheMisses));
+            Assert.That(scheduler.DirectVisibilityContextCacheEntries, Is.GreaterThan(0));
+            Assert.That(scheduler.DirectVisibilityContextCacheEntries,
+                Is.LessThanOrEqualTo(scheduler.DirectVisibilityContextCacheMaxEntries));
+            Assert.That(scheduler.DirectVisibilityContextCacheMaxEntries,
+                Is.LessThanOrEqualTo(scheduler.DirectVisibilityContextCacheMisses));
 
             Assert.That(portals.Invalidations, Is.GreaterThanOrEqualTo(settings.MeasuredIterations * 2));
             Assert.That(portals.Builds, Is.GreaterThan(0));

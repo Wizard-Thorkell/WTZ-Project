@@ -147,8 +147,11 @@ complete map validation does not enter the tick loop.
 
 Watch these `zlevelmetrics` families together:
 
-- PVS due, scheduled, deferred, exhausted, frame latency, and context-cache hit
-  rate;
+- PVS due, scheduled, deferred, exhausted, frame latency, and scheduled
+  context-cache hit rate;
+- direct floor-change PVS context-cache observations, which remain visible for
+  accounting but are isolated batches and are not part of the scheduler reuse
+  envelope;
 - boundary and sky cache entries, order entries, evictions, and invalidation;
 - gravity builds, reuse, build time, and owned grid workspaces;
 - traversal, elevator, flight, interaction, ballistic, explosion, and sound

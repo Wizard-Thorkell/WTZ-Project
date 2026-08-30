@@ -8760,6 +8760,28 @@ allocation is inside Robust physics enumeration.
   structural identity, and operational health `4/4`. Build, visual, and
   performance reuse were explicitly marked development-only; parent report
   SHA-256 is `450676a35e942f984921b0dd651cf87f5f905565a95c0df954fe5921d4b34d58`.
+- The first clean strict run `20260830T183647Z-9020-ba21c195` passed its full
+  Release build, release `41/41`, Z 0 `18/18`, port probes `50/50`, real-client
+  visual `24/24`, recovery `1/1`, health `4/4`, and lifecycle envelope before
+  failing closed at endurance. The fixture observed 65,536 real PVS refreshes
+  after immediate floor-change replication, while its stale assertion expected
+  only the 32,768 scheduler refreshes and mixed direct cache misses into the
+  scheduler reuse rate.
+- The correction counts real local-Z transitions, preserves the shared PVS and
+  sound totals, and splits scheduled reusable context observations from isolated
+  synchronous refresh observations. No gameplay policy, cadence, budget, or
+  acceptance threshold changed.
+- Release verification passes a zero-error build, 2/2 focused integration,
+  345 broad integration cases with one conditional skip, and 17/17 Z-level
+  unit/mapping cases. The corrected official
+  32-session, 10-floor, 1,024-iteration endurance profile passes with 88.91%
+  scheduled cache hits, p95/p99/max 6.538/31.344/65.224 ms, 17,557 allocated
+  bytes per iteration, and zero deferred or exhausted work. Its 28,525,291
+  scheduled plus 28,530,312 direct visibility observations exactly equal
+  57,055,603 shared checks.
+- The corrected 64-session capacity profile passes with 95.31% scheduled cache
+  hits, p95/p99/max 12.410/63.718/67.710 ms, 32,187 allocated bytes per
+  iteration, and zero deferred or exhausted work.
 
 ### Completion Gate
 

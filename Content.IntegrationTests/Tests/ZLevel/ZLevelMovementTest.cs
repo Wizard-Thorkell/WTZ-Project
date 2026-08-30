@@ -665,14 +665,16 @@ public sealed class ZLevelMovementTest : MovementTest
             Assert.Multiple(() =>
             {
                 Assert.That(firstRefresh.VisibilityContextCacheHits, Is.Zero);
-                Assert.That(firstRefresh.VisibilityContextCacheMisses, Is.GreaterThan(0));
-                Assert.That(firstRefresh.VisibilityContextCacheEntries, Is.GreaterThan(0));
-                Assert.That(repeatedRefresh.VisibilityContextCacheHits, Is.Zero,
+                Assert.That(firstRefresh.VisibilityContextCacheMisses, Is.Zero);
+                Assert.That(firstRefresh.DirectVisibilityContextCacheHits, Is.Zero);
+                Assert.That(firstRefresh.DirectVisibilityContextCacheMisses, Is.GreaterThan(0));
+                Assert.That(firstRefresh.DirectVisibilityContextCacheEntries, Is.GreaterThan(0));
+                Assert.That(repeatedRefresh.DirectVisibilityContextCacheHits, Is.Zero,
                     "A direct refresh must not reuse entity geometry from a previous simulation batch.");
-                Assert.That(repeatedRefresh.VisibilityContextCacheMisses,
-                    Is.EqualTo(firstRefresh.VisibilityContextCacheMisses * 2));
-                Assert.That(repeatedRefresh.VisibilityContextCacheEntries,
-                    Is.EqualTo(firstRefresh.VisibilityContextCacheEntries));
+                Assert.That(repeatedRefresh.DirectVisibilityContextCacheMisses,
+                    Is.EqualTo(firstRefresh.DirectVisibilityContextCacheMisses * 2));
+                Assert.That(repeatedRefresh.DirectVisibilityContextCacheEntries,
+                    Is.EqualTo(firstRefresh.DirectVisibilityContextCacheEntries));
             });
         });
         await RunSeconds(0.5f);

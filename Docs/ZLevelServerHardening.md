@@ -548,6 +548,16 @@ concurrent humans, 120 minutes, and twelve exact gameplay/operations checks.
 Dependency advisories, target-host calibration, filesystem recovery, monitoring,
 backups, and final launch approval remain operator responsibilities.
 
+The first strict final run exposed a useful instrumentation mismatch introduced
+with immediate viewer-floor replication: the endurance fixture correctly
+performed one synchronous refresh at each real floor transition in addition to
+the scheduled refresh, but still expected and classified scheduled work only.
+PVS refresh and visibility-check totals now conserve both routes exactly, while
+scheduled and direct context-cache observations are reported separately. The
+85/90 percent release envelopes continue to measure reusable scheduler batches;
+direct refreshes remain isolated by design and cannot borrow geometry from an
+earlier simulation batch.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -578,8 +588,8 @@ backups, and final launch approval remain operator responsibilities.
   initialized-map autosave/checkpoint telemetry.
 - **P8.4d2:** complete. Validated manual checkpoints and the clean-source
   executable recovery rehearsal pass their protected contract.
-- **P8.4d3:** active. It owns the operations guide, representative deployment
-  checks, and final P0-P8 public-server checklist.
+- **P8.4d3:** active. Its operations guide and final gate are implemented; the
+  strict rerun and closing evidence remain before the final P0-P8 decision.
 
 Each package closes only after its source diff, focused and broad tests,
 performance evidence, generated artifacts, documentation, dependency pairing,

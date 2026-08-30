@@ -80,6 +80,12 @@ public sealed class ZLevelPvsSystem : EntitySystem
     private long _visibilityContextCacheMisses;
     private int _visibilityContextCacheEntries;
     private int _visibilityContextCacheMaxEntries;
+    // Direct floor-change refreshes are isolated batches; keep their observations
+    // separate from the scheduler reuse envelope while retaining total accounting.
+    private long _directVisibilityContextCacheHits;
+    private long _directVisibilityContextCacheMisses;
+    private int _directVisibilityContextCacheEntries;
+    private int _directVisibilityContextCacheMaxEntries;
 
     public int VisibilityCheckBudget => _visibilityCheckBudget;
     public int MaxSessionRefreshesPerUpdate => _maxSessionRefreshesPerUpdate;
@@ -99,7 +105,11 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _visibilityContextCacheHits,
         _visibilityContextCacheMisses,
         _visibilityContextCacheEntries,
-        _visibilityContextCacheMaxEntries);
+        _visibilityContextCacheMaxEntries,
+        _directVisibilityContextCacheHits,
+        _directVisibilityContextCacheMisses,
+        _directVisibilityContextCacheEntries,
+        _directVisibilityContextCacheMaxEntries);
 
     public override void Initialize()
     {
@@ -178,13 +188,13 @@ public sealed class ZLevelPvsSystem : EntitySystem
             {
                 var index = (plan.StartIndex + offset) % _scheduledSessions.Count;
                 var refreshStarted = Stopwatch.GetTimestamp();
-                RefreshSessionCore(_scheduledSessions[index]);
+                RefreshSessionCore(_scheduledSessions[index], recordVisibilityContextMetrics: true);
                 refreshLatencyObserver?.Invoke(Stopwatch.GetTimestamp() - refreshStarted);
             }
         }
         finally
         {
-            CompleteVisibilityContextBatch();
+            CompleteVisibilityContextBatch(recordMetrics: true);
         }
 
         RecordSchedulerUpdate(
@@ -202,24 +212,34 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _visibilityContexts.Clear();
         try
         {
-            RefreshSessionCore(session);
+            RefreshSessionCore(session, recordVisibilityContextMetrics: false);
         }
         finally
         {
-            CompleteVisibilityContextBatch();
+            CompleteVisibilityContextBatch(recordMetrics: false);
         }
     }
 
-    private void CompleteVisibilityContextBatch()
+    private void CompleteVisibilityContextBatch(bool recordMetrics)
     {
-        _visibilityContextCacheEntries = _visibilityContexts.Count;
-        _visibilityContextCacheMaxEntries = Math.Max(
-            _visibilityContextCacheMaxEntries,
-            _visibilityContextCacheEntries);
+        if (recordMetrics)
+        {
+            _visibilityContextCacheEntries = _visibilityContexts.Count;
+            _visibilityContextCacheMaxEntries = Math.Max(
+                _visibilityContextCacheMaxEntries,
+                _visibilityContextCacheEntries);
+        }
+        else
+        {
+            _directVisibilityContextCacheEntries = _visibilityContexts.Count;
+            _directVisibilityContextCacheMaxEntries = Math.Max(
+                _directVisibilityContextCacheMaxEntries,
+                _directVisibilityContextCacheEntries);
+        }
         _visibilityContexts.Clear();
     }
 
-    private void RefreshSessionCore(ICommonSession session)
+    private void RefreshSessionCore(ICommonSession session, bool recordVisibilityContextMetrics)
     {
         if (!_pvsEnabled || session.Status != SessionStatus.InGame)
         {
@@ -288,11 +308,17 @@ public sealed class ZLevelPvsSystem : EntitySystem
                 var hasContext = _visibilityContexts.TryGetValue(candidate, out var context);
                 if (hasContext)
                 {
-                    _visibilityContextCacheHits++;
+                    if (recordVisibilityContextMetrics)
+                        _visibilityContextCacheHits++;
+                    else
+                        _directVisibilityContextCacheHits++;
                 }
                 else
                 {
-                    _visibilityContextCacheMisses++;
+                    if (recordVisibilityContextMetrics)
+                        _visibilityContextCacheMisses++;
+                    else
+                        _directVisibilityContextCacheMisses++;
                     hasContext = _visibility.TryResolveEntityVisibilityContext(candidate, out context);
                     if (hasContext)
                         _visibilityContexts.Add(candidate, context);
@@ -539,6 +565,10 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _visibilityContextCacheMisses = 0;
         _visibilityContextCacheEntries = 0;
         _visibilityContextCacheMaxEntries = 0;
+        _directVisibilityContextCacheHits = 0;
+        _directVisibilityContextCacheMisses = 0;
+        _directVisibilityContextCacheEntries = 0;
+        _directVisibilityContextCacheMaxEntries = 0;
         _visibilityContexts.Clear();
     }
 
@@ -569,7 +599,11 @@ public readonly record struct ZLevelPvsSchedulerMetricsSnapshot(
     long VisibilityContextCacheHits,
     long VisibilityContextCacheMisses,
     int VisibilityContextCacheEntries,
-    int VisibilityContextCacheMaxEntries)
+    int VisibilityContextCacheMaxEntries,
+    long DirectVisibilityContextCacheHits,
+    long DirectVisibilityContextCacheMisses,
+    int DirectVisibilityContextCacheEntries,
+    int DirectVisibilityContextCacheMaxEntries)
 {
     public double AverageRefreshMilliseconds => Updates == 0 ? 0d : RefreshMilliseconds / Updates;
     public double VisibilityContextCacheHitPercent =>
@@ -577,6 +611,11 @@ public readonly record struct ZLevelPvsSchedulerMetricsSnapshot(
             ? 0d
             : VisibilityContextCacheHits * 100d /
               (VisibilityContextCacheHits + VisibilityContextCacheMisses);
+    public double DirectVisibilityContextCacheHitPercent =>
+        DirectVisibilityContextCacheHits + DirectVisibilityContextCacheMisses == 0
+            ? 0d
+            : DirectVisibilityContextCacheHits * 100d /
+              (DirectVisibilityContextCacheHits + DirectVisibilityContextCacheMisses);
 }
 
 public readonly record struct ZLevelPvsViewerContext(
