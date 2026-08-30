@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7 phase gate`.
+- Active package: `P8.1 deterministic server-scale soak harness`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,8 +47,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4b2b active) |
-| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Complete |
+| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.1 active) |
 
 ## Phase P4 Packages
 
@@ -99,7 +99,16 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.4b1 | Flight controls, capability content, interruptions, and mapping | Complete |
 | P7.4b2a | Continuous flight trace and combat integration | Complete |
 | P7.4b2b | Explicit flight AI navigation and execution | Complete |
-| P7 gate | End-to-end vertical-content and scope review | Active |
+| P7 gate | End-to-end vertical-content and scope review | Complete |
+
+## Phase P8 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Active |
+| P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Pending |
+| P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Pending |
+| P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Pending |
 
 ## Phase P0 Packages
 
@@ -7236,10 +7245,156 @@ allocation is inside Robust physics enumeration.
   final end-to-end mapping/gameplay evidence, and hands the stable surface to P8
   hardening.
 
+## Completed Phase Gate: P7 Vertical Content
+
+### Scope
+
+- Review P7.1a through P7.4b2b as one authored-content pipeline rather than
+  treating roofs, weather, elevators, and flight as unrelated package results.
+- Re-run persistence, mapping, physical gameplay, combat, navigation, weather,
+  and graphical evidence on the final paired project/engine revisions.
+- Audit ownership boundaries, compatibility behavior, persistent versus runtime
+  state, performance limits, and the exact product work that must move to P8.
+- Harden the real-client capture when the gate itself can measure PVS or sprite
+  convergence instead of the weather behavior it claims to test.
+
+### Acceptance Criteria
+
+- Authored vertical surfaces, roofs, weather policy, elevators, flight content,
+  and their graph edges compose without weakening independent boundary channels.
+- Initialized maps preserve authored surfaces and elevator state through two
+  snapshot/load cycles, preserve flight configuration through its dedicated
+  snapshot/load fixture, and exclude active trips, actions, passengers, and
+  flight targets.
+- Elevators and flight execute through server-authoritative physical lifecycle
+  contracts; combat, gravity, support, and AI consume those contracts rather
+  than introducing parallel Z models.
+- Headless, unit, baseline, and real OpenGL evidence pass on the final diff, and
+  any gate instability is explained and corrected rather than hidden by wider
+  pixel tolerances.
+- No unresolved P7 correctness finding blocks the start of server-scale P8
+  hardening; remaining product and scale limits are explicit.
+
+### Consolidated Evidence
+
+- A cross-package matrix covering sky exposure, structural surfaces, vertical
+  content, elevators, weather, flight, initialized snapshots/mutations, map
+  format, pathfinding, hitscan, and ballistic trajectories passes 135/135 with
+  no failures or skips.
+- One complete Content Z-level run passes 336/336. The final post-build run
+  passes 335 cases and reports the established pooled aperture-cache skip; that
+  exact case then passes 1/1 in isolation. All 336 cases therefore have passing
+  evidence on the final source, with no failure.
+- Content structural, visual-analysis, and mapping unit coverage passes 18/18.
+  Existing focused fixtures include two full initialized-map cycles for
+  surfaces, atmosphere, infrastructure, and elevator topology/runtime
+  filtering; a separate fixture proves authored flight capability and strips
+  runtime flight state during snapshot/load.
+- Two complete schema-version 5 baselines pass 3/3. The first measures
+  10.2503/15.4385/22.3507 ms and the confirming run measures
+  17.4163/22.1708/27.7543 ms for 3/6/10 floors. Every sample retains 6,336
+  bytes, 100% warm boundary/sky/gravity cache hits, zero PVS exhaustion, and
+  zero neutral flight updates.
+- The first two graphical gate runs exposed a capture defect at 23/24: the
+  strict covered-floor weather signature included an incompletely replicated
+  structural layer and an animated connected player. The runner now requires
+  the captured floor to include its baseline tile/light/occluder inventory,
+  revalidates it during stabilization, hides only the local player sprite, and
+  restores that sprite state at teardown. The weather threshold remains 0.003.
+- Two consecutive corrected real OpenGL runs pass 24/24 in 33.9279 and 33.5015
+  seconds. The confirming run measures covered-floor RMS 0.000000 versus
+  exposed-floor RMS 0.055513, 1,007 mask plans, 49,343 tile checks, 6,601 runs,
+  and zero fail-closed plans or budget exhaustion.
+- A non-incremental single-worker full solution build completes in 2m41s with
+  zero errors and the established 691 warnings. No warning points to the gate's
+  modified capture system. WTZ Engine remains clean at published revision
+  `7cbd778024` and requires no P7 gate change.
+
+### Architecture Review
+
+- Vertical geometry remains one shared truth without becoming one gameplay
+  system. Tile/provider boundaries and `ZLevelTrace` provide typed crossings;
+  support, sky/weather, elevators, combat, flight, and navigation retain their
+  own policy, budgets, caches, and lifecycle.
+- Roofs, grates, catwalks, and shafts are persistent authored content. Weather
+  consumes the independent `Weather` channel and sky cache, so atmosphere,
+  sight, sound, projectiles, and body support cannot be changed accidentally by
+  a weather decision.
+- Elevators are physical dynamic graph edges backed by one cabin and exact
+  landing topology. Flight is an explicit actor capability and authored graph
+  corridor backed by the shared solver. Neither makes empty space ordinary
+  walkable terrain or adds a second pathfinder.
+- Mapper-owned configuration is serializable while trips, riders, controls,
+  active flight targets, and route ownership are transient. This composes with
+  P6's canonical initialized snapshot instead of creating a P7 save format.
+- Legacy unconfigured maps retain planar Z 0 weather, grid gravity, ordinary
+  jetpack behavior, native tiles, and component-free entities. Native Z-level
+  behavior remains map-opt-in.
+
+### Decisions
+
+- Close P7 without adding another vertical-content abstraction or serializer.
+  The composed contracts and round trips are complete enough for hardening;
+  further framework work without scale evidence would be speculative.
+- Keep the capture correction in the phase gate because false graphical passes
+  or failures would weaken the release oracle used again in P8. The fix changes
+  no production rendering or gameplay policy and preserves the strict threshold.
+- Split P8 into a measured soak harness, evidence-driven runtime hardening, Z 0
+  and porting work, and a final public-server release gate. Each remains subject
+  to the same mandatory package checklist.
+
+### Completion Gate
+
+- [x] Scope check: the only source change hardens the real-client oracle; all
+      other changes record P7 closure and the bounded P8 handoff.
+- [x] Invariant review: Z 0, local/world frames, moving grids, support, all
+      boundary channels, server authority, persistent/transient ownership, and
+      initialized lifecycle were reviewed across every P7 package.
+- [x] Automated verification: 135/135 cross-package, passing evidence for all
+      336 broad cases, 18/18 unit/mapping, two 3/3 baselines, two 24/24 real
+      graphical runs, and a zero-error full build complete on the final source.
+- [x] Performance evidence: repeat baselines preserve allocation/cache/PVS
+      invariants; graphical weather work and limits are captured; server-scale
+      concurrency is explicitly assigned to P8.1 rather than inferred.
+- [x] Documentation: architecture, persistence, mapping, content, controls,
+      evidence, capture correction, product limits, and P8 packages are
+      synchronized in the ledger and focused Z-level documents.
+- [x] Dependency check: WTZ Project remains paired with clean, published WTZ
+      Engine `7cbd778024`; no engine source or submodule pointer changed.
+- [x] Git check: generated baselines, screenshots, reports, and logs remain
+      ignored; declared source/docs pass whitespace and scope review.
+- [x] Mini review: findings, residual risks, and P8.1 are recorded below.
+- [x] Commit: prepared as isolated `Close Z-level vertical content phase` on
+      `zlevel/vertical-content`; push and remote hash verification follow.
+
+### Mini Review
+
+- Finding: the phase composes cleanly around shared geometry and specialized
+  consumers; no monolithic vertical-content coordinator or duplicated movement
+  model emerged.
+- Finding: the graphical gate caught two forms of test contamination without
+  revealing a production weather leak. Requiring structural convergence and
+  excluding the animated player produces a strict zero-difference covered-floor
+  oracle across consecutive runs.
+- Residual risk: elevators still lack interpolated cabins, doors, interlocks,
+  queues, emergency controls, and player construction; these are product depth,
+  not correctness prerequisites for the current physical contract.
+- Residual risk: flight AI is corridor-based and its one-tile approach/exit is
+  mapper-cleared rather than a volumetric planner. Arbitrary 3D pursuit remains
+  outside the declared P7 model.
+- Residual risk: graphical evidence covers one NVIDIA/OpenGL environment, and
+  the official test map is a compact fixture rather than a representative live
+  station. Multi-client density, item piles, moving grids, long rounds, and
+  cross-vendor graphics are P8 concerns.
+- Next package: P8.1 creates deterministic multi-session and mutation soak
+  workloads, records per-subsystem throughput/memory/cache/budget evidence, and
+  establishes release-sized thresholds before changing runtime policy.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P7 gate | `Close Z-level vertical content phase` | 135 cross-package, all 336 broad covered, 18 unit/mapping, 2x3 baseline, 2x24 real GL, full build, architecture/diff review | Complete |
 | 2026-08-30 | P7.4b2b | `Navigate authored Z-level flight corridors` | 6 focused, 1 official map, 38 path, 336 broad, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b2a | `Trace active Z-level flight heights` | 3 new, 72 consumer, 330 broad cases covered, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b1 | `Add native Z-level flight controls` | 14 focused, 327 broad cases covered, 18 unit/mapping, 3 baseline, full build, warning/diff review | Complete |

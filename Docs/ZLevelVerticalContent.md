@@ -313,3 +313,26 @@ activate or adopt native flight, approach the aperture, cross through the live
 empty space globally walkable. Route ownership is explicit across completion,
 invalidation, interruption, and replacement. The official mapping station
 contains one bidirectional Z 0/Z 1 corridor.
+
+## P7 Phase Gate
+
+P7 is complete. A 135-case cross-package matrix validates surfaces, sky,
+weather, elevators, flight, mapping, persistence, pathfinding, hitscan, and
+ballistic trajectories together. All 336 Content Z-level integration cases
+have passing evidence, structural/mapping unit coverage passes 18/18, and two
+3/6/10-floor baselines retain 6,336 measured bytes, fully warm boundary/sky/
+gravity caches, zero PVS exhaustion, and zero neutral flight updates.
+
+The real-client oracle now waits for each weather floor to regain the tile,
+light, and occluder inventory captured by its baseline. It also excludes the
+connected player's animated sprite from pixel signatures and restores its
+visibility after the run. Two consecutive NVIDIA/OpenGL captures pass 24/24;
+the confirming run reports covered-floor RMS 0.000000, exposed-floor RMS
+0.055513, and no weather presentation budget exhaustion. The comparison limit
+was not relaxed.
+
+The phase closes with no blocking correctness finding. Public-server density,
+long mutation soaks, moving-grid churn, dense elevator cabins, cross-vendor
+graphics, a representative full station, and porting verification belong to P8.
+Elevator product depth and arbitrary volumetric flight remain explicit future
+extensions rather than hidden requirements of these completed contracts.

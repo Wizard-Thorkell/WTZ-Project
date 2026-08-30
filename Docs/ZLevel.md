@@ -1136,6 +1136,14 @@ P7.4b2a supplies continuous flight-aware trace, hitscan, and physical trajectory
 endpoints. P7.4b2b supplies explicit capability-gated flight corridors and
 server-authoritative AI execution through the native vertical solver.
 
+The consolidated P7 vertical-content gate is complete. Cross-package mapping,
+double-round-trip persistence, physical gameplay, combat, navigation, neutral
+stress baselines, and repeated real OpenGL weather/lighting captures all have
+passing evidence in `Docs/ZLevelImplementationLedger.md`. P8 now owns measured
+multi-session soaks, evidence-driven budget/cache hardening, the explicit Z 0
+compatibility matrix, porting guidance, and the final public-server release
+gate.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

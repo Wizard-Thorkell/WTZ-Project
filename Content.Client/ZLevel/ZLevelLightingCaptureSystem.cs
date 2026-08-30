@@ -87,6 +87,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
+    [Dependency] private readonly SpriteSystem _sprites = default!;
     [Dependency] private readonly ZLevelLightingCacheSystem _lightingCache = default!;
     [Dependency] private readonly ZLevelLightingProjectionSystem _lightingProjection = default!;
     [Dependency] private readonly ZLevelOverlaySystem _zLevelOverlay = default!;
@@ -96,6 +97,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private readonly List<CaptureMeasurement> _measurements = new();
     private readonly List<CaptureCheck> _checks = new();
     private readonly Dictionary<string, byte[]> _signatures = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, FixtureLayerInventory> _baselineInventories = new();
     private ISawmill _log = default!;
     private CapturePhase _phase;
     private long _started;
@@ -123,6 +125,8 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private bool _originalDrawShadows;
     private bool _originalSoftShadows;
     private bool _originalMappingPreview;
+    private EntityUid? _hiddenPlayerSprite;
+    private bool _originalPlayerSpriteVisible;
 
     public override void Initialize()
     {
@@ -149,6 +153,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _measurements.Clear();
         _checks.Clear();
         _signatures.Clear();
+        _baselineInventories.Clear();
 
         if (_resources.UserData.Exists(OutputPath))
             _resources.UserData.Delete(OutputPath);
@@ -287,6 +292,14 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _originalMappingPreview = _zLevelOverlay.MappingPreviewEnabled;
         _fixturePrepared = true;
 
+        if (_player.LocalEntity is { } playerSpriteEntity &&
+            TryComp(playerSpriteEntity, out SpriteComponent? sprite))
+        {
+            _hiddenPlayerSprite = playerSpriteEntity;
+            _originalPlayerSpriteVisible = sprite.Visible;
+            _sprites.SetVisible((playerSpriteEntity, sprite), false);
+        }
+
         _captureEntity = Spawn(null, new EntityCoordinates(grid, FixtureCenter));
         _captureEye = EnsureComp<EyeComponent>(_captureEntity.Value);
         _eyeSystem.SetDrawFov(_captureEntity.Value, false, _captureEye);
@@ -424,8 +437,12 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         var spec = CaptureSpecs[_captureIndex];
         var inventory = GetFixtureLayerInventory(_fixtureGrid, _requestedLocalZ);
         if (inventory.Tiles == 0 ||
-            !spec.WeatherCapture && (inventory.EnabledLights == 0 || inventory.Occluders == 0))
+            (!spec.WeatherCapture && (inventory.EnabledLights == 0 || inventory.Occluders == 0)) ||
+            (spec.WeatherCapture && !IncludesBaselineInventory(_requestedLocalZ, inventory)))
             return;
+
+        if (!spec.WeatherCapture)
+            _baselineInventories.TryAdd(_requestedLocalZ, inventory);
 
         if (spec.WeatherEnabled)
         {
@@ -453,6 +470,15 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     {
         _eyeManager.CurrentEye = _captureEye!.Eye;
         var spec = CaptureSpecs[_captureIndex];
+        if (spec.WeatherCapture &&
+            !IncludesBaselineInventory(
+                _requestedLocalZ,
+                GetFixtureLayerInventory(_fixtureGrid, _requestedLocalZ)))
+        {
+            _phase = CapturePhase.WaitingForServerView;
+            return;
+        }
+
         if (spec.WeatherEnabled &&
             (_weatherObserved == 0 || Elapsed(_weatherObserved) < SharedWeatherSystem.StartupTime))
         {
@@ -474,6 +500,17 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _screenshotQueued = Stopwatch.GetTimestamp();
         _phase = CapturePhase.WaitingForScreenshot;
         state.Viewport.Viewport.Screenshot(image => ReceiveScreenshot(capturedIndex, state, image));
+    }
+
+    private bool IncludesBaselineInventory(int localZ, FixtureLayerInventory actual)
+    {
+        if (!_baselineInventories.TryGetValue(localZ, out var baseline))
+            return true;
+
+        return actual.Tiles >= baseline.Tiles &&
+               actual.Lights >= baseline.Lights &&
+               actual.EnabledLights >= baseline.EnabledLights &&
+               actual.Occluders >= baseline.Occluders;
     }
 
     private void ReceiveScreenshot(
@@ -993,9 +1030,16 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         if (_weatherTileDefinition != null)
             _weatherTileDefinition.Weather = _originalWeatherTilePolicy;
 
+        if (_hiddenPlayerSprite is { } player &&
+            TryComp(player, out SpriteComponent? sprite))
+        {
+            _sprites.SetVisible((player, sprite), _originalPlayerSpriteVisible);
+        }
+
         if (_captureEntity is { } captureEntity && Exists(captureEntity))
             QueueDel(captureEntity);
 
+        _hiddenPlayerSprite = null;
         _captureEntity = null;
         _captureEye = null;
         _playerViewMoved = false;
