@@ -31,6 +31,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             _entityManager.System<SharedZLevelSoundPortalSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundRouteSystem>().ResetMetrics();
             _entityManager.System<ZLevelSoundPlaybackSystem>().ResetMetrics();
+            _entityManager.System<ZLevelPvsSystem>().ResetSchedulerMetrics();
             _entityManager.System<ZLevelTraversalGraphSystem>().ResetMetrics();
             _entityManager.System<ZLevelElevatorSystem>().ResetMetrics();
             _entityManager.System<PathfindingSystem>().ResetZLevelMetrics();
@@ -51,6 +52,7 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
         var explosion = _entityManager.System<ExplosionSystem>();
         var elevators = _entityManager.System<ZLevelElevatorSystem>();
         var pvs = _entityManager.System<ZLevelPvsSystem>();
+        var pvsScheduler = pvs.SchedulerMetrics;
         var pathfinding = _entityManager.System<PathfindingSystem>();
         var soundPlayback = _entityManager.System<ZLevelSoundPlaybackSystem>();
         var soundPortals = _entityManager.System<SharedZLevelSoundPortalSystem>();
@@ -102,6 +104,17 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"fail-open-candidates={metrics.PvsFailOpenCandidates}, " +
             $"avg={metrics.PvsAverageRefreshMilliseconds:0.000}ms, " +
             $"last={metrics.PvsLastRefreshMilliseconds:0.000}ms, max={metrics.PvsMaxRefreshMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"  pvs scheduler: updates={pvsScheduler.Updates}, " +
+            $"active-samples={pvsScheduler.ActiveSessionSamples}, " +
+            $"due/scheduled/deferred={pvsScheduler.DueRefreshes}/{pvsScheduler.ScheduledRefreshes}/" +
+            $"{pvsScheduler.DeferredRefreshes}, budget-exhaustions={pvsScheduler.BudgetExhaustions}, " +
+            $"max-active/batch/deferred={pvsScheduler.MaxActiveSessions}/" +
+            $"{pvsScheduler.MaxRefreshesPerUpdate}/{pvsScheduler.MaxDeferredRefreshesPerUpdate}, " +
+            $"limit={pvs.MaxSessionRefreshesPerUpdate}, " +
+            $"avg={pvsScheduler.AverageRefreshMilliseconds:0.000}ms, " +
+            $"last={pvsScheduler.LastRefreshMilliseconds:0.000}ms, " +
+            $"max={pvsScheduler.MaxRefreshMilliseconds:0.000}ms");
         shell.WriteLine(
             $"  trace: queries={metrics.TraceQueries}, completed={metrics.TraceCompleted}, " +
             $"closed={metrics.TraceClosedBoundaries}, invalid={metrics.TraceInvalidCoordinates}, " +

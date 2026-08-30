@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.2b staggered and bounded PVS refresh scheduling`.
+- Active package: `P8.2c gravity topology allocation and invalidation hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -115,8 +115,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P8.2a | Per-stage latency/allocation attribution and GC correlation | Complete |
-| P8.2b | Fair, staggered, and bounded PVS refresh scheduling | Active |
-| P8.2c | Gravity invalidation, topology allocation, and lifecycle hardening | Pending |
+| P8.2b | Fair, staggered, and bounded PVS refresh scheduling | Complete |
+| P8.2c | Gravity invalidation, topology allocation, and lifecycle hardening | Active |
 
 ## Phase P0 Packages
 
@@ -7614,10 +7614,104 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.2b introduces fair staggered PVS scheduling, scheduler metrics,
   deterministic cadence/starvation tests, and before/after batch evidence.
 
+## Completed Package: P8.2b Bounded PVS Scheduling
+
+### Scope
+
+- Replace the synchronized 100 ms all-session pulse with deterministic refresh
+  credit consumed on every server update.
+- Preserve the 10 Hz per-session target, fair circular ordering, overdue credit,
+  fail-open visual policy, and independent fail-closed sound authorization.
+- Add a server-only, clamped session-count cap per update plus process-local
+  scheduler counters, timing, admin output, and reset support.
+- Clear culling and sound state immediately when a session leaves `InGame`.
+- Drive the production scheduler from schema 4 soak frames and add pure cadence,
+  backlog, fairness, long-frame, and lifecycle tests.
+
+### Evidence
+
+- Four pure scheduler cases pass in 36 ms. They prove the 32-session 10/11/11
+  cadence over three 30 Hz frames, fair traversal of all 64 sessions under an
+  eight-session cap, bounded catch-up without duplicate work, and empty-
+  population credit/cursor reset.
+- The schema 4 short Debug profile passes with 24 scheduler updates, 32 session
+  refreshes, zero deferred work, and a maximum batch of two.
+- Two schema 4 Release profiles pass at 10 floors, 32 sessions, 960 candidates,
+  and 128 measured iterations. Each performs exactly 384 scheduler updates,
+  4,096 session refreshes, and 4,218,880 candidate checks with maximum batch 11,
+  zero deferred refreshes, and zero scheduler or visibility budget exhaustion.
+- Scheduler-frame p50/p95/p99/max is 5.051/40.231/50.112/72.958 ms and
+  5.008/39.649/51.430/63.031 ms. The equivalent schema 3 all-session update had
+  p95 111.475 and 110.789 ms, so per-update p95 falls approximately 64 percent.
+- Complete PVS-cycle p95 remains 119.096 and 115.273 ms, correctly showing that
+  scheduling distributes existing CPU instead of disguising it as removed work.
+  Allocation remains dominated by gravity; scheduler overhead is approximately
+  0.06 percent of the 170.28 MB measured workload.
+- Focused PVS/sound/budget integration coverage passes 17/17; the complete
+  `FullyQualifiedName~ZLevel` matrix passes 337/337; Content Z-level/mapping unit
+  coverage passes 22/22; and the 3/6/10-floor baseline passes 3/3.
+- The final non-incremental single-worker solution build passes in 2m42s with
+  zero errors and 688 established warnings.
+
+### Decisions
+
+- Budget by session count, not wall-clock timing. This makes behavior testable,
+  preserves deterministic fairness, and avoids host-dependent authorization
+  cadence. Per-refresh visibility checks retain their independent safety budget.
+- Default the cap to 16 and clamp it from 1 through 256. At 32 sessions the
+  10 Hz target naturally requests at most 11 per 30 Hz update, so no work is
+  deferred. Larger populations expose debt and exhaustion rather than dropping
+  sessions or processing an unbounded catch-up pulse.
+- Keep `RefreshSession` as the unchanged authoritative unit. The scheduler owns
+  only timing and ordering; visual and sound decisions remain in their existing
+  consumers.
+- Treat the remaining approximately 40 ms synthetic p95 as explicit P8.4
+  tuning evidence. Operators can lower the cap at the cost of refresh age, but a
+  workstation stress capture is not sufficient to change the default cadence.
+
+### Completion Gate
+
+- [x] Scope check: one server scheduler, PVS integration, one CVar, admin
+      diagnostics, focused unit tests, soak schema/runner, and synchronized docs.
+- [x] Invariant review: Z 0, world/local frames, moving grids, server authority,
+      visual fail-open, sound fail-closed, session lifecycle, and fair backlog
+      behavior retain their previous contracts.
+- [x] Automated verification: 4 pure scheduler, 1 short Debug soak, 2 full
+      Release soaks, 17 focused, 337 broad, 22 unit/mapping, and 3 baseline cases
+      pass; the full solution builds cleanly.
+- [x] Performance evidence: two equivalent profiles reproduce max batch 11,
+      zero debt, unchanged decisions, and approximately 64 percent lower
+      per-update p95.
+- [x] Documentation: CVar, metrics, schema 4, evidence, tradeoff, limitation, and
+      operational interpretation are synchronized.
+- [x] Dependency check: WTZ Engine remains clean at published revision
+      `7cbd778024`; the scheduler is content-server policy.
+- [x] Git check: generated reports remain ignored; final whitespace, staged
+      scope, tree, commit, push, and remote hash are checked at publication.
+- [x] Mini review: the complete cycle remains expensive by design, scheduler
+      array overhead is bounded, session exit clears state immediately, and the
+      residual dedicated-server tuning risk is recorded rather than hidden.
+- [x] Commit: package prepared as `Stagger Z-level PVS refresh work` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: the previous long tail was primarily a scheduling burst. Dividing one
+  cycle over three frames delivers the largest measured gain without changing a
+  visibility or audio decision.
+- Finding: count budgeting is operationally legible: overload appears as credit,
+  deferred work, and exhaustion while the circular cursor prevents starvation.
+- Residual risk: the 32-session synthetic p95 remains slightly above a 30 Hz
+  tick. P8.4 must test a dedicated server, real player positions, actual network
+  serialization, and alternative cap values.
+- Next package: P8.2c removes full gravity topology rematerialization and most of
+  the 168.25 MB allocation caused by paired single-tile mutations.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.2b | `Stagger Z-level PVS refresh work` | 4 scheduler, 1 Debug + 2 Release soaks, 17 focused, 337 broad, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2a | `Attribute Z-level server workload costs` | Debug/Release builds, 1 short Debug soak, 2 full Release soaks, byte conservation, diff/dependency review | Complete |
 | 2026-08-30 | P8.1 | `Measure deterministic Z-level server scale` | 2 Release soaks, 337 complete Debug, 321 namespace Release, isolated pooled cache, 18 unit/mapping, 5 interaction, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P7 gate | `Close Z-level vertical content phase` | 135 cross-package, all 336 broad covered, 18 unit/mapping, 2x3 baseline, 2x24 real GL, full build, architecture/diff review | Complete |

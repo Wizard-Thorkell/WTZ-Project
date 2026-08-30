@@ -53,6 +53,15 @@ public sealed partial class CCVars
             CVar.SERVERONLY);
 
     /// <summary>
+    /// Maximum sessions whose Z-aware PVS and sound snapshots may refresh in one server update.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelPvsMaxSessionRefreshesPerUpdate =
+        CVarDef.Create(
+            "zlevel.pvs_max_session_refreshes_per_update",
+            16,
+            CVar.SERVERONLY);
+
+    /// <summary>
     /// Maximum adjacent world-Z boundaries resolved by one shared trace.
     /// </summary>
     public static readonly CVarDef<int> ZLevelTraceMaxVerticalCrossings =

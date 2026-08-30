@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
 }
 
 $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-if ($report.schemaVersion -ne 3) {
+if ($report.schemaVersion -ne 4) {
     throw "Unsupported server soak report schema: $($report.schemaVersion)."
 }
 
@@ -121,6 +121,17 @@ Write-Host ("  PVS latency p50/p95/p99/max={0:N3}/{1:N3}/{2:N3}/{3:N3} ms" -f `
     $report.measured.pvsRefreshLatency.p95Milliseconds,
     $report.measured.pvsRefreshLatency.p99Milliseconds,
     $report.measured.pvsRefreshLatency.maxMilliseconds)
+Write-Host ("  PVS scheduler-frame p50/p95/p99/max={0:N3}/{1:N3}/{2:N3}/{3:N3} ms" -f `
+    $report.measured.pvsSchedulerFrameLatency.p50Milliseconds,
+    $report.measured.pvsSchedulerFrameLatency.p95Milliseconds,
+    $report.measured.pvsSchedulerFrameLatency.p99Milliseconds,
+    $report.measured.pvsSchedulerFrameLatency.maxMilliseconds)
+Write-Host ("  PVS scheduler updates/scheduled/deferred/exhausted={0}/{1}/{2}/{3}, max-batch={4}" -f `
+    $report.measured.pvsScheduler.updates,
+    $report.measured.pvsScheduler.scheduledRefreshes,
+    $report.measured.pvsScheduler.deferredRefreshes,
+    $report.measured.pvsScheduler.budgetExhaustions,
+    $report.measured.pvsScheduler.maxRefreshesPerUpdate)
 Write-Host "  stage attribution:"
 foreach ($stage in $report.measured.stages) {
     Write-Host ("    {0}: p50/p95/p99/max={1:N3}/{2:N3}/{3:N3}/{4:N3} ms, allocated={5:N0} bytes" -f `

@@ -25,9 +25,11 @@ namespace Content.Server.ZLevel.Systems;
 /// </summary>
 public sealed class ZLevelPvsSystem : EntitySystem
 {
-    private const float RefreshInterval = 0.1f;
+    public const float TargetRefreshInterval = 0.1f;
     public const int DefaultVisibilityCheckBudget = 16384;
     public const int MaximumVisibilityCheckBudget = 1_000_000;
+    public const int DefaultMaxSessionRefreshesPerUpdate = 16;
+    public const int MaximumSessionRefreshesPerUpdate = 256;
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
     [Dependency] private readonly ISharedPlayerManager _players = default!;
@@ -44,18 +46,47 @@ public sealed class ZLevelPvsSystem : EntitySystem
     private readonly HashSet<EntityUid> _visible = new();
     private readonly HashSet<EntityUid> _culled = new();
     private readonly HashSet<EntityUid> _soundCulled = new();
+    private readonly List<ICommonSession> _scheduledSessions = new();
+    private readonly ZLevelPvsRefreshScheduler _refreshScheduler = new(TargetRefreshInterval);
 
     private EntityQuery<EyeComponent> _eyeQuery;
     private EntityQuery<MetaDataComponent> _metaQuery;
     private EntityQuery<OccluderComponent> _occluderQuery;
     private EntityQuery<PointLightComponent> _pointLightQuery;
     private EntityQuery<TransformComponent> _transformQuery;
-    private float _refreshAccumulator = RefreshInterval;
     private float _priorityViewSize;
     private bool _pvsEnabled;
     private int _visibilityCheckBudget = DefaultVisibilityCheckBudget;
+    private int _maxSessionRefreshesPerUpdate = DefaultMaxSessionRefreshesPerUpdate;
+
+    private long _schedulerUpdates;
+    private long _schedulerActiveSessionSamples;
+    private long _schedulerDueRefreshes;
+    private long _schedulerRefreshes;
+    private long _schedulerDeferredRefreshes;
+    private long _schedulerBudgetExhaustions;
+    private int _schedulerMaxActiveSessions;
+    private int _schedulerMaxRefreshes;
+    private int _schedulerMaxDeferredRefreshes;
+    private long _schedulerTimestampTicks;
+    private long _schedulerLastTimestampTicks;
+    private long _schedulerMaxTimestampTicks;
 
     public int VisibilityCheckBudget => _visibilityCheckBudget;
+    public int MaxSessionRefreshesPerUpdate => _maxSessionRefreshesPerUpdate;
+    public ZLevelPvsSchedulerMetricsSnapshot SchedulerMetrics => new(
+        _schedulerUpdates,
+        _schedulerActiveSessionSamples,
+        _schedulerDueRefreshes,
+        _schedulerRefreshes,
+        _schedulerDeferredRefreshes,
+        _schedulerBudgetExhaustions,
+        _schedulerMaxActiveSessions,
+        _schedulerMaxRefreshes,
+        _schedulerMaxDeferredRefreshes,
+        TimestampTicksToMilliseconds(_schedulerTimestampTicks),
+        TimestampTicksToMilliseconds(_schedulerLastTimestampTicks),
+        TimestampTicksToMilliseconds(_schedulerMaxTimestampTicks));
 
     public override void Initialize()
     {
@@ -67,6 +98,8 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _pointLightQuery = GetEntityQuery<PointLightComponent>();
         _transformQuery = GetEntityQuery<TransformComponent>();
 
+        _players.PlayerStatusChanged += OnPlayerStatusChanged;
+
         Subs.CVar(_configuration, CVars.NetPVS, OnPvsEnabled, true);
         Subs.CVar(_configuration, CVars.NetMaxUpdateRange, _ => RefreshViewSize(), true);
         Subs.CVar(_configuration, CVars.NetPvsPriorityRange, _ => RefreshViewSize(), true);
@@ -75,14 +108,26 @@ public sealed class ZLevelPvsSystem : EntitySystem
             CCVars.ZLevelPvsVisibilityCheckBudget,
             value => _visibilityCheckBudget = Math.Clamp(value, 0, MaximumVisibilityCheckBudget),
             true);
+        Subs.CVar(
+            _configuration,
+            CCVars.ZLevelPvsMaxSessionRefreshesPerUpdate,
+            value => _maxSessionRefreshesPerUpdate = Math.Clamp(
+                value,
+                1,
+                MaximumSessionRefreshesPerUpdate),
+            true);
     }
 
     public override void Shutdown()
     {
+        _players.PlayerStatusChanged -= OnPlayerStatusChanged;
         foreach (var session in _players.Sessions)
         {
             _pvs.ClearSessionCulling(session);
         }
+
+        _refreshScheduler.Reset();
+        _scheduledSessions.Clear();
 
         base.Shutdown();
     }
@@ -90,16 +135,38 @@ public sealed class ZLevelPvsSystem : EntitySystem
     public override void Update(float frameTime)
     {
         base.Update(frameTime);
+        RefreshScheduledSessions(frameTime);
+    }
 
-        _refreshAccumulator += frameTime;
-        if (_refreshAccumulator < RefreshInterval)
-            return;
-
-        _refreshAccumulator %= RefreshInterval;
+    internal ZLevelPvsRefreshPlan RefreshScheduledSessions(
+        float frameTime,
+        Action<long>? refreshLatencyObserver = null)
+    {
+        var started = Stopwatch.GetTimestamp();
+        _scheduledSessions.Clear();
         foreach (var session in _players.Sessions)
         {
-            RefreshSession(session);
+            if (session.Status == SessionStatus.InGame)
+                _scheduledSessions.Add(session);
         }
+
+        var plan = _refreshScheduler.Plan(
+            _scheduledSessions.Count,
+            frameTime,
+            _maxSessionRefreshesPerUpdate);
+        for (var offset = 0; offset < plan.ScheduledRefreshes; offset++)
+        {
+            var index = (plan.StartIndex + offset) % _scheduledSessions.Count;
+            var refreshStarted = Stopwatch.GetTimestamp();
+            RefreshSession(_scheduledSessions[index]);
+            refreshLatencyObserver?.Invoke(Stopwatch.GetTimestamp() - refreshStarted);
+        }
+
+        RecordSchedulerUpdate(
+            _scheduledSessions.Count,
+            plan,
+            Stopwatch.GetTimestamp() - started);
+        return plan;
     }
 
     /// <summary>
@@ -277,6 +344,15 @@ public sealed class ZLevelPvsSystem : EntitySystem
         _priorityViewSize = MathF.Max(8f, MathF.Max(normal, priority));
     }
 
+    private void OnPlayerStatusChanged(object? sender, SessionStatusEventArgs args)
+    {
+        if (args.NewStatus == SessionStatus.InGame)
+            return;
+
+        _pvs.ClearSessionCulling(args.Session);
+        _soundPlayback.ClearSession(args.Session, args.NewStatus != SessionStatus.Disconnected);
+    }
+
     private void RecordRefresh(long started, int visibilityChecks, bool budgetExhausted)
     {
         _metrics.RecordPvsRefresh(
@@ -288,6 +364,71 @@ public sealed class ZLevelPvsSystem : EntitySystem
             budgetExhausted,
             Stopwatch.GetTimestamp() - started);
     }
+
+    private void RecordSchedulerUpdate(
+        int activeSessions,
+        in ZLevelPvsRefreshPlan plan,
+        long elapsedTimestampTicks)
+    {
+        _schedulerUpdates++;
+        _schedulerActiveSessionSamples += activeSessions;
+        _schedulerDueRefreshes += plan.DueRefreshes;
+        _schedulerRefreshes += plan.ScheduledRefreshes;
+        _schedulerDeferredRefreshes += plan.DeferredRefreshes;
+        if (plan.DeferredRefreshes > 0)
+            _schedulerBudgetExhaustions++;
+        _schedulerMaxActiveSessions = Math.Max(_schedulerMaxActiveSessions, activeSessions);
+        _schedulerMaxRefreshes = Math.Max(_schedulerMaxRefreshes, plan.ScheduledRefreshes);
+        _schedulerMaxDeferredRefreshes = Math.Max(
+            _schedulerMaxDeferredRefreshes,
+            plan.DeferredRefreshes);
+        _schedulerTimestampTicks += elapsedTimestampTicks;
+        _schedulerLastTimestampTicks = elapsedTimestampTicks;
+        _schedulerMaxTimestampTicks = Math.Max(_schedulerMaxTimestampTicks, elapsedTimestampTicks);
+    }
+
+    public void ResetSchedulerMetrics()
+    {
+        _schedulerUpdates = 0;
+        _schedulerActiveSessionSamples = 0;
+        _schedulerDueRefreshes = 0;
+        _schedulerRefreshes = 0;
+        _schedulerDeferredRefreshes = 0;
+        _schedulerBudgetExhaustions = 0;
+        _schedulerMaxActiveSessions = 0;
+        _schedulerMaxRefreshes = 0;
+        _schedulerMaxDeferredRefreshes = 0;
+        _schedulerTimestampTicks = 0;
+        _schedulerLastTimestampTicks = 0;
+        _schedulerMaxTimestampTicks = 0;
+    }
+
+    internal void ResetSchedulerState()
+    {
+        _refreshScheduler.Reset();
+    }
+
+    private static double TimestampTicksToMilliseconds(long ticks)
+    {
+        return ticks * 1000d / Stopwatch.Frequency;
+    }
+}
+
+public readonly record struct ZLevelPvsSchedulerMetricsSnapshot(
+    long Updates,
+    long ActiveSessionSamples,
+    long DueRefreshes,
+    long ScheduledRefreshes,
+    long DeferredRefreshes,
+    long BudgetExhaustions,
+    int MaxActiveSessions,
+    int MaxRefreshesPerUpdate,
+    int MaxDeferredRefreshesPerUpdate,
+    double RefreshMilliseconds,
+    double LastRefreshMilliseconds,
+    double MaxRefreshMilliseconds)
+{
+    public double AverageRefreshMilliseconds => Updates == 0 ? 0d : RefreshMilliseconds / Updates;
 }
 
 public readonly record struct ZLevelPvsViewerContext(

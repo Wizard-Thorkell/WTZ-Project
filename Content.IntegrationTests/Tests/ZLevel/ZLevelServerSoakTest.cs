@@ -42,6 +42,9 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 public sealed class ZLevelServerSoakTest : GameTest
 {
     private const string OutputDirectoryEnvironmentVariable = "WTZ_ZLEVEL_SOAK_DIR";
+    private const int PvsSchedulerFramesPerCycle = 3;
+    private const float PvsSchedulerFrameTime = ZLevelPvsSystem.TargetRefreshInterval /
+        PvsSchedulerFramesPerCycle;
     private static readonly Vector2i[] MutationTiles =
     [
         new(10, 10),
@@ -92,6 +95,13 @@ public sealed class ZLevelServerSoakTest : GameTest
             Side.Server,
             CCVars.ZLevelPvsVisibilityCheckBudget,
             ZLevelPvsSystem.DefaultVisibilityCheckBudget);
+        await OverrideCVar(
+            Side.Server,
+            CCVars.ZLevelPvsMaxSessionRefreshesPerUpdate,
+            Math.Max(
+                ZLevelPvsSystem.DefaultMaxSessionRefreshesPerUpdate,
+                (settings.SessionCount + PvsSchedulerFramesPerCycle - 1) /
+                PvsSchedulerFramesPerCycle));
 
         var dummySessions = await Server.AddDummySessions(settings.SessionCount);
         await RunTicksSync(5);
@@ -184,7 +194,7 @@ public sealed class ZLevelServerSoakTest : GameTest
                 AssertRestored(stressFixture);
 
                 report = new ZLevelServerSoakReport(
-                    3,
+                    4,
                     DateTimeOffset.UtcNow,
                     CreateHostSnapshot(),
                     settings,
@@ -324,14 +334,20 @@ public sealed class ZLevelServerSoakTest : GameTest
         var routePortals = new List<ZLevelSoundPortal>();
         var iterationLatencyTicks = new long[iterations];
         var pvsRefreshLatencyTicks = new long[iterations * sessions.Count];
+        var pvsSchedulerFrameLatencyTicks = new long[iterations * PvsSchedulerFramesPerCycle];
         var stageRecorder = new ZLevelServerSoakStageRecorder(iterations);
         var pvsLatencyIndex = 0;
+        var pvsSchedulerFrameLatencyIndex = 0;
+        Action<long> observePvsRefreshLatency = ticks =>
+            pvsRefreshLatencyTicks[pvsLatencyIndex++] = ticks;
 
         metrics.ResetCounters();
         portals.ResetMetrics();
         routes.ResetMetrics();
         playback.ResetMetrics();
         graph.ResetMetrics();
+        pvs.ResetSchedulerMetrics();
+        pvs.ResetSchedulerState();
 
         var collectionZeroBefore = GC.CollectionCount(0);
         var collectionOneBefore = GC.CollectionCount(1);
@@ -395,13 +411,14 @@ public sealed class ZLevelServerSoakTest : GameTest
                 stageRecorder.Record(ZLevelServerSoakStage.OpenTraversalGraph, iteration, stageStarted);
 
                 stageStarted = stageRecorder.Start();
-                foreach (var session in sessions)
+                for (var frame = 0; frame < PvsSchedulerFramesPerCycle; frame++)
                 {
-                    var pvsStarted = Stopwatch.GetTimestamp();
-                    pvs.RefreshSession(session);
-                    pvsRefreshLatencyTicks[pvsLatencyIndex++] = Stopwatch.GetTimestamp() - pvsStarted;
+                    var frameStarted = Stopwatch.GetTimestamp();
+                    pvs.RefreshScheduledSessions(PvsSchedulerFrameTime, observePvsRefreshLatency);
+                    pvsSchedulerFrameLatencyTicks[pvsSchedulerFrameLatencyIndex++] =
+                        Stopwatch.GetTimestamp() - frameStarted;
                 }
-                stageRecorder.Record(ZLevelServerSoakStage.PvsRefreshBatch, iteration, stageStarted);
+                stageRecorder.Record(ZLevelServerSoakStage.PvsRefreshCycle, iteration, stageStarted);
             }
             finally
             {
@@ -466,11 +483,13 @@ public sealed class ZLevelServerSoakTest : GameTest
         var routeMetrics = routes.Snapshot();
         var playbackMetrics = playback.Snapshot();
         var graphMetrics = graph.Snapshot();
+        var pvsSchedulerMetrics = pvs.SchedulerMetrics;
         var generationZeroCollections = GC.CollectionCount(0) - collectionZeroBefore;
         var generationOneCollections = GC.CollectionCount(1) - collectionOneBefore;
         var generationTwoCollections = GC.CollectionCount(2) - collectionTwoBefore;
         var iterationLatency = CreateLatencySnapshot(iterationLatencyTicks);
         var pvsRefreshLatency = CreateLatencySnapshot(pvsRefreshLatencyTicks);
+        var pvsSchedulerFrameLatency = CreateLatencySnapshot(pvsSchedulerFrameLatencyTicks);
         var stageSnapshots = stageRecorder.CreateStageSnapshots();
         var collectionCorrelation = stageRecorder.CreateCollectionCorrelation();
         var state = CreateRuntimeState(
@@ -498,8 +517,10 @@ public sealed class ZLevelServerSoakTest : GameTest
             generationTwoCollections,
             iterationLatency,
             pvsRefreshLatency,
+            pvsSchedulerFrameLatency,
             stageSnapshots,
             collectionCorrelation,
+            pvsSchedulerMetrics,
             sharedMetrics,
             portalMetrics,
             routeMetrics,
@@ -652,6 +673,12 @@ public sealed class ZLevelServerSoakTest : GameTest
         var routes = run.SoundRoutes;
         var playback = run.SoundPlayback;
         var graph = run.TraversalGraph;
+        var scheduler = run.PvsScheduler;
+        var expectedSchedulerUpdates = (long) settings.MeasuredIterations * PvsSchedulerFramesPerCycle;
+        var expectedSchedulerLimit = Math.Max(
+            ZLevelPvsSystem.DefaultMaxSessionRefreshesPerUpdate,
+            (settings.SessionCount + PvsSchedulerFramesPerCycle - 1) /
+            PvsSchedulerFramesPerCycle);
 
         Assert.Multiple(() =>
         {
@@ -666,6 +693,7 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(run.GenerationTwoCollections, Is.GreaterThanOrEqualTo(0));
             Assert.That(run.IterationLatency.Samples, Is.EqualTo(settings.MeasuredIterations));
             Assert.That(run.PvsRefreshLatency.Samples, Is.EqualTo(expectedRefreshes));
+            Assert.That(run.PvsSchedulerFrameLatency.Samples, Is.EqualTo(expectedSchedulerUpdates));
             Assert.That(run.Stages, Has.Count.EqualTo(Enum.GetValues<ZLevelServerSoakStage>().Length));
             Assert.That(run.Stages.Select(stage => stage.Name), Is.Unique);
             Assert.That(run.Stages.Sum(stage => stage.AllocatedBytes), Is.EqualTo(run.AllocatedBytes));
@@ -675,6 +703,7 @@ public sealed class ZLevelServerSoakTest : GameTest
                 Is.EqualTo(settings.MeasuredIterations));
             Assert.That(double.IsFinite(run.IterationLatency.P99Milliseconds), Is.True);
             Assert.That(double.IsFinite(run.PvsRefreshLatency.P99Milliseconds), Is.True);
+            Assert.That(double.IsFinite(run.PvsSchedulerFrameLatency.P99Milliseconds), Is.True);
             Assert.That(run.IterationLatency.P50Milliseconds,
                 Is.LessThanOrEqualTo(run.IterationLatency.MaxMilliseconds));
             Assert.That(run.IterationLatency.P95Milliseconds,
@@ -687,6 +716,12 @@ public sealed class ZLevelServerSoakTest : GameTest
                 Is.LessThanOrEqualTo(run.PvsRefreshLatency.MaxMilliseconds));
             Assert.That(run.PvsRefreshLatency.P99Milliseconds,
                 Is.LessThanOrEqualTo(run.PvsRefreshLatency.MaxMilliseconds));
+            Assert.That(run.PvsSchedulerFrameLatency.P50Milliseconds,
+                Is.LessThanOrEqualTo(run.PvsSchedulerFrameLatency.MaxMilliseconds));
+            Assert.That(run.PvsSchedulerFrameLatency.P95Milliseconds,
+                Is.LessThanOrEqualTo(run.PvsSchedulerFrameLatency.MaxMilliseconds));
+            Assert.That(run.PvsSchedulerFrameLatency.P99Milliseconds,
+                Is.LessThanOrEqualTo(run.PvsSchedulerFrameLatency.MaxMilliseconds));
 
             Assert.That(metrics.BoundaryQueries, Is.GreaterThan(fixture.BoundarySamples.Count));
             Assert.That(metrics.BoundaryInvalidations, Is.GreaterThanOrEqualTo(settings.MeasuredIterations * 2));
@@ -703,6 +738,19 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(metrics.PvsVisibilityChecks, Is.GreaterThan(0));
             Assert.That(metrics.PvsBudgetExhaustions, Is.Zero);
             Assert.That(metrics.PvsFailOpenCandidates, Is.Zero);
+
+            Assert.That(scheduler.Updates, Is.EqualTo(expectedSchedulerUpdates));
+            Assert.That(scheduler.ActiveSessionSamples,
+                Is.EqualTo(expectedSchedulerUpdates * settings.SessionCount));
+            Assert.That(scheduler.DueRefreshes, Is.EqualTo(expectedRefreshes));
+            Assert.That(scheduler.ScheduledRefreshes, Is.EqualTo(expectedRefreshes));
+            Assert.That(scheduler.DeferredRefreshes, Is.Zero);
+            Assert.That(scheduler.BudgetExhaustions, Is.Zero);
+            Assert.That(scheduler.MaxActiveSessions, Is.EqualTo(settings.SessionCount));
+            Assert.That(scheduler.MaxRefreshesPerUpdate,
+                Is.LessThanOrEqualTo(expectedSchedulerLimit));
+            Assert.That(scheduler.MaxDeferredRefreshesPerUpdate, Is.Zero);
+            Assert.That(double.IsFinite(scheduler.MaxRefreshMilliseconds), Is.True);
 
             Assert.That(portals.Invalidations, Is.GreaterThanOrEqualTo(settings.MeasuredIterations * 2));
             Assert.That(portals.Builds, Is.GreaterThan(0));
@@ -812,6 +860,7 @@ public sealed class ZLevelServerSoakTest : GameTest
             sky.MaxBoundaryChecks,
             visibility.MaxVisibleLevelDistance,
             pvs.VisibilityCheckBudget,
+            pvs.MaxSessionRefreshesPerUpdate,
             portals.CacheCapacity,
             routes.MaxCrossings,
             routes.MaxPortalChunks,
@@ -909,7 +958,7 @@ public sealed class ZLevelServerSoakTest : GameTest
         OpenVerticalConsumers,
         SoundRoute,
         OpenTraversalGraph,
-        PvsRefreshBatch,
+        PvsRefreshCycle,
         RestoreMutation,
         RestoredConsumers,
         RestoredTraversalGraph,
@@ -1099,6 +1148,7 @@ internal sealed record ZLevelServerSoakBudgetSnapshot(
     int SkyExposureMaxBoundaryChecks,
     int VisibilityMaxLevelDistance,
     int PvsVisibilityCheckBudget,
+    int PvsMaxSessionRefreshesPerUpdate,
     int SoundPortalCacheCapacity,
     int SoundRouteMaxCrossings,
     int SoundRouteMaxPortalChunks,
@@ -1137,8 +1187,10 @@ internal sealed record ZLevelServerSoakRunSnapshot(
     int GenerationTwoCollections,
     ZLevelServerSoakLatencySnapshot IterationLatency,
     ZLevelServerSoakLatencySnapshot PvsRefreshLatency,
+    ZLevelServerSoakLatencySnapshot PvsSchedulerFrameLatency,
     IReadOnlyList<ZLevelServerSoakStageSnapshot> Stages,
     ZLevelServerSoakCollectionCorrelationSnapshot CollectionCorrelation,
+    ZLevelPvsSchedulerMetricsSnapshot PvsScheduler,
     ZLevelMetricsSnapshot SharedMetrics,
     ZLevelSoundPortalCacheMetrics SoundPortals,
     ZLevelSoundRouteMetrics SoundRoutes,

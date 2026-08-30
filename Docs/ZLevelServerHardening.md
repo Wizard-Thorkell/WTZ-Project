@@ -54,7 +54,7 @@ output, and checks that the report contains the requested profile.
 ## Report Contract
 
 The runner writes `artifacts/zlevel-server-soak/zlevel-server-soak.json`. Schema
-version 3 records:
+version 4 records:
 
 - host runtime, architecture, logical processors, GC mode, and build mode;
 - every configured cache and work budget consumed by the workload;
@@ -65,9 +65,11 @@ version 3 records:
   individual per-session PVS refresh calls;
 - the same latency summary plus main-thread allocation for movement/viewer
   updates, open mutation, vertical consumers, sound, traversal, the complete PVS
-  batch, restoration, restored consumers, and unattributed work;
+  cycle, restoration, restored consumers, and unattributed work;
 - complete-iteration latency split by whether a Gen0/Gen1/Gen2 collection was
   observed during that iteration;
+- scheduler-update counts, due/scheduled/deferred work, budget exhaustion, batch
+  maxima, and per-scheduler-frame latency;
 - shared boundary, sky, visibility, gravity, PVS, and trace metrics;
 - sound portal, route, and per-session playback metrics;
 - traversal snapshot metrics and final bounded-cache lifecycle state.
@@ -151,6 +153,43 @@ frame. Second, remove repeated full-grid gravity topology materialization from
 single-tile invalidation without weakening connectivity correctness. Cache
 capacities remain unchanged.
 
+## P8.2 PVS Scheduling Evidence
+
+`ZLevelPvsSystem` now turns the existing 10 Hz per-session target into fractional
+refresh credit on every server update. A circular cursor consumes that credit in
+fair order, while `zlevel.pvs_max_session_refreshes_per_update` caps one update
+between 1 and 256 sessions and defaults to 16. Overdue credit is retained and
+reported rather than silently dropped. Sessions leaving `InGame` immediately
+clear visual culling and sound authorization through the player-status event.
+
+The schema 4 soak executes the real scheduler three times at 30 Hz for each
+structural iteration. With 32 sessions it deterministically schedules 10, 11,
+and 11 refreshes, preserving the same 4,096 refreshes and 4,218,880 candidate
+checks as the schema 3 batch.
+
+| Measurement | Scheduler run 1 | Scheduler run 2 |
+| --- | ---: | ---: |
+| Total measured time | 7,386.905 ms | 7,099.772 ms |
+| Main-thread allocation | 170,281,832 B | 170,266,272 B |
+| Scheduler frame p50 / p95 / p99 | 5.051 / 40.231 / 50.112 ms | 5.008 / 39.649 / 51.430 ms |
+| Scheduler frame maximum | 72.958 ms | 63.031 ms |
+| Complete PVS cycle p95 | 119.096 ms | 115.273 ms |
+| Updates / refreshes / max batch | 384 / 4,096 / 11 | 384 / 4,096 / 11 |
+| Deferred / budget exhausted | 0 / 0 | 0 / 0 |
+
+Before staggering, the equivalent schema 3 batch p95 was 111.475 and 110.789
+ms in one update. Per-update p95 is now 40.231 and 39.649 ms, a repeatable
+approximately 64 percent reduction without lowering cadence, changing culling,
+or changing sound policy. The complete cycle intentionally retains similar cost:
+the package distributes work rather than claiming to remove it.
+
+The remaining p95 is above one 30 Hz tick on this workstation stress profile.
+Operators can lower the session cap at the cost of deferred refresh age; the
+admin metrics expose due, scheduled, deferred, exhaustion, maximum batch, and
+latency for that decision. P8.4 must select production values from a dedicated
+server and representative player distribution rather than treating 16 as a
+universal SLA.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -158,10 +197,10 @@ capacities remain unchanged.
   budget failure and establishes the schema 2 reference above.
 - **P8.2a:** complete. Schema 3 attributes the reproducible tail to batched PVS
   CPU and the allocation pressure to full gravity rebuilds.
-- **P8.2b:** stagger and bound PVS refresh scheduling while retaining fail-open
-  visibility behavior, independent sound authorization, and fair session age.
-- **P8.2c:** harden gravity invalidation and field rebuild allocation using the
-  same structural workload and connectivity assertions.
+- **P8.2b:** complete. Fair token credit and a bounded circular cursor reduce
+  per-update PVS p95 by approximately 64 percent with unchanged decisions.
+- **P8.2c:** active. Harden gravity invalidation and field rebuild allocation
+  using the same structural workload and connectivity assertions.
 - **P8.3:** execute the explicit Z 0 regression matrix and publish the minimal
   engine/content porting contract with automated checks.
 - **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
