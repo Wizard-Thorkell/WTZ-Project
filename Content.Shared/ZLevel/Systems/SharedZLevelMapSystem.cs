@@ -34,7 +34,8 @@ public sealed class SharedZLevelMapSystem : EntitySystem
         config = default;
         if (!TryComp(gridUid, out TransformComponent? transform) ||
             transform.MapUid is not { } mapUid ||
-            !TryComp<ZLevelMapComponent>(mapUid, out var component))
+            !TryComp<ZLevelMapComponent>(mapUid, out var component) ||
+            component.LifeStage >= ComponentLifeStage.Stopping)
         {
             return false;
         }

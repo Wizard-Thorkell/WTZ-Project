@@ -10,3 +10,4 @@
   - type: MovementAlwaysTouching
   - type: CanMoveInAir
   - type: MovementSpeedModifier
+  - type: ZLevelFlight

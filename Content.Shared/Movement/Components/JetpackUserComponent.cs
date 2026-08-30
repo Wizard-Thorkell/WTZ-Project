@@ -22,4 +22,17 @@ public sealed partial class JetpackUserComponent : Component
 
     [DataField, AutoNetworkedField]
     public float WeightlessModifier;
+
+    /// <summary>
+    /// Runtime ownership flags for native Z-level flight granted by this jetpack.
+    /// They are deliberately not map-serialized.
+    /// </summary>
+    [AutoNetworkedField]
+    public bool StartedZLevelFlight;
+
+    [AutoNetworkedField]
+    public bool GrantedZLevelFlight;
+
+    [AutoNetworkedField]
+    public bool GrantedZLevelFlightControls;
 }

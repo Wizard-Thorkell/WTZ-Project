@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.4a flight movement, gravity, and collision contract`.
+- Active package: `P7.4b2 flight trace, projectile, and AI integration`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4a active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4b2 active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -95,8 +95,9 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Complete |
 | P7.3a | Shared Z-aware weather exposure policy | Complete |
 | P7.3b | Bounded Z-aware weather rendering, audio, and diagnostics | Complete |
-| P7.4a | Flight movement, gravity, and collision contract | Active |
-| P7.4b | Flight trace, projectile, AI, content, and mapping integration | Pending |
+| P7.4a | Flight movement, gravity, and collision contract | Complete |
+| P7.4b1 | Flight controls, capability content, interruptions, and mapping | Complete |
+| P7.4b2 | Flight trace, projectile, and AI navigation/execution integration | Active |
 | P7 gate | End-to-end vertical-content and scope review | Pending |
 
 ## Phase P0 Packages
@@ -6893,10 +6894,129 @@ allocation is inside Robust physics enumeration.
   consumers, AI execution, and gameplay interruption policy through the typed
   API and events established here.
 
+## Completed Package: P7.4b1 Flight Controls, Content, And Mapping
+
+### Scope
+
+- Add authoritative player actions for starting, stopping, ascending, and
+  descending through the native flight solver without adding a second movement
+  controller.
+- Integrate existing jetpacks and intrinsically flying mobs while preserving
+  ownership of capability components and pre-existing flight state.
+- Stop active flight through typed lifecycle reasons when the user becomes
+  incapacitated, stunned, knocked down, thrown, buckled, detached, or loses the
+  capability.
+- Exercise authored flight content and initialized-map snapshot/load behavior on
+  the official three-floor mapping fixture.
+- Keep trace/projectile policy and explicit AI route execution in P7.4b2.
+
+### Implementation
+
+- `ZLevelFlightControlsComponent` owns networked action configuration and runtime
+  action references. `SharedZLevelFlightControlSystem` grants and removes those
+  actions in response to capability, parent, map, and replication lifecycle.
+- Player actions invoke only the typed shared flight API. They validate native
+  map configuration, capability, current body state, and target bounds on the
+  authoritative side before mutating flight state.
+- `SharedJetpackSystem` permits activation in ordinary weightlessness and on a
+  configured native Z-level gravity grid. Runtime ownership flags ensure teardown
+  removes or stops only the capability, controls, and flight state it granted.
+- Existing intrinsic flight remains active across jetpack activation/deactivation,
+  while disabling native configuration invalidates jetpack-provided flight.
+- `FlyingMobBase` supplies intrinsic capability; player-controlled dragons also
+  receive controls. The official mapping station contains one filled jetpack at
+  Z 0 for repeatable floor-to-floor tests.
+- Runtime active state, target height, and action entity references are excluded
+  from mapping snapshots. A loaded snapshot is grounded and receives fresh
+  actions from normal lifecycle setup.
+- Native map lookup rejects components already stopping, closing a stale-config
+  lifecycle path found by the mapping test.
+
+### Evidence
+
+- The final focused flight/content/map matrix passes 14/14 in 1m13s.
+- The broad Content integration filter covers 327 cases: 326 pass and the one
+  established deliberate cache-invalidation case remains skipped; there are no
+  failures.
+- Content unit/mapping filters pass 18/18.
+- The process-local baseline runner passes all 3/3 stress depths. Three, six, and
+  ten floors complete in 10.1246, 15.3204, and 24.9917 ms respectively, each at
+  6,336 bytes with 100% warm boundary/sky/gravity cache hits, zero PVS budget
+  exhaustion, and zero neutral flight work.
+- A non-incremental single-worker `SpaceStation14.slnx` build passes in 2m26s
+  with zero errors. Its 695 warnings are established solution warnings; path
+  attribution reports zero warning in any modified production or test file.
+- `git diff --check` passes apart from Git's informational LF-to-CRLF notices.
+  WTZ Engine is clean and remains pinned to published revision `7cbd778024`;
+  this package requires no engine change.
+
+### Decisions
+
+- Capability and player controls are separate components. AI and passive flying
+  entities do not receive action-bar entities merely because they can fly.
+- Controls remain event-driven; dormant flight capability adds no per-tick scan
+  to the neutral stress fixtures.
+- Jetpacks keep their legacy behavior on unconfigured maps. A configured native
+  grid applies its authored gravity and vertical-boundary policy instead.
+- Ownership is explicit because blindly removing a shared capability on jetpack
+  shutdown would break species or effects that already supplied flight.
+- Reparenting between grids stops the current flight plan as required by P7.4a.
+  A capable user may explicitly start a new plan in the destination grid; no
+  stale local-frame target is carried across the ownership boundary.
+- Empty space is not made walkable. P7.4b2 will add explicit flight-aware
+  navigation and execution without weakening ordinary planar pathfinding.
+
+### Completion Gate
+
+- [x] Scope check: controls, capability content, jetpack ownership, typed
+      interruptions, mapping fixture, tests, and documentation only.
+- [x] Invariant review: Z 0 compatibility, configured/unconfigured gravity,
+      local targets, reparenting, server authority, replication, bounds,
+      capability loss, and active-state ownership were exercised.
+- [x] Automated verification: 14 focused, 327 broad cases covered, 18
+      unit/mapping, and 3 baseline cases pass without a new failure.
+- [x] Performance evidence: all neutral fixtures report zero flight work and the
+      same 6,336-byte steady-state allocation at every tested floor depth.
+- [x] Documentation: controls, ownership, interruptions, persistence boundary,
+      content, evidence, and remaining consumer work are recorded here and in
+      `ZLevelFlight.md`, `ZLevelVerticalContent.md`, and `ZLevel.md`.
+- [x] Dependency check: no WTZ Engine change; the clean submodule remains pinned
+      to published revision `7cbd778024`.
+- [x] Git check: focused and broad tests, full build, warning attribution,
+      whitespace, generated-artifact ignore state, scope, and dependency state
+      pass.
+- [x] Mini review: lifecycle ordering, component ownership, rollback, direct
+      activation, intrinsic flight, mapping normalization, and grid changes were
+      reviewed and corrected or recorded.
+- [x] Commit: prepared as isolated `Add native Z-level flight controls` on
+      `zlevel/vertical-content`; push and local/remote hash verification follow.
+
+### Mini Review
+
+- Finding: Robust component startup/shutdown subscriptions are exclusive. A
+  typed capability-changed event avoids duplicate lifecycle handlers while
+  keeping control ownership synchronized.
+- Finding: direct jetpack activation must enforce the same native-grid policy as
+  the normal action path and roll back every modifier when setup fails.
+- Finding: jetpack ownership flags are necessary to preserve intrinsic flyers
+  and already-active flight across equipment teardown.
+- Finding: snapshot tests exposed that a stopping map component could briefly be
+  treated as live configuration; lifecycle-aware lookup closes that window.
+- Residual risk: player-facing reason popups expose a generic typed reason rather
+  than bespoke prose for every interruption.
+- Residual risk: a cross-grid reparent deliberately stops flight and does not
+  silently restart the jetpack plan in a different local frame.
+- Residual risk: flight-aware trace/projectile height and explicit AI
+  navigation/execution are not part of this package.
+- Next package: P7.4b2 integrates hover-height traces and projectiles, then adds
+  explicit flight navigation edges and execution without marking empty space as
+  ordinary walkable area.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P7.4b1 | `Add native Z-level flight controls` | 14 focused, 327 broad cases covered, 18 unit/mapping, 3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4a | `Define native Z-level flight physics` | 10 focused, 31 movement/map, 322 broad, 11 unit/mapping, 3 baseline, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3b | `Present weather on active Z levels` | 8 focused, all 314 broad covered, 14 unit/mapping, 3 baseline, 24 real GL, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3a | `Define shared Z-level weather exposure` | 3 focused, all 309 broad covered, 9 unit, 3 baseline, full build, allocation/diff review | Complete |

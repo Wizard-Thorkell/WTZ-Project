@@ -4,6 +4,9 @@ using Content.Shared.Interaction.Events;
 using Content.Shared.Movement.Components;
 using Content.Shared.Movement.Events;
 using Content.Shared.Popups;
+using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Containers;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Systems;
@@ -19,6 +22,8 @@ public abstract class SharedJetpackSystem : EntitySystem
     [Dependency] private readonly SharedPopupSystem _popup = default!;
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly ActionContainerSystem _actionContainer = default!;
+    [Dependency] private readonly SharedZLevelMapSystem _zLevelMaps = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevels = default!;
 
     [Dependency] private readonly EntityQuery<JetpackComponent> _jetpackQuery = default!;
 
@@ -35,6 +40,7 @@ public abstract class SharedJetpackSystem : EntitySystem
         SubscribeLocalEvent<JetpackComponent, EntGotInsertedIntoContainerMessage>(OnJetpackMoved);
 
         SubscribeLocalEvent<GravityChangedEvent>(OnJetpackUserGravityChanged);
+        SubscribeLocalEvent<ZLevelMapConfigurationChangedEvent>(OnZLevelMapConfigurationChanged);
         SubscribeLocalEvent<JetpackComponent, MapInitEvent>(OnMapInit);
     }
 
@@ -59,7 +65,7 @@ public abstract class SharedJetpackSystem : EntitySystem
         var query = EntityQueryEnumerator<JetpackUserComponent, TransformComponent>();
         while (query.MoveNext(out var uid, out var user, out var transform))
         {
-            if (transform.GridUid == gridUid && ev.HasGravity &&
+            if (transform.GridUid == gridUid && ev.HasGravity && !CanEnableOnGrid(gridUid) &&
                 _jetpackQuery.TryGetComponent(user.Jetpack, out var jetpack))
             {
                 _popup.PopupClient(Loc.GetString("jetpack-to-grid"), uid, uid);
@@ -96,7 +102,7 @@ public abstract class SharedJetpackSystem : EntitySystem
         }
     }
 
-    private void SetupUser(EntityUid user, EntityUid jetpackUid, JetpackComponent component)
+    private bool SetupUser(EntityUid user, EntityUid jetpackUid, JetpackComponent component)
     {
         EnsureComp<JetpackUserComponent>(user, out var userComp);
         component.JetpackUser = user;
@@ -109,18 +115,40 @@ public abstract class SharedJetpackSystem : EntitySystem
         userComp.WeightlessModifier = component.WeightlessModifier;
         userComp.WeightlessFriction = component.Friction;
         userComp.WeightlessFrictionNoInput = component.Friction;
+
+        if (!TrySetupZLevelFlight(user, userComp))
+        {
+            component.JetpackUser = null;
+            RemComp<JetpackUserComponent>(user);
+
+            if (physics != null)
+                _physics.SetBodyStatus(user, physics, BodyStatus.OnGround);
+
+            _movementSpeedModifier.RefreshWeightlessModifiers(user);
+            return false;
+        }
+
+        Dirty(user, userComp);
         _movementSpeedModifier.RefreshWeightlessModifiers(user);
+        return true;
     }
 
     private void RemoveUser(EntityUid uid, JetpackComponent component)
     {
-        if (!RemComp<JetpackUserComponent>(uid))
+        if (!TryComp<JetpackUserComponent>(uid, out var userComp))
             return;
 
+        TeardownZLevelFlight(uid, userComp);
+        RemComp<JetpackUserComponent>(uid);
         component.JetpackUser = null;
 
         if (TryComp<PhysicsComponent>(uid, out var physics))
-            _physics.SetBodyStatus(uid, physics, BodyStatus.OnGround);
+        {
+            _physics.SetBodyStatus(
+                uid,
+                physics,
+                _zLevels.IsFlying(uid) ? BodyStatus.InAir : BodyStatus.OnGround);
+        }
 
         _movementSpeedModifier.RefreshWeightlessModifiers(uid);
     }
@@ -145,7 +173,8 @@ public abstract class SharedJetpackSystem : EntitySystem
         // No and no again! Do not attempt to activate the jetpack on a grid with gravity disabled. You will not be the first or the last to try this.
         // https://discord.com/channels/310555209753690112/310555209753690112/1270067921682694234
         return gridUid == null ||
-               (!HasComp<GravityComponent>(gridUid));
+               !HasComp<GravityComponent>(gridUid) ||
+               _zLevelMaps.TryGetConfig(gridUid.Value, out _);
     }
 
     private void OnJetpackGetAction(EntityUid uid, JetpackComponent component, GetItemActionsEvent args)
@@ -171,6 +200,13 @@ public abstract class SharedJetpackSystem : EntitySystem
             user = container.Owner;
         }
 
+        if (enabled &&
+            TryComp(user.Value, out TransformComponent? userTransform) &&
+            !CanEnableOnGrid(userTransform.GridUid))
+        {
+            return;
+        }
+
         if (enabled)
         {
             // If the user is already using another jetpack, disable it first
@@ -181,7 +217,9 @@ public abstract class SharedJetpackSystem : EntitySystem
                 SetEnabled(userComp.Jetpack, oldJetpack, false, user);
             }
 
-            SetupUser(user.Value, uid, component);
+            if (!SetupUser(user.Value, uid, component))
+                return;
+
             EnsureComp<ActiveJetpackComponent>(uid);
         }
         else
@@ -203,6 +241,83 @@ public abstract class SharedJetpackSystem : EntitySystem
     protected virtual bool CanEnable(EntityUid uid, JetpackComponent component)
     {
         return true;
+    }
+
+    private bool TrySetupZLevelFlight(EntityUid user, JetpackUserComponent userComp)
+    {
+        if (!TryComp(user, out TransformComponent? transform) ||
+            transform.GridUid is not { } gridUid ||
+            !_zLevelMaps.TryGetConfig(gridUid, out _))
+        {
+            return true;
+        }
+
+        ZLevelFlightComponent flight;
+        if (TryComp<ZLevelFlightComponent>(user, out var existingFlight))
+        {
+            flight = existingFlight;
+        }
+        else
+        {
+            flight = EnsureComp<ZLevelFlightComponent>(user);
+            userComp.GrantedZLevelFlight = true;
+        }
+
+        if (!HasComp<ZLevelFlightControlsComponent>(user))
+        {
+            EnsureComp<ZLevelFlightControlsComponent>(user);
+            userComp.GrantedZLevelFlightControls = true;
+        }
+
+        var result = flight.Active
+            ? ZLevelFlightResult.AlreadyActive
+            : _zLevels.TryStartFlight(user, flight: flight);
+        if (result is ZLevelFlightResult.Success or ZLevelFlightResult.AlreadyActive)
+        {
+            userComp.StartedZLevelFlight = result == ZLevelFlightResult.Success;
+            return true;
+        }
+
+        if (userComp.GrantedZLevelFlightControls)
+            RemComp<ZLevelFlightControlsComponent>(user);
+        if (userComp.GrantedZLevelFlight)
+            RemComp<ZLevelFlightComponent>(user);
+        userComp.GrantedZLevelFlightControls = false;
+        userComp.GrantedZLevelFlight = false;
+        return false;
+    }
+
+    private void TeardownZLevelFlight(EntityUid user, JetpackUserComponent userComp)
+    {
+        if (userComp.StartedZLevelFlight)
+        {
+            _zLevels.TryStopFlight(
+                user,
+                ZLevelFlightStopReason.CapabilitySourceRemoved);
+        }
+
+        if (userComp.GrantedZLevelFlightControls)
+            RemComp<ZLevelFlightControlsComponent>(user);
+        if (userComp.GrantedZLevelFlight)
+            RemComp<ZLevelFlightComponent>(user);
+    }
+
+    private void OnZLevelMapConfigurationChanged(ref ZLevelMapConfigurationChangedEvent args)
+    {
+        var query = EntityQueryEnumerator<JetpackUserComponent, TransformComponent>();
+        while (query.MoveNext(out var uid, out var user, out var transform))
+        {
+            if (transform.MapUid != args.MapUid ||
+                transform.GridUid is not { } gridUid ||
+                CanEnableOnGrid(gridUid) ||
+                !_jetpackQuery.TryGetComponent(user.Jetpack, out var jetpack))
+            {
+                continue;
+            }
+
+            _popup.PopupClient(Loc.GetString("jetpack-to-grid"), uid, uid);
+            SetEnabled(user.Jetpack, jetpack, false, uid);
+        }
     }
 }
 

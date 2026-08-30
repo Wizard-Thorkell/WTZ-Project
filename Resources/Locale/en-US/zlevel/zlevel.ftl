@@ -2,6 +2,12 @@ zlevel-traversal-verb-up = Go up
 zlevel-traversal-verb-down = Go down
 zlevel-traversal-failed = You can't traverse to that floor from here.
 zlevel-traversal-success = Moved to Z-Level {$z}.
+zlevel-flight-started = Vertical flight engaged.
+zlevel-flight-stopped = Vertical flight released.
+zlevel-flight-target-changed = Flight target set to Z-Level {$z}.
+zlevel-flight-interrupted = Vertical flight was interrupted.
+zlevel-flight-boundary-blocked = A closed deck blocks vertical flight.
+zlevel-flight-unavailable = Vertical flight is unavailable ({$reason}).
 
 zlevel-elevator-window-title = Elevator
 zlevel-elevator-status-label = Status

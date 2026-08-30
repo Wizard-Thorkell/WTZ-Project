@@ -1129,8 +1129,9 @@ and presentation in specialized systems rather than adding those policies to
 `SharedZLevelTraceSystem`.
 
 Native flight's movement, gravity, collision, lifecycle, and save-state
-contracts are documented in `Docs/ZLevelFlight.md`. Player controls, content,
-projectile behavior, and AI execution remain the P7.4b consumer package.
+contracts are documented in `Docs/ZLevelFlight.md`. P7.4b1 supplies native
+actions, intrinsic/jetpack content, interruption policy, and mapping coverage.
+Flight-aware projectiles and explicit AI navigation/execution remain P7.4b2.
 
 ## Definition Of Done
 

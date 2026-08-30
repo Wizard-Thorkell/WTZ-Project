@@ -147,6 +147,9 @@ public sealed class ZLevelMapFormatTest : GameTest
                 .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID ==
                     "ZLevelFloorOpeningMarker")
                 .ToArray();
+            var flightJetpacks = entities
+                .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "JetpackBlueFilled")
+                .ToArray();
 
             Assert.Multiple(() =>
             {
@@ -161,6 +164,11 @@ public sealed class ZLevelMapFormatTest : GameTest
                 Assert.That(entities.Count(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID is
                     "ZLevelStairsUp" or "ZLevelStairsDown"), Is.EqualTo(4));
                 Assert.That(apertureMarkers, Has.Length.EqualTo(4));
+                Assert.That(flightJetpacks, Has.Length.EqualTo(1));
+                Assert.That(transform.GetZLevel((
+                    flightJetpacks[0],
+                    entMan.GetComponent<TransformComponent>(flightJetpacks[0]),
+                    entMan.GetComponentOrNull<ZLevelPositionComponent>(flightJetpacks[0]))), Is.Zero);
                 Assert.That(lightFixtures, Has.Length.EqualTo(3));
                 Assert.That(lightFixtures.Select(uid => transform.GetZLevel((
                         uid,

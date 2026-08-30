@@ -1,0 +1,42 @@
+- type: entity
+  parent: BaseAction
+  id: ActionZLevelFlightToggle
+  name: Toggle vertical flight
+  description: Engage or release controlled movement between Z-levels.
+  components:
+  - type: Action
+    icon:
+      sprite: Objects/Tanks/Jetpacks/blue.rsi
+      state: icon
+    iconOn:
+      sprite: Objects/Tanks/Jetpacks/blue.rsi
+      state: icon-on
+    useDelay: 0.5
+  - type: InstantAction
+    event: !type:ZLevelFlightToggleActionEvent
+
+- type: entity
+  parent: BaseAction
+  id: ActionZLevelFlightUp
+  name: Fly up
+  description: Set the flight target one Z-level higher.
+  components:
+  - type: Action
+    icon:
+      sprite: Interface/Actions/jump.rsi
+      state: icon
+    useDelay: 0.25
+  - type: InstantAction
+    event: !type:ZLevelFlightUpActionEvent
+
+- type: entity
+  parent: BaseAction
+  id: ActionZLevelFlightDown
+  name: Fly down
+  description: Set the flight target one Z-level lower.
+  components:
+  - type: Action
+    icon: Interface/Actions/rooting.png
+    useDelay: 0.25
+  - type: InstantAction
+    event: !type:ZLevelFlightDownActionEvent

@@ -17,7 +17,9 @@ public enum ZLevelFlightResult : byte
     InvalidCurrentPosition,
     InvalidTarget,
     InvalidConfiguration,
+    Incapacitated,
     Anchored,
+    Buckled,
     Contained,
     InvalidBodyType,
 }
@@ -32,7 +34,22 @@ public enum ZLevelFlightStopReason : byte
     GridChanged,
     MapConfigurationChanged,
     InvalidState,
+    Incapacitated,
+    Stunned,
+    KnockedDown,
+    Thrown,
+    Buckled,
+    CapabilitySourceRemoved,
 }
+
+public sealed partial class ZLevelFlightToggleActionEvent : Content.Shared.Actions.InstantActionEvent;
+
+public sealed partial class ZLevelFlightUpActionEvent : Content.Shared.Actions.InstantActionEvent;
+
+public sealed partial class ZLevelFlightDownActionEvent : Content.Shared.Actions.InstantActionEvent;
+
+[ByRefEvent]
+public readonly record struct ZLevelFlightCapabilityChangedEvent(bool Available);
 
 [ByRefEvent]
 public record struct ZLevelFlightStartAttemptEvent(int TargetLocalZLevel, float TargetLocalZOffset)

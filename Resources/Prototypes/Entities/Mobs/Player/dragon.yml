@@ -41,6 +41,7 @@
   - type: CombatMode
   - type: MobMover
   - type: InputMover
+  - type: ZLevelFlightControls
   - type: MovementSpeedModifier
     baseWalkSpeed: 3
     baseSprintSpeed: 5

@@ -1,8 +1,13 @@
 // DragonStation Z-Level prototype.
 // Copyright (c) pedel and OpenAI Codex.
 
+using Content.Shared.Buckle.Components;
 using Content.Shared.Gravity;
+using Content.Shared.Mobs;
+using Content.Shared.Mobs.Components;
 using Content.Shared.Movement.Events;
+using Content.Shared.Stunnable;
+using Content.Shared.Throwing;
 using Content.Shared.ZLevel.Components;
 using Robust.Shared.Containers;
 using Robust.Shared.Map.Components;
@@ -34,6 +39,11 @@ public sealed partial class SharedZLevelSystem
         SubscribeLocalEvent<ZLevelFlightComponent, AnchorStateChangedEvent>(OnFlightAnchorChanged);
         SubscribeLocalEvent<ZLevelFlightComponent, PhysicsBodyTypeChangedEvent>(OnFlightBodyTypeChanged);
         SubscribeLocalEvent<ZLevelFlightComponent, EntInsertedIntoContainerMessage>(OnFlightContained);
+        SubscribeLocalEvent<ZLevelFlightComponent, MobStateChangedEvent>(OnFlightMobStateChanged);
+        SubscribeLocalEvent<ZLevelFlightComponent, StunnedEvent>(OnFlightStunned);
+        SubscribeLocalEvent<ZLevelFlightComponent, KnockedDownEvent>(OnFlightKnockedDown);
+        SubscribeLocalEvent<ZLevelFlightComponent, ThrownEvent>(OnFlightThrown);
+        SubscribeLocalEvent<ZLevelFlightComponent, BuckledEvent>(OnFlightBuckled);
         SubscribeLocalEvent<ZLevelFlightComponent, IsWeightlessEvent>(OnFlightWeightless);
         SubscribeLocalEvent<ZLevelFlightComponent, CanWeightlessMoveEvent>(OnFlightCanMove);
         SubscribeLocalEvent<ZLevelMapConfigurationChangedEvent>(OnFlightMapConfigurationChanged);
@@ -209,6 +219,16 @@ public sealed partial class SharedZLevelSystem
         if (transform.Anchored)
             return ZLevelFlightResult.Anchored;
 
+        if ((TryComp<MobStateComponent>(uid, out var mobState) && mobState.CurrentState != MobState.Alive) ||
+            HasComp<StunnedComponent>(uid) ||
+            HasComp<KnockedDownComponent>(uid))
+        {
+            return ZLevelFlightResult.Incapacitated;
+        }
+
+        if (TryComp<BuckleComponent>(uid, out var buckle) && buckle.Buckled)
+            return ZLevelFlightResult.Buckled;
+
         if (_containers.IsEntityInContainer(uid))
             return ZLevelFlightResult.Contained;
 
@@ -302,6 +322,8 @@ public sealed partial class SharedZLevelSystem
     private void OnFlightStartup(Entity<ZLevelFlightComponent> entity, ref ComponentStartup args)
     {
         SynchronizeFlightState(entity);
+        var changed = new ZLevelFlightCapabilityChangedEvent(true);
+        RaiseLocalEvent(entity.Owner, ref changed);
     }
 
     private void OnFlightShutdown(Entity<ZLevelFlightComponent> entity, ref ComponentShutdown args)
@@ -310,6 +332,9 @@ public sealed partial class SharedZLevelSystem
             StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.CapabilityRemoved, dirty: false);
         else
             _activeFlights.Remove(entity.Owner);
+
+        var changed = new ZLevelFlightCapabilityChangedEvent(false);
+        RaiseLocalEvent(entity.Owner, ref changed);
     }
 
     private void OnFlightStateHandled(Entity<ZLevelFlightComponent> entity, ref AfterAutoHandleStateEvent args)
@@ -357,6 +382,36 @@ public sealed partial class SharedZLevelSystem
     {
         if (entity.Comp.Active)
             StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.Contained, dirty: true);
+    }
+
+    private void OnFlightMobStateChanged(Entity<ZLevelFlightComponent> entity, ref MobStateChangedEvent args)
+    {
+        if (entity.Comp.Active && args.NewMobState != MobState.Alive)
+            StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.Incapacitated, dirty: true);
+    }
+
+    private void OnFlightStunned(Entity<ZLevelFlightComponent> entity, ref StunnedEvent args)
+    {
+        if (entity.Comp.Active)
+            StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.Stunned, dirty: true);
+    }
+
+    private void OnFlightKnockedDown(Entity<ZLevelFlightComponent> entity, ref KnockedDownEvent args)
+    {
+        if (entity.Comp.Active)
+            StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.KnockedDown, dirty: true);
+    }
+
+    private void OnFlightThrown(Entity<ZLevelFlightComponent> entity, ref ThrownEvent args)
+    {
+        if (entity.Comp.Active)
+            StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.Thrown, dirty: true);
+    }
+
+    private void OnFlightBuckled(Entity<ZLevelFlightComponent> entity, ref BuckledEvent args)
+    {
+        if (entity.Comp.Active)
+            StopFlight(entity.Owner, entity.Comp, ZLevelFlightStopReason.Buckled, dirty: true);
     }
 
     private void OnFlightWeightless(Entity<ZLevelFlightComponent> entity, ref IsWeightlessEvent args)

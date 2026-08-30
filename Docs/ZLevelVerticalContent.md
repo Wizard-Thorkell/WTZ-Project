@@ -289,3 +289,15 @@ clamp and retarget once, while ordinary fixtures continue to collide by
 discrete world floor. Runtime active/target state is replicated but excluded
 from map serialization. Full API, lifecycle, collision, and consumer boundaries
 are documented in `ZLevelFlight.md`.
+
+P7.4b1 makes that capability playable. Entities with
+`ZLevelFlightControlsComponent` receive toggle/up/down actions only on configured
+native grids. Existing jetpacks preserve legacy space behavior and become an
+owned capability source on native grids with gravity. `FlyingMobBase` supplies
+the dormant intrinsic capability while dragons supply controls; future flying
+NPC steering remains separate.
+
+Critical state, stun, knockdown, throws, and buckling interrupt active flight.
+Initialized mapping snapshots retain authored flight tuning but strip active
+targets and action references, then reconstruct fresh actions after load. The
+official mapping station provides a filled jetpack on Z 0 for manual testing.
