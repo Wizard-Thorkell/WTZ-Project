@@ -232,6 +232,33 @@ should compare reuse, cached-grid count, retained heap after collection, and
 grid lifecycle together. P8.4 still needs representative-station and repeated
 grid creation/deletion evidence before assigning a production memory envelope.
 
+## P8.3a Executable Z 0 Contract
+
+WTZ preserves ordinary Space Station 14 maps as component-free planar Z 0 maps.
+Opting into native multi-floor behavior remains explicit. This protects existing
+2D content without adding an automatic station-migration layer or silently
+inventing vertical structure.
+
+`Docs/ZLevelZZeroCompatibility.json` is the versioned `WTZ-Z0-1` source of truth.
+It binds 18 compatibility promises across 15 mandatory domains to exact tests:
+17 in WTZ Project and one engine-level legacy tile API test in WTZ Engine. The
+separate runner-owned domain list prevents a manifest edit from silently
+dropping an entire protected area.
+
+`Tools/run_zlevel_z0_compatibility.ps1` validates schema, IDs, domain coverage,
+repository ownership, project paths, and unique fully-qualified tests. It runs
+each project as one exact filter, parses the resulting TRX files, and rejects
+missing, duplicate, failed, skipped, or unexpectedly selected tests. Its ignored
+JSON report records the manifest hash, paired project/engine revisions, counts,
+and each outcome.
+
+The package gate passes all 18 declared contracts, three new foundational
+component-free/passive-state tests, 340 of 342 broad Z-level cases with the two
+fixture-conditioned cases passing in isolation, 22 unit/mapping cases, and all
+three 3/6/10-floor baselines. The baseline remains at 6,336 allocated bytes for
+every floor depth. A non-incremental single-worker solution build completes in
+3m01s with zero errors and 704 established warnings.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -243,8 +270,12 @@ grid creation/deletion evidence before assigning a production memory envelope.
   per-update PVS p95 by approximately 64 percent with unchanged decisions.
 - **P8.2c:** complete. Per-grid reusable topology workspaces reduce measured
   allocation by approximately 98.8 percent with exact connectivity unchanged.
-- **P8.3:** active. Execute the explicit Z 0 regression matrix and publish the minimal
-  engine/content porting contract with automated checks.
+- **P8.3a:** complete. The `WTZ-Z0-1` matrix protects 15 required domains with
+  18 exact project/engine tests and a fail-closed TRX-verifying runner.
+- **P8.3b:** active. Publish the minimal versioned engine/content porting
+  manifest and compatibility verifier.
+- **P8.3c:** rehearse the documented port on a clean worktree and close the
+  phase gate.
 - **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
   regression, operational diagnostics, and the final public-server checklist.
 

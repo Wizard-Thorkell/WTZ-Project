@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "WTZ-Z0-1",
+  "requiredDomains": [
+    "atmosphere",
+    "combat",
+    "construction",
+    "core",
+    "engine-map",
+    "entity-position",
+    "gravity",
+    "interaction",
+    "mapping",
+    "navigation",
+    "rendering",
+    "serialization",
+    "sound",
+    "visibility",
+    "weather"
+  ],
+  "entries": [
+    {
+      "id": "core.unconfigured-map-passive",
+      "domain": "core",
+      "repository": "project",
+      "contract": "An ordinary unconfigured map remains component-free and does not allocate gravity topology state.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelZZeroCompatibilityTest.UnconfiguredBaseMapStaysComponentFreeAndVerticalSystemsRemainPassive"
+    },
+    {
+      "id": "entity-position.canonical-zero",
+      "domain": "entity-position",
+      "repository": "project",
+      "contract": "Stamping an entity back to world Z 0 restores the canonical component-free representation.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelZZeroCompatibilityTest.StampingBackToWorldZZeroRemovesExplicitPosition"
+    },
+    {
+      "id": "visibility.planar-zero",
+      "domain": "visibility",
+      "repository": "project",
+      "contract": "Same-floor entity and coordinate visibility on an ordinary map remains planar and component-free.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelZZeroCompatibilityTest.ComponentFreeZZeroEntitiesRemainPlanarVisible"
+    },
+    {
+      "id": "engine-map.legacy-two-dimensional-api",
+      "domain": "engine-map",
+      "repository": "engine",
+      "contract": "Legacy engine tile reads, writes, and enumeration continue to address only the base layer.",
+      "project": "RobustToolbox/Robust.Server.IntegrationTests/Robust.Server.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Robust.Server.IntegrationTests.Maps.ZLevelMapTests.ZLevelLegacy2DQueriesRemainOnBaseLayer"
+    },
+    {
+      "id": "mapping.tile-authority",
+      "domain": "mapping",
+      "repository": "project",
+      "contract": "Tile placement retains the requested layer and does not mutate Z 0 accidentally.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.Placement.PlacementZLevelAuthorityTest.TilePlacementUsesRequestedZLevel"
+    },
+    {
+      "id": "mapping.entity-authority",
+      "domain": "mapping",
+      "repository": "project",
+      "contract": "Entity placement stamps the authoritative requested layer while preserving ordinary placement behavior.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.Placement.PlacementZLevelAuthorityTest.EntityPlacementStampsRequestedZLevel"
+    },
+    {
+      "id": "serialization.version-two-default",
+      "domain": "serialization",
+      "repository": "project",
+      "contract": "Pre-Z-level version-two decal data loads on the base layer.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelDecalTest.VersionTwoMapDecalsDefaultToBaseLayer"
+    },
+    {
+      "id": "construction.rcd-planar-cycle",
+      "domain": "construction",
+      "repository": "project",
+      "contract": "The native RCD construction and deconstruction cycle remains functional.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.Construction.RCDTest.RCDConstructionDeconstructionTest"
+    },
+    {
+      "id": "atmosphere.coordinate-layer",
+      "domain": "atmosphere",
+      "repository": "project",
+      "contract": "Coordinate hotspot operations remain isolated to their requested layer, including Z 0.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelAtmosTest.CoordinateHotspotApisStayOnRequestedZLevel"
+    },
+    {
+      "id": "interaction.networked-pointer-zero",
+      "domain": "interaction",
+      "repository": "project",
+      "contract": "Networked pointer coordinates preserve same-floor interaction authority.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelInteractionAuthorityTest.PointerCoordinateLayerPreservesSameFloorInteractionAfterNetworking"
+    },
+    {
+      "id": "combat.hitscan-order-zero",
+      "domain": "combat",
+      "repository": "project",
+      "contract": "Z 0 hitscan preserves native raycast order and distances.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelTraceTest.ZZeroEntityHitsPreserveEngineRaycastOrderAndDistance"
+    },
+    {
+      "id": "combat.network-gun-zero",
+      "domain": "combat",
+      "repository": "project",
+      "contract": "Network gun targeting preserves the native same-floor entity target.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelBallisticTrajectoryTest.NetworkGunPreservesNativeSameFloorEntityTarget"
+    },
+    {
+      "id": "combat.network-throw-zero",
+      "domain": "combat",
+      "repository": "project",
+      "contract": "Network throw targeting preserves the native same-floor entity target.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelBallisticTrajectoryTest.NetworkThrowPreservesNativeSameFloorEntityTarget"
+    },
+    {
+      "id": "navigation.legacy-planar-request",
+      "domain": "navigation",
+      "repository": "project",
+      "contract": "The hierarchical pathfinder retains the native planar request path on one floor.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelPathfindingTest.WorldFrameSelectsLocalFloorWithoutRebuildingNavigation"
+    },
+    {
+      "id": "sound.same-floor-compatibility",
+      "domain": "sound",
+      "repository": "project",
+      "contract": "Same-floor sound routing remains distinct from vertical route failures.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelSoundRouteTest.SameFloorCompatibilityAndVerticalFailureStatesRemainDistinct"
+    },
+    {
+      "id": "weather.legacy-exposure-zero",
+      "domain": "weather",
+      "repository": "project",
+      "contract": "Legacy weather exposure retains planar Z 0 behavior.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelWeatherExposureTest.LegacyPolicyRetainsPlanarZZeroBehavior"
+    },
+    {
+      "id": "rendering.legacy-roof-mask-zero",
+      "domain": "rendering",
+      "repository": "project",
+      "contract": "The legacy roof presentation mask remains planar on Z 0.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelWeatherPresentationTest.LegacyMaskRetainsPlanarRoofAndZZeroPolicy"
+    },
+    {
+      "id": "gravity.no-source-no-fall",
+      "domain": "gravity",
+      "repository": "project",
+      "contract": "A configured map without an artificial-gravity source does not invent downward gravity.",
+      "project": "Content.IntegrationTests/Content.IntegrationTests.csproj",
+      "fullyQualifiedTest": "Content.IntegrationTests.Tests.ZLevel.ZLevelMovementTest.NativeZLevelMapWithoutGravitySourceDoesNotFall"
+    }
+  ]
+}

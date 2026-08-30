@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.3a executable Z 0 compatibility matrix`.
+- Active package: `P8.3b versioned engine/content porting manifest and verifier`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -122,8 +122,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P8.3a | Executable Z 0 compatibility inventory and regression matrix | Active |
-| P8.3b | Versioned engine/content porting manifest and compatibility verifier | Pending |
+| P8.3a | Executable Z 0 compatibility inventory and regression matrix | Complete |
+| P8.3b | Versioned engine/content porting manifest and compatibility verifier | Active |
 | P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Pending |
 
 ## Phase P0 Packages
@@ -7824,10 +7824,102 @@ allocation is inside Robust physics enumeration.
   explicit inventory and executable regression matrix before the port contract
   is frozen.
 
+## Completed Package: P8.3a Executable Z 0 Compatibility Matrix
+
+### Scope
+
+- Define the versioned `WTZ-Z0-1` behavioral contract as a machine-readable
+  inventory covering 15 required compatibility domains.
+- Bind each of 18 promises to one unique fully-qualified integration test across
+  WTZ Project and WTZ Engine.
+- Add three foundational tests for passive unconfigured maps, canonical
+  component-free entity positions on world Z 0, and planar Z 0 visibility.
+- Add a PowerShell gate that validates the inventory, executes exact project
+  groups, parses TRX results, and emits an ignored revision/hash report.
+- Document that compatibility preserves legacy planar behavior and does not
+  automatically migrate old stations into multi-floor maps.
+
+### Evidence
+
+- The three new foundational integration cases pass 3/3. They prove that an
+  unconfigured map remains free of `ZLevelMapComponent`, does not allocate a
+  gravity workspace, validates with base tiles, and preserves equivalent legacy
+  and explicit-Z0 tile reads; stamping an entity back to world Z 0 removes its
+  explicit `ZLevelPositionComponent`; and same-floor entity/coordinate
+  visibility remains planar without vertical state.
+- The executable compatibility gate passes all 18/18 declared contracts across
+  15 domains and two projects: 17 Content integration cases and the WTZ Engine
+  `ZLevelLegacy2DQueriesRemainOnBaseLayer` case. TRX discovery, exact outcomes,
+  manifest SHA-256, and paired revisions are captured in the ignored schema 1
+  report.
+- The complete Debug `FullyQualifiedName~ZLevel` matrix executes 342 cases: 340
+  pass and two fixture-conditioned pooled cases skip. Both the lighting-cache
+  and concurrent-NPC cases pass 2/2 together in an isolated invocation.
+- Content Z-level/mapping unit coverage passes 22/22. The generated 3/6/10-floor
+  baseline passes 3/3 at 9.918, 14.697, and 21.721 ms respectively, with exactly
+  6,336 allocated bytes at every depth.
+- The final non-incremental single-worker solution build passes in 3m01s with
+  zero errors and 704 established warnings.
+
+### Decisions
+
+- Define Z 0 compatibility as preservation, not conversion. Ordinary maps stay
+  component-free and planar until a mapper explicitly configures native floors.
+- Keep one unique test per matrix entry. A single test cannot make several
+  promises appear independently covered, and renaming/removing a test causes the
+  gate to fail discovery.
+- Own the mandatory domain set in the runner as well as the manifest. Editing
+  the source-of-truth file alone cannot silently reduce the protected surface.
+- Parse TRX definitions and results after `dotnet test`; process exit success
+  alone is insufficient because a stale filter can execute zero tests.
+- Run project and engine contracts from the project checkout while recording
+  both Git revisions. P8.3a requires no new engine source change.
+
+### Completion Gate
+
+- [x] Scope check: one Content fixture, one JSON inventory, one runner, and
+      synchronized Z-level documentation; production behavior is unchanged.
+- [x] Invariant review: component-free Z 0 representation, unconfigured-map
+      passivity, legacy 2D tile APIs, server authority, moving-frame consumers,
+      mapping, persistence, and all listed gameplay domains are represented.
+- [x] Automated verification: 3 new, 18 executable-contract, all 342 broad cases
+      covered, 2 isolated pooled cases, 22 unit/mapping, 3 baseline cases, and
+      the full solution build pass.
+- [x] Performance evidence: no runtime path changed; the neutral baseline
+      remains at exactly 6,336 allocated bytes for 3, 6, and 10 floors.
+- [x] Documentation: scope, non-migration boundary, domain table, commands,
+      report schema, evidence, and next package are synchronized.
+- [x] Dependency check: WTZ Engine remains clean and published at revision
+      `7cbd778024`; its existing exact legacy-map test is executed by the gate.
+- [x] Git check: generated TRX/JSON reports remain ignored; whitespace, staged
+      scope, tree, commit, push, and remote hash are checked at publication.
+- [x] Mini review: Windows PowerShell 5.1 compatibility, exact discovery, pooled
+      skips, map passivity, and the distinction between preservation and
+      migration were verified explicitly.
+- [x] Commit: package prepared as `Make Z 0 compatibility executable` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: the implementation already had meaningful Z 0 regressions in every
+  critical subsystem, but they were discoverable only through code archaeology.
+  The matrix turns that latent coverage into a named release contract.
+- Finding: the three missing foundation cases were architectural, not feature-
+  specific. They now prove the opt-in boundary on which every legacy map relies.
+- Residual risk: each domain currently selects a high-value representative
+  contract rather than every possible same-floor behavior. The broad suite and
+  P8.4 gameplay matrix remain necessary.
+- Residual risk: this gate proves the paired checkout; it does not yet explain or
+  verify which engine/content commits a foreign fork must import. P8.3b owns that
+  versioned port manifest and compatibility verifier.
+- Next package: P8.3b freezes the minimal engine/content port boundary, verifies
+  revisions and required symbols/files, and reports actionable incompatibilities.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.3a | `Make Z 0 compatibility executable` | 3 new, 18 contract, all 342 broad covered, 2 isolated pooled, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2c | `Reuse Z-level gravity field workspaces` | 4 focused, 1 Debug + 2 Release soaks, 339 broad covered, isolated cache, 22 unit/mapping, 3 baseline, full build, allocation/diff/dependency review | Complete |
 | 2026-08-30 | P8.2b | `Stagger Z-level PVS refresh work` | 4 scheduler, 1 Debug + 2 Release soaks, 17 focused, 337 broad, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2a | `Attribute Z-level server workload costs` | Debug/Release builds, 1 short Debug soak, 2 full Release soaks, byte conservation, diff/dependency review | Complete |
