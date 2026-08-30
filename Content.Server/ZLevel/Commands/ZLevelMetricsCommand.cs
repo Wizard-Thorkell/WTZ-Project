@@ -88,7 +88,8 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"cached-grids={gravity.CachedGridCount}, pending={gravity.PendingRefreshGridCount}, " +
             $"invalidations={metrics.GravityInvalidations}");
         shell.WriteLine(
-            $"  gravity-build: count={metrics.GravityBuilds}, tiles={metrics.GravityBuildTiles}, " +
+            $"  gravity-build: count/reused={metrics.GravityBuilds}/{metrics.GravityReusedBuilds}, " +
+            $"tiles={metrics.GravityBuildTiles}, " +
             $"sources={metrics.GravityBuildSources}, avg={metrics.GravityAverageBuildMilliseconds:0.000}ms, " +
             $"last={metrics.GravityLastBuildMilliseconds:0.000}ms, max={metrics.GravityMaxBuildMilliseconds:0.000}ms");
         shell.WriteLine(

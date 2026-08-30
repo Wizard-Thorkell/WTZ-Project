@@ -54,7 +54,7 @@ output, and checks that the report contains the requested profile.
 ## Report Contract
 
 The runner writes `artifacts/zlevel-server-soak/zlevel-server-soak.json`. Schema
-version 4 records:
+version 5 records:
 
 - host runtime, architecture, logical processors, GC mode, and build mode;
 - every configured cache and work budget consumed by the workload;
@@ -70,7 +70,8 @@ version 4 records:
   observed during that iteration;
 - scheduler-update counts, due/scheduled/deferred work, budget exhaustion, batch
   maxima, and per-scheduler-frame latency;
-- shared boundary, sky, visibility, gravity, PVS, and trace metrics;
+- shared boundary, sky, visibility, gravity, PVS, and trace metrics, including
+  gravity builds that reused an existing per-grid workspace;
 - sound portal, route, and per-session playback metrics;
 - traversal snapshot metrics and final bounded-cache lifecycle state.
 
@@ -190,6 +191,47 @@ latency for that decision. P8.4 must select production values from a dedicated
 server and representative player distribution rather than treating 16 as a
 universal SLA.
 
+## P8.2 Gravity Workspace Evidence
+
+`SharedZLevelGravitySystem` retains one workspace per managed grid instead of
+allocating a new live-tile set, source array, BFS dictionary, queue, column
+dictionary, and column lists for every invalidation. Ordinary tile events update
+the live inventory only when emptiness changes. A solid-to-solid tile replacement
+therefore keeps the current field, while removal or placement dirties it and
+reuses its buffers on demand. Source-only changes preserve the live inventory.
+
+The public `InvalidateGrid` batch-edit API remains conservative: it retains the
+owned buffers but marks the tile snapshot stale so the next query re-enumerates
+the grid. Grid removal drops the workspace and its high-water capacity. The
+admin command and client debug overlay report gravity `count/reused`; after
+warm-up, an ordinary structural workload should normally reuse every build.
+
+Schema 5 runs the same profile and all the same production consumers as schema
+4. It appends `gravityReusedBuilds` to the shared metrics snapshot.
+
+| Measurement | Workspace run 1 | Workspace run 2 |
+| --- | ---: | ---: |
+| Total measured time | 6,858.106 ms | 7,419.711 ms |
+| Main-thread allocation | 2,068,744 B | 2,064,688 B |
+| Gravity builds / reused builds | 256 / 256 | 256 / 256 |
+| Gravity build time | 389.790 ms | 406.336 ms |
+| Gravity cache hits / misses | 54,144 / 256 | 54,144 / 256 |
+| Workload iterations with a GC collection | 0 / 128 | 0 / 128 |
+
+The preceding schema 4 runs allocated 170,281,832 and 170,266,272 bytes. The
+workspace therefore removes approximately 98.8 percent of total measured
+allocation. The two gravity-consumer stages specifically fall from 168,249,344
+bytes to 26,624 bytes, above 99.98 percent, while all 256 field decisions and
+every PVS, sound, traversal, cache, and budget counter remain structurally
+equivalent. Gravity build CPU also falls from approximately 627-632 ms to
+390-406 ms on the comparison host.
+
+This is a high-water cache, not zero retained memory. A live grid keeps the
+capacity needed by its largest observed topology until grid teardown. Operators
+should compare reuse, cached-grid count, retained heap after collection, and
+grid lifecycle together. P8.4 still needs representative-station and repeated
+grid creation/deletion evidence before assigning a production memory envelope.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -199,9 +241,9 @@ universal SLA.
   CPU and the allocation pressure to full gravity rebuilds.
 - **P8.2b:** complete. Fair token credit and a bounded circular cursor reduce
   per-update PVS p95 by approximately 64 percent with unchanged decisions.
-- **P8.2c:** active. Harden gravity invalidation and field rebuild allocation
-  using the same structural workload and connectivity assertions.
-- **P8.3:** execute the explicit Z 0 regression matrix and publish the minimal
+- **P8.2c:** complete. Per-grid reusable topology workspaces reduce measured
+  allocation by approximately 98.8 percent with exact connectivity unchanged.
+- **P8.3:** active. Execute the explicit Z 0 regression matrix and publish the minimal
   engine/content porting contract with automated checks.
 - **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
   regression, operational diagnostics, and the final public-server checklist.

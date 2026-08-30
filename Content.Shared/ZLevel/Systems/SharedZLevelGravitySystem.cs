@@ -2,7 +2,6 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using System.Diagnostics;
-using System.Linq;
 using Content.Shared.Gravity;
 using Content.Shared.ZLevel.Components;
 using Robust.Shared.GameStates;
@@ -28,6 +27,7 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private EntityQuery<ZLevelPositionComponent> _positionQuery;
     private readonly Dictionary<EntityUid, GravityFieldCache> _caches = new();
     private readonly HashSet<EntityUid> _pendingWeightlessRefresh = new();
+    private readonly List<EntityUid> _pendingRefreshBuffer = new();
 
     public int CachedGridCount => _caches.Count;
     public int PendingRefreshGridCount => _pendingWeightlessRefresh.Count;
@@ -61,9 +61,10 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
         if (_pendingWeightlessRefresh.Count == 0)
             return;
 
-        var grids = _pendingWeightlessRefresh.ToArray();
+        _pendingRefreshBuffer.Clear();
+        _pendingRefreshBuffer.AddRange(_pendingWeightlessRefresh);
         _pendingWeightlessRefresh.Clear();
-        foreach (var gridUid in grids)
+        foreach (var gridUid in _pendingRefreshBuffer)
         {
             RefreshWeightlessnessOnGrid(gridUid);
         }
@@ -131,7 +132,8 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
     private GravityFieldCache GetCache(EntityUid gridUid, MapGridComponent grid)
     {
-        if (_caches.TryGetValue(gridUid, out var cached))
+        var reusedWorkspace = _caches.TryGetValue(gridUid, out var cached);
+        if (reusedWorkspace && !cached!.Dirty)
         {
             _metrics.RecordGravityCacheAccess(true);
             return cached;
@@ -139,41 +141,49 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
         _metrics.RecordGravityCacheAccess(false);
         var started = Stopwatch.GetTimestamp();
-
-        var sources = GetSources(gridUid, grid);
-        var liveTiles = _map.GetAllNonEmptyZLevelTiles(gridUid, grid)
-            .Select(tile => tile.GridIndices)
-            .ToHashSet();
-        var seeds = sources
-            .Select(source => new ZLevelGravitySeed(source.Node, source.Node.Z, source.Uid))
-            .ToArray();
-        var assignments = ZLevelGravitySolver.Solve(liveTiles, seeds);
-        var columns = new Dictionary<Vector2i, List<GravityFieldNode>>();
-
-        foreach (var (node, assignment) in assignments)
+        if (!reusedWorkspace)
         {
-            var xy = new Vector2i(node.X, node.Y);
-            if (!columns.TryGetValue(xy, out var column))
-            {
-                column = new List<GravityFieldNode>();
-                columns.Add(xy, column);
-            }
-
-            column.Add(new GravityFieldNode(node.Z, assignment.TargetLevel, assignment.Distance));
+            cached = new GravityFieldCache();
+            _caches.Add(gridUid, cached);
         }
 
-        cached = new GravityFieldCache(columns);
-        _caches[gridUid] = cached;
+        if (!cached!.LiveTilesCurrent)
+            RefreshLiveTiles(gridUid, grid, cached);
+
+        CollectSeeds(gridUid, grid, cached.Seeds);
+        ZLevelGravitySolver.SolveSorted(
+            cached.LiveTiles,
+            cached.Seeds,
+            cached.Assignments,
+            cached.Queue);
+        RebuildColumns(cached);
+        cached.Dirty = false;
+        cached.LiveTilesCurrent = true;
         _metrics.RecordGravityBuild(
-            liveTiles.Count,
-            sources.Count,
-            Stopwatch.GetTimestamp() - started);
+            cached.LiveTiles.Count,
+            cached.Seeds.Count,
+            Stopwatch.GetTimestamp() - started,
+            reusedWorkspace);
         return cached;
     }
 
-    private List<GravitySource> GetSources(EntityUid gridUid, MapGridComponent grid)
+    private void RefreshLiveTiles(
+        EntityUid gridUid,
+        MapGridComponent grid,
+        GravityFieldCache cache)
     {
-        var sources = new List<GravitySource>();
+        cache.LiveTiles.Clear();
+        foreach (var tile in _map.GetAllNonEmptyZLevelTiles(gridUid, grid))
+            cache.LiveTiles.Add(tile.GridIndices);
+        cache.LiveTilesCurrent = true;
+    }
+
+    private void CollectSeeds(
+        EntityUid gridUid,
+        MapGridComponent grid,
+        List<ZLevelGravitySeed> seeds)
+    {
+        seeds.Clear();
         var query = EntityQueryEnumerator<GravityGeneratorComponent, TransformComponent>();
         while (query.MoveNext(out var uid, out var generator, out var transform))
         {
@@ -182,11 +192,45 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
 
             var xy = _map.TileIndicesFor(gridUid, grid, transform.Coordinates);
             var z = _transform.GetZLevel((uid, transform, _positionQuery.CompOrNull(uid)));
-            sources.Add(new GravitySource(uid, new ZLevelTileIndices(xy.X, xy.Y, z)));
+            var node = new ZLevelTileIndices(xy.X, xy.Y, z);
+            seeds.Add(new ZLevelGravitySeed(node, node.Z, uid));
         }
 
-        sources.Sort((left, right) => left.Uid.CompareTo(right.Uid));
-        return sources;
+        seeds.Sort(static (left, right) => left.Source.CompareTo(right.Source));
+    }
+
+    private static void RebuildColumns(GravityFieldCache cache)
+    {
+        foreach (var column in cache.Columns.Values)
+            column.Clear();
+
+        foreach (var (node, assignment) in cache.Assignments)
+        {
+            var xy = new Vector2i(node.X, node.Y);
+            if (!cache.Columns.TryGetValue(xy, out var column))
+            {
+                column = cache.ColumnPool.Count == 0
+                    ? new List<GravityFieldNode>()
+                    : cache.ColumnPool.Pop();
+                cache.Columns.Add(xy, column);
+            }
+
+            column.Add(new GravityFieldNode(node.Z, assignment.TargetLevel, assignment.Distance));
+        }
+
+        cache.EmptyColumns.Clear();
+        foreach (var (xy, column) in cache.Columns)
+        {
+            if (column.Count == 0)
+                cache.EmptyColumns.Add(xy);
+        }
+
+        foreach (var xy in cache.EmptyColumns)
+        {
+            var column = cache.Columns[xy];
+            cache.Columns.Remove(xy);
+            cache.ColumnPool.Push(column);
+        }
     }
 
     private void OnIsWeightless(Entity<GravityAffectedComponent> entity, ref IsWeightlessEvent args)
@@ -242,7 +286,7 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private void OnSourceChanged(Entity<GravityGeneratorComponent> entity, ref ZLevelGravitySourceChangedEvent args)
     {
         if (args.OldGridUid is { } oldGridUid && _gridQuery.HasComp(oldGridUid))
-            InvalidateGrid(oldGridUid);
+            InvalidateGrid(oldGridUid, preserveLiveTiles: true);
 
         InvalidateCurrentGrid(entity.Owner);
     }
@@ -250,17 +294,52 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private void OnGridGravityChanged(ref GravityChangedEvent args)
     {
         if (_gridQuery.HasComp(args.ChangedGridIndex))
-            InvalidateGrid(args.ChangedGridIndex);
+            InvalidateGrid(args.ChangedGridIndex, preserveLiveTiles: true);
     }
 
     private void OnTileChanged(ref TileChangedEvent args)
     {
-        InvalidateGrid(args.Entity.Owner);
+        var changed = false;
+        foreach (var change in args.Changes)
+        {
+            if (!change.EmptyChanged)
+                continue;
+
+            changed = true;
+            if (!_caches.TryGetValue(args.Entity.Owner, out var cache) || !cache.LiveTilesCurrent)
+                continue;
+
+            var indices = new ZLevelTileIndices(change.GridIndices.X, change.GridIndices.Y, 0);
+            if (change.NewTile.IsEmpty)
+                cache.LiveTiles.Remove(indices);
+            else
+                cache.LiveTiles.Add(indices);
+        }
+
+        if (changed)
+            InvalidateGrid(args.Entity.Owner, preserveLiveTiles: true);
     }
 
     private void OnZLevelTileChanged(ref ZLevelTileChangedEvent args)
     {
-        InvalidateGrid(args.Entity.Owner);
+        var changed = false;
+        foreach (var change in args.Changes)
+        {
+            if (!change.EmptyChanged)
+                continue;
+
+            changed = true;
+            if (!_caches.TryGetValue(args.Entity.Owner, out var cache) || !cache.LiveTilesCurrent)
+                continue;
+
+            if (change.NewTile.IsEmpty)
+                cache.LiveTiles.Remove(change.GridIndices);
+            else
+                cache.LiveTiles.Add(change.GridIndices);
+        }
+
+        if (changed)
+            InvalidateGrid(args.Entity.Owner, preserveLiveTiles: true);
     }
 
     private void OnGridRemoved(GridRemovalEvent args)
@@ -273,7 +352,7 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     private void InvalidateCurrentGrid(EntityUid uid)
     {
         if (TryComp(uid, out TransformComponent? transform) && transform.GridUid is { } gridUid)
-            InvalidateGrid(gridUid);
+            InvalidateGrid(gridUid, preserveLiveTiles: true);
     }
 
     /// <summary>
@@ -282,9 +361,21 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
     /// </summary>
     public void InvalidateGrid(EntityUid gridUid)
     {
-        var removed = _caches.Remove(gridUid);
+        InvalidateGrid(gridUid, preserveLiveTiles: false);
+    }
+
+    private void InvalidateGrid(EntityUid gridUid, bool preserveLiveTiles)
+    {
+        var retained = _caches.TryGetValue(gridUid, out var cache);
+        if (retained)
+        {
+            cache!.Dirty = true;
+            if (!preserveLiveTiles)
+                cache.LiveTilesCurrent = false;
+        }
+
         var managed = IsManagedGrid(gridUid);
-        if (!removed && !managed)
+        if (!retained && !managed)
             return;
 
         _metrics.RecordGravityInvalidation();
@@ -302,9 +393,18 @@ public sealed class SharedZLevelGravitySystem : EntitySystem
         }
     }
 
-    private sealed record GravityFieldCache(Dictionary<Vector2i, List<GravityFieldNode>> Columns);
-
-    private readonly record struct GravitySource(EntityUid Uid, ZLevelTileIndices Node);
+    private sealed class GravityFieldCache
+    {
+        public readonly Dictionary<Vector2i, List<GravityFieldNode>> Columns = new();
+        public readonly Stack<List<GravityFieldNode>> ColumnPool = new();
+        public readonly List<Vector2i> EmptyColumns = new();
+        public readonly HashSet<ZLevelTileIndices> LiveTiles = new();
+        public readonly List<ZLevelGravitySeed> Seeds = new();
+        public readonly Dictionary<ZLevelTileIndices, ZLevelGravityAssignment> Assignments = new();
+        public readonly Queue<ZLevelTileIndices> Queue = new();
+        public bool Dirty = true;
+        public bool LiveTilesCurrent;
+    }
 
     private readonly record struct GravityFieldNode(int Level, int TargetLevel, int SourceDistance);
 }

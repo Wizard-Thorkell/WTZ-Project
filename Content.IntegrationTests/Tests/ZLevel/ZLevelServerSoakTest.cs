@@ -194,7 +194,7 @@ public sealed class ZLevelServerSoakTest : GameTest
                 AssertRestored(stressFixture);
 
                 report = new ZLevelServerSoakReport(
-                    4,
+                    5,
                     DateTimeOffset.UtcNow,
                     CreateHostSnapshot(),
                     settings,
@@ -731,6 +731,7 @@ public sealed class ZLevelServerSoakTest : GameTest
             Assert.That(metrics.GravityQueries, Is.GreaterThan(fixture.GravitySamples.Count));
             Assert.That(metrics.GravityInvalidations, Is.GreaterThanOrEqualTo(settings.MeasuredIterations * 2));
             Assert.That(metrics.GravityBuilds, Is.GreaterThan(0));
+            Assert.That(metrics.GravityReusedBuilds, Is.EqualTo(metrics.GravityBuilds));
             Assert.That(metrics.PvsRefreshes, Is.EqualTo(expectedRefreshes));
             Assert.That(metrics.PvsViewers, Is.GreaterThanOrEqualTo(expectedRefreshes));
             Assert.That(metrics.PvsCandidates, Is.GreaterThan(fixture.CandidateEntities.Count));

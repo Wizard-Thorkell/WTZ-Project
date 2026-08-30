@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.2c gravity topology allocation and invalidation hardening`.
+- Active package: `P8.3a executable Z 0 compatibility matrix`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -48,7 +48,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Complete |
-| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.2 active) |
+| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.3 active) |
 
 ## Phase P4 Packages
 
@@ -106,8 +106,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | Package | Deliverable | Status |
 | --- | --- | --- |
 | P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Complete |
-| P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Active |
-| P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Pending |
+| P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Complete |
+| P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Active |
 | P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Pending |
 
 ## Phase P8.2 Packages
@@ -116,7 +116,15 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | --- | --- | --- |
 | P8.2a | Per-stage latency/allocation attribution and GC correlation | Complete |
 | P8.2b | Fair, staggered, and bounded PVS refresh scheduling | Complete |
-| P8.2c | Gravity invalidation, topology allocation, and lifecycle hardening | Active |
+| P8.2c | Gravity invalidation, topology allocation, and lifecycle hardening | Complete |
+
+## Phase P8.3 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P8.3a | Executable Z 0 compatibility inventory and regression matrix | Active |
+| P8.3b | Versioned engine/content porting manifest and compatibility verifier | Pending |
+| P8.3c | Clean-worktree port rehearsal, guide, and P8.3 phase gate | Pending |
 
 ## Phase P0 Packages
 
@@ -7707,10 +7715,120 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.2c removes full gravity topology rematerialization and most of
   the 168.25 MB allocation caused by paired single-tile mutations.
 
+## Completed Package: P8.2c Reusable Gravity Topology Workspaces
+
+### Scope
+
+- Retain one bounded high-water workspace per managed grid for live tiles,
+  ordered sources, BFS assignments, queue storage, gravity columns, and recycled
+  column lists.
+- Maintain the live topology incrementally for ordinary base and native-layer
+  empty/non-empty tile transitions while ignoring solid-to-solid replacement.
+- Preserve a conservative external invalidation API that marks the live-tile
+  snapshot stale, and release the entire workspace when its grid is removed.
+- Reuse the pending weightlessness refresh buffer, expose reused-build metrics,
+  and extend the soak report contract to schema 5.
+- Prove that reused buffers discard stale assignments and retain the exact
+  connected-component gravity result after topology changes.
+
+### Evidence
+
+- Four focused gravity solver/cache/invalidation cases pass. The new connected
+  integration case proves that solid tile replacement produces one cache hit and
+  zero invalidations, while removing and restoring a native Z1 endpoint produces
+  exactly two builds and reuses the same workspace both times.
+- The short schema 5 Debug soak passes with three floors, two sessions, and two
+  measured iterations. Its gravity-consumer stages allocate only 416 bytes in
+  total; the remaining small-profile allocation is owned primarily by sound.
+- Two schema 5 Release profiles pass at 10 floors, 32 sessions, 960 candidates,
+  8 warm-ups, and 128 measured iterations. Total time is 6,858.106 and
+  7,419.711 ms; main-thread allocation is 2,068,744 and 2,064,688 bytes.
+- The equivalent schema 4 scheduler profiles allocated 170,281,832 and
+  170,266,272 bytes. Total measured allocation therefore falls approximately
+  98.8 percent. The two gravity-consumer stages fall from 168,249,344 bytes to
+  26,624 bytes, a reduction above 99.98 percent.
+- Both captures report 256 gravity builds, 256 reused builds, 926,080 processed
+  tiles, 54,144 cache hits, 256 misses, and 256 invalidations. Gravity build time
+  is 389.790 and 406.336 ms, compared with 631.818 and 626.953 ms before reuse.
+- Both captures preserve 4,096 scheduled PVS refreshes, 4,218,880 candidates and
+  checks, maximum scheduler batch 11, zero deferred work, and every previous
+  correctness/cache/budget invariant. No workload GC collection occurs in
+  either run, compared with seven collection-bearing iterations before reuse.
+- The complete Debug Z-level matrix passes 338 executed cases with one known
+  pooled lighting-cache skip; that case passes 1/1 in isolation. Content
+  Z-level/mapping unit coverage passes 22/22 and the generated 3/6/10-floor
+  baseline passes 3/3.
+- The final restored, non-incremental, single-worker solution build passes in
+  2m36s with zero errors and 704 established warnings. An initial `--no-restore`
+  attempt after a Release-only restore lacked optional Debug assets; allowing
+  the normal restore repaired the invocation without source changes.
+
+### Decisions
+
+- Keep the exact deterministic multi-source BFS. Reuse its storage and maintain
+  only the live-tile inventory incrementally; do not introduce a second,
+  partially incremental connectivity algorithm with harder invalidation rules.
+- Treat tile emptiness as the topology contract. Replacing one non-empty tile
+  definition with another cannot change connected gravity and must not dirty the
+  field.
+- Trust ordinary tile/source events to preserve the current live inventory, but
+  make the public batch-edit invalidation conservative by forcing re-enumeration
+  on the next query.
+- Scope retained capacity to each grid and remove it on grid teardown. Do not use
+  a process-global pool that can retain a deleted station's largest topology.
+- Make schema 5 append-only over schema 4 by adding reused-build evidence while
+  preserving every previous scheduler and subsystem field.
+
+### Completion Gate
+
+- [x] Scope check: gravity solver/cache/invalidation, one metric, diagnostics,
+      focused tests, soak schema, and synchronized documentation only.
+- [x] Invariant review: Z 0 base tiles and native layers share the same empty-
+      transition rule; source world Z, moving-grid local frames, deterministic
+      source order, server authority, and exact connected components remain
+      unchanged.
+- [x] Automated verification: 4 focused, 1 short Debug plus 2 complete Release
+      soaks, 339 broad cases covered, isolated pooled cache, 22 unit/mapping, 3
+      baseline cases, and the full solution build pass.
+- [x] Performance evidence: two equivalent schema 5 captures reproduce every
+      structural counter and reduce total allocation by approximately 98.8
+      percent without changing PVS or gravity decisions.
+- [x] Documentation: lifecycle, invalidation policy, schema 5, before/after
+      measurements, runner behavior, and residual limits are synchronized.
+- [x] Dependency check: WTZ Engine remains clean and published at revision
+      `7cbd778024`; the workspace optimization is content-shared policy.
+- [x] Git check: generated reports remain ignored; `git diff --check` reports
+      only checkout line-ending notices; the final tree, staged scope, commit,
+      push, and remote hash are checked at publication.
+- [x] Mini review: test fixtures were corrected to avoid physical grid splitting
+      and to respect column-level gravity queries; stale-buffer and external-
+      invalidation paths are directly covered.
+- [x] Commit: package prepared as `Reuse Z-level gravity field workspaces` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: field topology rematerialization, not the BFS result itself, caused
+  nearly all measured allocation. Reusing ownership-local storage removes that
+  pressure without introducing an approximate gravity model.
+- Finding: retaining the live set across source-only invalidations and updating
+  it from empty transitions also removes roughly one third of measured gravity
+  build CPU on the comparison host.
+- Residual risk: collection capacities retain the largest topology seen by a
+  live grid until that grid is deleted. P8.4 must inspect retained memory on a
+  representative station and repeated grid lifecycle, not only per-iteration
+  allocation.
+- Residual risk: scheduler-frame p95 remains approximately 39 ms in the synthetic
+  32-session profile. Dedicated-server cap and cadence selection remains P8.4.
+- Next package: P8.3a converts the stated Z 0 compatibility promise into an
+  explicit inventory and executable regression matrix before the port contract
+  is frozen.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.2c | `Reuse Z-level gravity field workspaces` | 4 focused, 1 Debug + 2 Release soaks, 339 broad covered, isolated cache, 22 unit/mapping, 3 baseline, full build, allocation/diff/dependency review | Complete |
 | 2026-08-30 | P8.2b | `Stagger Z-level PVS refresh work` | 4 scheduler, 1 Debug + 2 Release soaks, 17 focused, 337 broad, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.2a | `Attribute Z-level server workload costs` | Debug/Release builds, 1 short Debug soak, 2 full Release soaks, byte conservation, diff/dependency review | Complete |
 | 2026-08-30 | P8.1 | `Measure deterministic Z-level server scale` | 2 Release soaks, 337 complete Debug, 321 namespace Release, isolated pooled cache, 18 unit/mapping, 5 interaction, 3 baseline, full build, diff/dependency review | Complete |

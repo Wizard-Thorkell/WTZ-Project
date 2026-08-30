@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
 }
 
 $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-if ($report.schemaVersion -ne 4) {
+if ($report.schemaVersion -ne 5) {
     throw "Unsupported server soak report schema: $($report.schemaVersion)."
 }
 

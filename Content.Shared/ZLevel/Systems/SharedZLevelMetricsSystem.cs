@@ -54,6 +54,7 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
     private long _gravityCacheMisses;
     private long _gravityInvalidations;
     private long _gravityBuilds;
+    private long _gravityReusedBuilds;
     private long _gravityBuildTiles;
     private long _gravityBuildSources;
     private long _gravityBuildTimestampTicks;
@@ -260,9 +261,15 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _gravityInvalidations++;
     }
 
-    public void RecordGravityBuild(int tileCount, int sourceCount, long elapsedTimestampTicks)
+    public void RecordGravityBuild(
+        int tileCount,
+        int sourceCount,
+        long elapsedTimestampTicks,
+        bool reusedWorkspace)
     {
         _gravityBuilds++;
+        if (reusedWorkspace)
+            _gravityReusedBuilds++;
         _gravityBuildTiles += tileCount;
         _gravityBuildSources += sourceCount;
         _gravityBuildTimestampTicks += elapsedTimestampTicks;
@@ -542,6 +549,7 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
             _gravityCacheMisses,
             _gravityInvalidations,
             _gravityBuilds,
+            _gravityReusedBuilds,
             _gravityBuildTiles,
             _gravityBuildSources,
             TimestampTicksToMilliseconds(_gravityBuildTimestampTicks),
@@ -657,6 +665,7 @@ public sealed class SharedZLevelMetricsSystem : EntitySystem
         _gravityCacheMisses = 0;
         _gravityInvalidations = 0;
         _gravityBuilds = 0;
+        _gravityReusedBuilds = 0;
         _gravityBuildTiles = 0;
         _gravityBuildSources = 0;
         _gravityBuildTimestampTicks = 0;
@@ -777,6 +786,7 @@ public readonly record struct ZLevelMetricsSnapshot(
     long GravityCacheMisses,
     long GravityInvalidations,
     long GravityBuilds,
+    long GravityReusedBuilds,
     long GravityBuildTiles,
     long GravityBuildSources,
     double GravityBuildMilliseconds,

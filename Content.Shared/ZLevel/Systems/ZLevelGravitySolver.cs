@@ -28,8 +28,24 @@ public static class ZLevelGravitySolver
     {
         var assignments = new Dictionary<ZLevelTileIndices, ZLevelGravityAssignment>();
         var queue = new Queue<ZLevelTileIndices>();
+        var orderedSeeds = seeds.OrderBy(seed => seed.Source).ToArray();
+        SolveSorted(liveTiles, orderedSeeds, assignments, queue);
+        return assignments;
+    }
 
-        foreach (var seed in seeds.OrderBy(seed => seed.Source))
+    /// <summary>
+    /// Fills caller-owned work buffers. Seeds must already be ordered by source.
+    /// </summary>
+    public static void SolveSorted(
+        IReadOnlySet<ZLevelTileIndices> liveTiles,
+        IReadOnlyList<ZLevelGravitySeed> orderedSeeds,
+        Dictionary<ZLevelTileIndices, ZLevelGravityAssignment> assignments,
+        Queue<ZLevelTileIndices> queue)
+    {
+        assignments.Clear();
+        queue.Clear();
+
+        foreach (var seed in orderedSeeds)
         {
             if (!liveTiles.Contains(seed.Node) || assignments.ContainsKey(seed.Node))
                 continue;
@@ -55,8 +71,6 @@ public static class ZLevelGravitySolver
                 queue.Enqueue(neighbor);
             }
         }
-
-        return assignments;
     }
 }
 

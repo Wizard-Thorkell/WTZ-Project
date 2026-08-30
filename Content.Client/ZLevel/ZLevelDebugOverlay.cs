@@ -143,7 +143,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         args.ScreenHandle.DrawString(
             _font,
             metricsPosition + new Vector2(0f, 42f),
-            $"gravity build count:{metrics.GravityBuilds} " +
+            $"gravity build count/reuse:{metrics.GravityBuilds}/{metrics.GravityReusedBuilds} " +
             $"avg/max:{metrics.GravityAverageBuildMilliseconds:0.000}/{metrics.GravityMaxBuildMilliseconds:0.000}ms",
             metricsColor);
         args.ScreenHandle.DrawString(

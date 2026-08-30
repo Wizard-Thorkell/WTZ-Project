@@ -1120,12 +1120,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_server_soak
 
 The runner defaults to the P8.1 Release profile of 10 floors, 32 sessions, 960
 representative entities, 36 traversal nodes, and 128 measured structural
-iterations. Its schema 4 report includes subsystem counters and budgets,
+iterations. Its schema 5 report includes subsystem counters and budgets,
 bounded-cache state, allocation/heap/GC evidence, iteration/PVS latency
 percentiles, per-stage latency/allocation, GC correlation, and real scheduler
-frame metrics. Load axes are script parameters; generated reports remain under
-ignored `artifacts/`. See `Docs/ZLevelServerHardening.md` for the workload
-contract, current evidence, and interpretation limits.
+frame metrics, including gravity builds that reused per-grid workspaces. Load
+axes are script parameters; generated reports remain under ignored `artifacts/`.
+See `Docs/ZLevelServerHardening.md` for the workload contract, current evidence,
+and interpretation limits.
 
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.
@@ -1172,8 +1173,10 @@ long-tail frame to the intentionally batched PVS refresh, while paired complete
 gravity rebuilds own approximately 98.9 percent of measured allocation. P8.2b
 now distributes the PVS cycle across server updates, reducing per-update p95 by
 approximately 64 percent at unchanged cadence in the 32-session profile. P8.2c
-owns gravity invalidation/allocation; cache capacities remain unchanged because
-the release profile showed no material cache pressure.
+now reuses per-grid gravity topology workspaces and incrementally maintains live
+tiles, reducing total measured allocation by approximately 98.8 percent while
+preserving exact connected-component results. P8.3 owns the executable Z 0
+compatibility matrix and versioned porting contract.
 
 ## Definition Of Done
 

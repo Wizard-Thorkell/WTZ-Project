@@ -126,6 +126,7 @@ public sealed class ZLevelMetricsTest : GameTest
                 Assert.That(resetSnapshot.SkyExposureEvictions, Is.Zero);
                 Assert.That(resetSnapshot.VisibilityTileQueries, Is.Zero);
                 Assert.That(resetSnapshot.GravityQueries, Is.Zero);
+                Assert.That(resetSnapshot.GravityReusedBuilds, Is.Zero);
                 Assert.That(resetSnapshot.FlightStarts, Is.Zero);
                 Assert.That(resetSnapshot.FlightStops, Is.Zero);
                 Assert.That(resetSnapshot.FlightTargetChanges, Is.Zero);

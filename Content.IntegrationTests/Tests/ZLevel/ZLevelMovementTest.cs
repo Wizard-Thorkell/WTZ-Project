@@ -302,6 +302,90 @@ public sealed class ZLevelMovementTest : MovementTest
     }
 
     [Test]
+    public async Task GravityCacheReusesWorkspaceAndIgnoresSolidTileReplacement()
+    {
+        EntityUid generator = default;
+        Vector2i sourceTile = default;
+        Vector2i probeTile = default;
+
+        await Server.WaitPost(() =>
+        {
+            var definitions = Server.ResolveDependency<ITileDefinitionManager>();
+            var map = SEntMan.System<SharedMapSystem>();
+            var zLevelMap = SEntMan.System<SharedZLevelMapSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var coordinates = SEntMan.GetCoordinates(PlayerCoords);
+            sourceTile = map.TileIndicesFor(MapData.Grid, grid, coordinates);
+            probeTile = new Vector2i(
+                (int) MathF.Ceiling(grid.LocalAABB.Right / grid.TileSize) + 1,
+                sourceTile.Y);
+            var plating = (ContentTileDefinition) definitions["Plating"];
+
+            zLevelMap.Configure(
+                MapData.MapUid,
+                -2,
+                2,
+                0,
+                ZLevelDefaultBoundaryMode.TileAboveCloses);
+            for (var x = sourceTile.X; x <= probeTile.X; x++)
+            {
+                map.SetZLevelTile(
+                    MapData.Grid,
+                    grid,
+                    new ZLevelTileIndices(x, sourceTile.Y, 1),
+                    new Tile(plating.TileId));
+            }
+            generator = SEntMan.SpawnEntity("ZLevelGravityGeneratorDummy", coordinates);
+            SEntMan.GetComponent<ApcPowerReceiverComponent>(generator).NeedsPower = false;
+        });
+
+        await RunTicks(5);
+
+        await Server.WaitAssertion(() =>
+        {
+            var definitions = Server.ResolveDependency<ITileDefinitionManager>();
+            var gravity = SEntMan.System<SharedZLevelGravitySystem>();
+            var map = SEntMan.System<SharedMapSystem>();
+            var metrics = SEntMan.System<SharedZLevelMetricsSystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var current = map.GetTileRef(MapData.Grid, grid, sourceTile).Tile;
+            var plating = (ContentTileDefinition) definitions["Plating"];
+            var steel = (ContentTileDefinition) definitions["FloorSteel"];
+            var replacement = current.TypeId == plating.TileId
+                ? new Tile(steel.TileId)
+                : new Tile(plating.TileId);
+
+            Assert.That(gravity.TryGetGravityTarget(MapData.Grid, grid, probeTile, 1, out _), Is.True);
+            metrics.ResetCounters();
+
+            map.SetTile(MapData.Grid, grid, sourceTile, replacement);
+            Assert.That(gravity.TryGetGravityTarget(MapData.Grid, grid, probeTile, 1, out _), Is.True);
+            var replacementMetrics = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(replacementMetrics.GravityInvalidations, Is.Zero);
+                Assert.That(replacementMetrics.GravityBuilds, Is.Zero);
+                Assert.That(replacementMetrics.GravityCacheHits, Is.EqualTo(1));
+            });
+
+            metrics.ResetCounters();
+            var probeIndices = new ZLevelTileIndices(probeTile.X, probeTile.Y, 1);
+            map.SetZLevelTile(MapData.Grid, grid, probeIndices, Tile.Empty);
+            Assert.That(gravity.TryGetGravityTarget(MapData.Grid, grid, probeTile, 1, out _), Is.False);
+            map.SetZLevelTile(MapData.Grid, grid, probeIndices, replacement);
+            Assert.That(gravity.TryGetGravityTarget(MapData.Grid, grid, probeTile, 1, out var target), Is.True);
+            var mutationMetrics = metrics.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(target, Is.Zero);
+                Assert.That(mutationMetrics.GravityInvalidations, Is.EqualTo(2));
+                Assert.That(mutationMetrics.GravityBuilds, Is.EqualTo(2));
+                Assert.That(mutationMetrics.GravityReusedBuilds, Is.EqualTo(2));
+            });
+        });
+    }
+
+    [Test]
     public void GravitySolverDoesNotCrossEmptySpace()
     {
         var station = new HashSet<ZLevelTileIndices>
@@ -836,6 +920,37 @@ public sealed class ZLevelMovementTest : MovementTest
 
             SEntMan.DeleteEntity(origin);
             Assert.That(graph.NodeCount, Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public void GravitySolverReusableBuffersDiscardStaleAssignments()
+    {
+        var liveTiles = new HashSet<ZLevelTileIndices>
+        {
+            new(0, 0, 0),
+            new(1, 0, 0),
+            new(1, 0, 1),
+        };
+        var seeds = new List<ZLevelGravitySeed>
+        {
+            new(new ZLevelTileIndices(0, 0, 0), 0, EntityUid.FirstUid),
+        };
+        var assignments = new Dictionary<ZLevelTileIndices, ZLevelGravityAssignment>();
+        var queue = new Queue<ZLevelTileIndices>();
+
+        ZLevelGravitySolver.SolveSorted(liveTiles, seeds, assignments, queue);
+        Assert.That(assignments, Does.ContainKey(new ZLevelTileIndices(1, 0, 1)));
+
+        liveTiles.Remove(new ZLevelTileIndices(1, 0, 0));
+        ZLevelGravitySolver.SolveSorted(liveTiles, seeds, assignments, queue);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(assignments, Has.Count.EqualTo(1));
+            Assert.That(assignments, Does.ContainKey(new ZLevelTileIndices(0, 0, 0)));
+            Assert.That(assignments, Does.Not.ContainKey(new ZLevelTileIndices(1, 0, 1)));
+            Assert.That(queue, Is.Empty);
         });
     }
 
