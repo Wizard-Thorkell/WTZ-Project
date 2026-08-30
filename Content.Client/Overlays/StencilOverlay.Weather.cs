@@ -1,5 +1,5 @@
+using System.Diagnostics;
 using System.Numerics;
-using Content.Shared.Light.Components;
 using Content.Shared.StatusEffectNew.Components;
 using Content.Shared.Weather;
 using Robust.Client.Graphics;
@@ -9,8 +9,6 @@ namespace Content.Client.Overlays;
 
 public sealed partial class StencilOverlay
 {
-    private List<Entity<MapGridComponent>> _grids = new();
-
     private void DrawWeather(
         in OverlayDrawArgs args,
         CachedResources res,
@@ -22,6 +20,19 @@ public sealed partial class StencilOverlay
         var worldAABB = args.WorldAABB;
         var worldBounds = args.WorldBounds;
         var position = args.Viewport.Eye?.Position.Position ?? Vector2.Zero;
+        var viewerWorldZ = args.Viewport.Eye?.WorldZLevel ?? 0;
+        if (args.Viewport.Eye is { } eye &&
+            _viewContext.TryGetViewContext(eye, null, out var view))
+        {
+            viewerWorldZ = view.WorldZLevel;
+        }
+
+        _weatherPresentation.BuildMask(_weather, mapId, worldAABB, viewerWorldZ);
+        var renderStarted = Stopwatch.GetTimestamp();
+        var renderedBatches = 0;
+        var renderedRuns = 0;
+        var drawCalls = 0;
+        var failClosed = _weatherPresentation.MaskEntireViewport;
 
         // Cut out the irrelevant bits via stencil
         // This is why we don't just use parallax; we might want specific tiles to get drawn over
@@ -30,32 +41,47 @@ public sealed partial class StencilOverlay
             () =>
             {
                 var xformQuery = _entManager.GetEntityQuery<TransformComponent>();
-                _grids.Clear();
-
-                // idk if this is safe to cache in a field and clear sloth help
-                _mapManager.FindGridsIntersecting(mapId, worldAABB, ref _grids);
-
-                foreach (var grid in _grids)
+                if (failClosed)
                 {
-                    var matrix = _transform.GetWorldMatrix(grid, xformQuery);
+                    worldHandle.SetTransform(invMatrix);
+                    worldHandle.DrawRect(worldAABB, Color.White);
+                    drawCalls++;
+                    return;
+                }
+
+                foreach (var batch in _weatherPresentation.Batches)
+                {
+                    if (!_entManager.TryGetComponent(batch.GridUid, out MapGridComponent? grid) ||
+                        grid.Deleted)
+                    {
+                        failClosed = true;
+                        worldHandle.SetTransform(invMatrix);
+                        worldHandle.DrawRect(worldAABB, Color.White);
+                        drawCalls++;
+                        return;
+                    }
+
+                    var matrix = _transform.GetWorldMatrix(batch.GridUid, xformQuery);
                     var matty = Matrix3x2.Multiply(matrix, invMatrix);
                     worldHandle.SetTransform(matty);
-                    _entManager.TryGetComponent(grid.Owner, out RoofComponent? roofComp);
-
-                    foreach (var tile in _map.GetTilesIntersecting(grid.Owner, grid, worldAABB))
+                    for (var i = 0; i < batch.RunCount; i++)
                     {
-                        // Ignored tiles for stencil
-                        if (_weather.CanWeatherAffect((grid.Owner, grid, roofComp), tile))
-                            continue;
-
-                        var gridTile = new Box2(tile.GridIndices * grid.Comp.TileSize,
-                            (tile.GridIndices + Vector2i.One) * grid.Comp.TileSize);
-
-                        worldHandle.DrawRect(gridTile, Color.White);
+                        var run = _weatherPresentation.Runs[batch.FirstRun + i];
+                        worldHandle.DrawRect(run.LocalBounds, Color.White);
+                        renderedRuns++;
+                        drawCalls++;
                     }
+
+                    renderedBatches++;
                 }
             },
             Color.Transparent);
+        _weatherPresentation.RecordMaskRender(
+            renderStarted,
+            renderedBatches,
+            renderedRuns,
+            drawCalls,
+            failClosed);
 
         worldHandle.SetTransform(Matrix3x2.Identity);
         worldHandle.UseShader(_protoManager.Index(StencilMask).Instance());

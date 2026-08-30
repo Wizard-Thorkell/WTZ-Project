@@ -85,7 +85,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
         _presentations.Clear();
         _firstPolicies.Policies.Clear();
         _secondPolicies.Policies.Clear();
-        Volatile.Write(ref _activePolicies, new ZLevelSoundPolicySnapshot());
+        Interlocked.Exchange(ref _activePolicies, new ZLevelSoundPolicySnapshot());
         base.Shutdown();
     }
 
@@ -94,7 +94,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
         base.FrameUpdate(frameTime);
 
         var started = Stopwatch.GetTimestamp();
-        var active = Volatile.Read(ref _activePolicies);
+        var active = ReadActivePolicies();
         var next = ReferenceEquals(active, _firstPolicies) ? _secondPolicies : _firstPolicies;
         next.Policies.Clear();
         next.Authorized = 0;
@@ -109,7 +109,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
             BuildPolicies(next, eye.Position, view, ref candidates, ref crossFloor);
         }
 
-        Volatile.Write(ref _activePolicies, next);
+        Interlocked.Exchange(ref _activePolicies, next);
         var elapsed = Stopwatch.GetTimestamp() - started;
         _frames++;
         _audioCandidates += candidates;
@@ -265,7 +265,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
         TransformComponent transform,
         MapCoordinates listener)
     {
-        var policies = Volatile.Read(ref _activePolicies);
+        var policies = ReadActivePolicies();
         if (!policies.Policies.TryGetValue(uid, out var policy))
             return;
 
@@ -308,7 +308,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
 
     public ZLevelSoundClientMetrics Snapshot()
     {
-        var active = Volatile.Read(ref _activePolicies);
+        var active = ReadActivePolicies();
         return new ZLevelSoundClientMetrics(
             _snapshotsReceived,
             _snapshotPresentationsReceived,
@@ -331,7 +331,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
 
     public bool HasCurrentPolicy(EntityUid audio)
     {
-        return Volatile.Read(ref _activePolicies).Policies.ContainsKey(audio);
+        return ReadActivePolicies().Policies.ContainsKey(audio);
     }
 
     public bool TryGetCurrentAuthorizedPolicy(
@@ -339,7 +339,7 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
         out Vector2 position,
         out float gainMultiplier)
     {
-        if (Volatile.Read(ref _activePolicies).Policies.TryGetValue(audio, out var policy) &&
+        if (ReadActivePolicies().Policies.TryGetValue(audio, out var policy) &&
             policy.Mode == ZLevelSoundClientPolicyMode.Authorized)
         {
             position = policy.Position;
@@ -368,6 +368,11 @@ public sealed class ZLevelSoundPresentationSystem : EntitySystem
         Interlocked.Exchange(ref _processedStreams, 0);
         Interlocked.Exchange(ref _processedAuthorized, 0);
         Interlocked.Exchange(ref _processedMuted, 0);
+    }
+
+    private ZLevelSoundPolicySnapshot ReadActivePolicies()
+    {
+        return Interlocked.CompareExchange(ref _activePolicies, null!, null!);
     }
 
     public static float GetRouteGainMultiplier(

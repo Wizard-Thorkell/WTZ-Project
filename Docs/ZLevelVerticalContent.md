@@ -144,6 +144,37 @@ entities without a grid are exposed; nullspace and malformed requests fail
 closed. Terminations distinguish local tile rejection, planar roof, same-floor
 blocker, sky blockage, and invalid coordinates/grid/level.
 
+## Weather Presentation And Audio
+
+The client stencil builds one retained mask plan for the viewport's active
+world floor. Every intersecting grid, including a legacy map-grid, converts that
+world floor through its current `ZLevelFrameComponent.Origin`; grids that do not
+represent the viewed floor contribute no mask. Blocked tiles are compressed
+into horizontal local-space runs grouped by grid, so contiguous interiors need
+one draw call per run rather than one per tile.
+
+Mask work is atomic. The planner preflights all visible tile checks, evaluates
+the shared weather policy, and then verifies the retained-run budget. If either
+budget cannot represent the complete plan, the stencil masks the entire
+viewport for that frame. It never exposes an arbitrary subset of an indoor area
+because iteration order happened to consume the budget first.
+
+Ambient weather audio performs one deterministic radius-three search for the
+listener update, shared by every active weather effect. It checks only the
+listener's exact inherited local floor and reports typed direct, nearby,
+blocked, invalid, or budget-exhausted outcomes. A nearby exposed tile retains
+the upstream occlusion calculation; every incomplete outcome uses the upstream
+fully occluded value. Unconfigured Z 0 maps keep their planar roof behavior.
+
+Client-owned archived limits are intentionally independent from the shared sky
+cache budgets:
+
+| CVar | Default | Effective range | Exhaustion policy |
+| --- | ---: | ---: | --- |
+| `zlevel.weather_mask_max_tile_checks_per_frame` | 16,384 | 0..1,000,000 | Mask full viewport |
+| `zlevel.weather_mask_max_runs_per_frame` | 8,192 | 0..1,000,000 | Mask full viewport |
+| `zlevel.weather_audio_max_tile_checks_per_frame` | 64 | 0..4,096 | Fully occlude weather audio |
+
 ## Cache And Budgets
 
 The process-local cache is keyed by grid UID and local tile/floor origin. It is
@@ -183,8 +214,10 @@ The cache observes:
 
 `zlevelmetrics` reports query outcomes, checks, hit rate, cache occupancy,
 invalid requests, boundary failures, budget exhaustion, invalidated entries,
-evictions, and effective limits. The existing Z-level debug overlay shows a
-compact client-local sky line.
+evictions, and effective limits. `zlevelrendermetrics` and the existing Z-level
+debug overlay add client-local weather plan, grid, tile, run, render, audio,
+timing, fail-closed, and effective-budget counters. Resetting render metrics
+also resets the weather counters.
 
 Stress snapshots use schema version 4 and include effective sky budgets plus
 query/cache/outcome counters. The 3/6/10-floor measured workload must remain hot
@@ -192,18 +225,20 @@ after warm-up when it fits the configured cache.
 
 ## Current Consumer Boundary
 
-P7.3a defines the shared Z-aware weather gameplay query without changing the
-current production presentation. Robust's legacy `RoofComponent`,
-`IsRoofComponent`, and planar behavior remain intact on unconfigured maps; they
-are not silently treated as dimensional surfaces.
+P7.3a defines the shared Z-aware weather gameplay query. P7.3b makes the
+production client stencil and ambient-audio consumers use that policy on the
+active world floor. Robust's legacy `RoofComponent`, `IsRoofComponent`, and
+planar behavior remain intact on unconfigured maps; they are not silently
+treated as dimensional surfaces.
 
 The new content is already consumed by atmosphere, visibility, sound,
 projectiles, explosions, effects, falling, support, and navigation through their
-existing specialized boundary channels. P7.3b will migrate the client stencil
-and ambient audio to the shared policy with visible-tile budgets and diagnostics.
-No arbitrary weather damage is introduced where upstream has no weather gameplay
-consumer. Interaction and authored traversal remain closed on grates; shafts
-open them only when their content explicitly requests all channels.
+existing specialized boundary channels. No arbitrary weather damage is
+introduced where upstream has no weather gameplay consumer. Presentation
+remains scoped to map-wide weather status effects and tile-authored weather
+eligibility; future spatial planet-weather volumes need a separate contract.
+Interaction and authored traversal remain closed on grates; shafts open them
+only when their content explicitly requests all channels.
 
 ## Verification
 
@@ -226,3 +261,20 @@ open them only when their content explicitly requests all channels.
   308 passed in one broad run and its one pooled skip passed in isolation.
 - The P7.3a baseline passed at 11.0122, 15.4494, and 23.2621 ms for 3, 6, and 10
   floors, with 6,336 measured bytes and 100% warm boundary/sky/gravity hits.
+- P7.3b weather presentation passes 5/5 focused cases and 8/8 together with the
+  shared policy. The cases cover legacy planar Z 0, active world floors, moving
+  frames, atomic tile/run exhaustion, exact-floor audio, and CVar clamping.
+- All 314 Content Z-level integration cases have passing evidence: 313 passed in
+  one broad run and its one pooled aperture-cache skip passed 1/1 in isolation.
+  The combined Content unit/mapping filter passes 14/14.
+- A hot loop of 128 retained mask plans allocates no more than 8,192 bytes. The
+  schema-version 4 baseline passes 3/3 at 10.8001, 15.6784, and 23.4932 ms for
+  3, 6, and 10 floors, with 6,336 bytes, 100% warm boundary/sky/gravity hits,
+  zero measured cache misses, and no PVS budget exhaustion at every depth.
+- Real OpenGL capture on an NVIDIA RTX 3070 passes 24/24 pixel checks. Covered
+  Z 2 remains visually unchanged while exposed Z 3 shows rain with an RMS
+  contrast gap of 0.056199; 1,003 mask plans report zero fail-closed frames or
+  budget exhaustion.
+- A non-incremental full-solution build completes in 2m28s with zero errors and
+  the same 695 established warnings as P7.3a. Dedicated non-incremental client
+  and integration scans attribute no warning to a modified production/test file.

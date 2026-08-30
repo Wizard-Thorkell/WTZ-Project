@@ -23,4 +23,12 @@ public sealed class MappingManagerTest
             Assert.That(encoding.GetString(encoded), Is.EqualTo(yml));
         });
     }
+
+    [Test]
+    public void RejectsInvalidUtf16BeforeEncodingSnapshot()
+    {
+        Assert.That(
+            () => MappingManager.EncodeSnapshot("name: \uD800\n"),
+            Throws.ArgumentException);
+    }
 }

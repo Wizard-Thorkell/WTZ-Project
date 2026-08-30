@@ -34,8 +34,7 @@ internal sealed class MappingSaveRequestTracker
             if (_nextRequestId == 0)
                 _nextRequestId = 1;
 
-            var completion = new TaskCompletionSource<MappingSaveResponse>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<MappingSaveResponse>();
             _pending = new PendingRequest(_nextRequestId, completion);
             requestId = _nextRequestId;
             response = completion.Task;

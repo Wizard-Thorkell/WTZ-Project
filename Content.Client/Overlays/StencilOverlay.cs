@@ -2,6 +2,7 @@ using System.Numerics;
 using Content.Client.Graphics;
 using Content.Client.Parallax;
 using Content.Client.Weather;
+using Content.Client.ZLevel;
 using Content.Shared.Salvage;
 using Content.Shared.StatusEffectNew;
 using Content.Shared.StatusEffectNew.Components;
@@ -27,13 +28,14 @@ public sealed partial class StencilOverlay : Overlay
     [Dependency] private readonly IClyde _clyde = default!;
     [Dependency] private readonly IEntityManager _entManager = default!;
     [Dependency] private readonly IGameTiming _timing = default!;
-    [Dependency] private readonly IMapManager _mapManager = default!;
     [Dependency] private readonly IPrototypeManager _protoManager = default!;
     private readonly ParallaxSystem _parallax;
     private readonly SharedTransformSystem _transform;
     private readonly SharedMapSystem _map;
     private readonly SpriteSystem _sprite;
     private readonly WeatherSystem _weather;
+    private readonly ZLevelViewContextSystem _viewContext;
+    private readonly ZLevelWeatherPresentationSystem _weatherPresentation;
     private readonly StatusEffectsSystem _statusEffects;
     private HashSet<Entity<WeatherStatusEffectComponent, StatusEffectComponent>>? _weatherSet = new();
 
@@ -43,7 +45,15 @@ public sealed partial class StencilOverlay : Overlay
 
     private readonly ShaderInstance _shader;
 
-    public StencilOverlay(ParallaxSystem parallax, SharedTransformSystem transform, SharedMapSystem map, SpriteSystem sprite, WeatherSystem weather, StatusEffectsSystem statusEffects)
+    public StencilOverlay(
+        ParallaxSystem parallax,
+        SharedTransformSystem transform,
+        SharedMapSystem map,
+        SpriteSystem sprite,
+        WeatherSystem weather,
+        ZLevelViewContextSystem viewContext,
+        ZLevelWeatherPresentationSystem weatherPresentation,
+        StatusEffectsSystem statusEffects)
     {
         ZIndex = ParallaxSystem.ParallaxZIndex + 1;
         _parallax = parallax;
@@ -51,6 +61,8 @@ public sealed partial class StencilOverlay : Overlay
         _map = map;
         _sprite = sprite;
         _weather = weather;
+        _viewContext = viewContext;
+        _weatherPresentation = weatherPresentation;
         _statusEffects = statusEffects;
         IoCManager.InjectDependencies(this);
         _shader = _protoManager.Index(CircleShader).InstanceUnique();

@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.3b bounded Z-aware weather presentation`.
+- Active package: `P7.4a flight movement, gravity, and collision contract`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -47,7 +47,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P4 | Vertical sound propagation through cached portals | Complete |
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
-| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.3b active) |
+| P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | In progress (P7.4a active) |
 | P8 | Server hardening, scale tests, Z 0 regression, and porting guide | Pending |
 
 ## Phase P4 Packages
@@ -94,8 +94,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.2a | Elevator cabins, stops, controls, power, and traversal lifecycle | Complete |
 | P7.2b | Elevator mapping, save/load, pathfinding, and hardening | Complete |
 | P7.3a | Shared Z-aware weather exposure policy | Complete |
-| P7.3b | Bounded Z-aware weather rendering, audio, and diagnostics | Active |
-| P7.4a | Flight movement, gravity, and collision contract | Pending |
+| P7.3b | Bounded Z-aware weather rendering, audio, and diagnostics | Complete |
+| P7.4a | Flight movement, gravity, and collision contract | Active |
 | P7.4b | Flight trace, projectile, AI, content, and mapping integration | Pending |
 | P7 gate | End-to-end vertical-content and scope review | Pending |
 
@@ -6641,10 +6641,133 @@ allocation is inside Robust physics enumeration.
 - Next package: P7.3b builds a bounded active-world-floor weather mask, migrates
   ambient audio to entity exposure, and adds presentation metrics and visual QA.
 
+## Completed Package: P7.3b Bounded Weather Presentation
+
+### Scope
+
+- Migrate the production weather stencil from planar `TileRef` queries to the
+  shared typed exposure policy on the viewport's active world floor.
+- Replace the allocating planar ambient-audio flood fill with one deterministic,
+  bounded exact-floor query per listener update.
+- Add client budgets, fail-closed behavior, diagnostics, allocation evidence,
+  and real OpenGL pixel coverage without adding new weather damage gameplay.
+
+### Implementation
+
+- `ZLevelWeatherPresentationSystem` owns reusable grid/context/run buffers and a
+  per-client-frame budget. It converts the viewed world floor through each
+  intersecting grid frame, including legacy map-grids, and evaluates only valid
+  represented local floors.
+- Blocked tiles are compressed into horizontal local-space runs and retained in
+  deterministic grid order. The stencil draws those batches with each grid's
+  current transform, preserving rotated and moving-grid presentation.
+- Tile-check capacity is preflighted before policy evaluation. Run capacity is
+  validated before publication. Either exhaustion discards the partial plan and
+  masks the complete viewport for that frame; arbitrary indoor leaks are never
+  selected by iteration order.
+- Ambient audio checks deterministic squared-distance offsets inside radius
+  three on the listener's exact inherited local floor. Direct and nearby
+  exposure are distinct typed results; blocked, invalid, and budget-exhausted
+  results retain the upstream fully occluded behavior. One result is reused for
+  every weather status effect in the update.
+- Three archived client CVars independently bound mask tile checks, retained
+  runs, and audio checks. `zlevelrendermetrics`, its reset path, and the debug
+  overlay expose planning, rendering, timing, audio, budget, and fail-closed
+  counters.
+- The real visual-capture fixture now records covered and exposed rain on Z 2
+  and Z 3. Its full-bright and tile-weather overrides are local, reversible test
+  setup; production tile policy is unchanged.
+- Real client startup exposed older content-sandbox violations outside weather:
+  sound snapshot publication now uses allowed `Interlocked` operations, mapping
+  network completions are deferred to the UI thread, and snapshot encoding
+  explicitly rejects malformed UTF-16 before using BOM-free `Encoding.UTF8`.
+  These narrow hardening fixes preserve the P4/P6 contracts and make the actual
+  sandboxed client loadable by the P7 visual gate.
+
+### Verification Evidence
+
+- Weather presentation passes 5/5 focused cases and 8/8 together with P7.3a.
+  Coverage includes legacy planar roofs, moving frames, active world-floor
+  selection, atomic tile/run exhaustion, exact-floor audio, and CVar clamps.
+- The complete Content Z-level integration matrix has passing evidence for all
+  314 cases: 313 passed in one broad run and its one pooled aperture-cache skip
+  passed 1/1 in isolation. The combined Content unit/mapping filter passes 14/14,
+  including strict malformed-UTF-16 rejection.
+- Across 128 hot mask builds, total thread allocation remains at or below 8,192
+  bytes. The freshly rebuilt schema-version 4 baseline passes 3/3 at 10.8001,
+  15.6784, and 23.4932 ms for 3/6/10 floors with 6,336 bytes at every depth,
+  100% warm boundary/sky/gravity hits, zero measured misses, and no PVS budget
+  exhaustion.
+- The real OpenGL fixture on an NVIDIA RTX 3070 passes 24/24 pixel assertions.
+  Covered Z 2 has RMS difference 0.000000, exposed Z 3 has 0.056199, and the
+  active contrast gap is 0.056199. Its 1,003 mask plans, 49,147 tile checks,
+  6,573 retained runs, and 1,003 render frames report zero fail-closed plans,
+  frames, or budget exhaustion.
+- A non-incremental `SpaceStation14.slnx` build completes in 2m28s with zero
+  errors and the same 695 established warnings as P7.3a. Dedicated
+  non-incremental client and integration scans complete with code 0 and no
+  warning attributed to a modified production or test file.
+- The final sandboxed visual launch repeats 24/24 after that build. Diff scope,
+  whitespace, dependency state, and staged content are reviewed before the
+  isolated package commit.
+
+### Decisions
+
+- Weather presentation consumes `SharedWeatherSystem`; it does not duplicate
+  sky geometry, add a weather-specific trace, or move renderer/audio policy into
+  the shared cache.
+- Budgets are client-frame presentation limits. Tile/run exhaustion fails closed
+  visually and audio exhaustion fully occludes, keeping degradation predictable.
+- The mask retains ordinary map-grid participation from the upstream stencil.
+  Explicitly excluding the map would have been a subtle legacy Z 0 regression.
+- Map-space remains exposed by the shared policy. Bounded spatial planet-weather
+  volumes require their own future contract rather than overloading grid roofs.
+
+### Completion Gate
+
+- [x] Scope check: weather presentation, its diagnostics/tests/capture, and only
+      the sandbox fixes required by the real client gate are included.
+- [x] Invariant review: legacy Z 0, local/world frames, moving and rotated grids,
+      map-grids, exact-floor audio, independent Weather channels, and fail-closed
+      exhaustion were reviewed.
+- [x] Automated verification: focused, broad, isolated pooled, unit/mapping, and
+      freshly compiled schema-version 4 baseline tests pass.
+- [x] Performance evidence: hot allocation, 3/6/10-floor snapshots, mask/render
+      counters, and GPU pixel evidence are captured above.
+- [x] Documentation: architecture, CVars, behavior, limitations, and evidence are
+      recorded here and in the vertical-content and overview documents.
+- [x] Dependency check: P7.3b requires no WTZ Engine change; the clean engine
+      remains pinned to published revision `7cbd778024`.
+- [x] Git check: final non-incremental build, warning attribution, repeat visual
+      launch, `git diff --check`, tree scope, clean engine state, and staged
+      review pass; generated capture/baseline artifacts remain ignored.
+- [x] Mini review: consumer search, map-grid compatibility, fail-closed ordering,
+      sandbox constraints, residual risks, and P7.4a handoff are recorded.
+- [x] Commit: prepared as isolated `Present weather on active Z levels` on
+      `zlevel/vertical-content`; push and local/remote hash verification follow.
+
+### Mini Review
+
+- Finding: whole-plan failure is necessary for weather. Rendering a budget-sized
+  prefix would leak rain indoors according to grid/tile iteration order.
+- Finding: horizontal runs materially reduce draw calls while preserving exact
+  tile policy and current grid transforms.
+- Finding: executing the real sandboxed client caught API-policy failures that
+  ordinary compilation and headless tests could not observe.
+- Residual risk: a live admin experiment did not observe a dynamically cleared
+  non-zero Z tile in the connected client's inventory before timeout. Persisted
+  and integration replication coverage remains green, but explicit long-running
+  live delta verification belongs in P8 hardening.
+- Residual risk: weather is still a map-wide status effect and local tile policy;
+  spatial storms and arbitrary non-grid planet volumes are not represented.
+- Next package after the gate: P7.4a defines flight movement, gravity, and
+  collision semantics before trace, projectile, AI, content, and mapping work.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-29 | P7.3b | `Present weather on active Z levels` | 8 focused, all 314 broad covered, 14 unit/mapping, 3 baseline, 24 real GL, full build, allocation/warning/diff review | Complete |
 | 2026-08-29 | P7.3a | `Define shared Z-level weather exposure` | 3 focused, all 309 broad covered, 9 unit, 3 baseline, full build, allocation/diff review | Complete |
 | 2026-08-29 | P7.2b | `Integrate physical elevators with Z-level navigation` | 14 elevator, 3 focused consumers, 306 broad, 9 unit, 3 baseline, full build, warning/performance/diff review | Complete |
 | 2026-08-29 | P7.2a | `Add powered Z-level elevator cabins` | 6 focused, 297 broad, 9 unit, 3 baseline, full build, authority/performance/diff review | Complete |

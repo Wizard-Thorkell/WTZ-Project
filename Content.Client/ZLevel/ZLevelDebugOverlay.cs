@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Content.Client.Weather;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client.GameObjects;
@@ -46,6 +47,7 @@ public sealed class ZLevelDebugOverlay : Overlay
     private readonly ZLevelSoundPresentationSystem _soundPresentationSystem;
     private readonly ZLevelTileProjectionSystem _tileProjectionSystem;
     private readonly ZLevelViewContextSystem _viewContextSystem;
+    private readonly ZLevelWeatherPresentationSystem _weatherPresentationSystem;
     private readonly EntityQuery<ZLevelPositionComponent> _zLevelQuery;
     private readonly Font _font;
     private readonly List<DrawVertexUV2D> _tileVertices = new();
@@ -72,6 +74,7 @@ public sealed class ZLevelDebugOverlay : Overlay
         _soundPresentationSystem = _entityManager.System<ZLevelSoundPresentationSystem>();
         _tileProjectionSystem = _entityManager.System<ZLevelTileProjectionSystem>();
         _viewContextSystem = _entityManager.System<ZLevelViewContextSystem>();
+        _weatherPresentationSystem = _entityManager.System<ZLevelWeatherPresentationSystem>();
         _zLevelQuery = _entityManager.GetEntityQuery<ZLevelPositionComponent>();
 
         var font = _resourceCache.GetResource<FontResource>("/Fonts/NotoSans/NotoSans-Regular.ttf");
@@ -270,6 +273,24 @@ public sealed class ZLevelDebugOverlay : Overlay
             $"hit:{metrics.SkyExposureCacheHitPercent:0.0}% " +
             $"cache:{_skyExposureSystem.CachedExposureCount}/{_skyExposureSystem.CacheCapacity} " +
             $"budget:{metrics.SkyExposureBudgetExhaustions}",
+            metricsColor);
+
+        var weather = _weatherPresentationSystem.Snapshot();
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 280f),
+            $"weather mask batch/run/check/block-total:{weather.CurrentMaskBatches}/" +
+            $"{weather.CurrentMaskRuns}/{weather.CurrentMaskTileChecks}/" +
+            $"{weather.MaskBlockedTiles} fail:{weather.MaskFailClosedPlans} " +
+            $"budget:{weather.MaskTileBudgetExhaustions}/{weather.MaskRunBudgetExhaustions}",
+            metricsColor);
+        args.ScreenHandle.DrawString(
+            _font,
+            metricsPosition + new Vector2(0f, 294f),
+            $"weather audio q/check direct/near/block:{weather.AudioQueries}/" +
+            $"{weather.AudioTileChecks} {weather.AudioDirectExposures}/" +
+            $"{weather.AudioNearbyExposures}/{weather.AudioBlockedQueries} " +
+            $"budget:{weather.AudioBudgetExhaustions}",
             metricsColor);
     }
 

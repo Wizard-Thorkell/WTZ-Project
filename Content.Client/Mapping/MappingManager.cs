@@ -18,10 +18,6 @@ public sealed class MappingManager : IPostInjectInit
 
     internal static readonly TimeSpan SaveRequestTimeout = TimeSpan.FromSeconds(30);
 
-    private static readonly UTF8Encoding SnapshotEncoding = new(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
-
     private readonly MappingSaveRequestTracker _requests = new();
 
     public void PostInject()
@@ -33,12 +29,16 @@ public sealed class MappingManager : IPostInjectInit
 
     private void OnSaveError(MappingSaveMapErrorMessage message)
     {
-        _requests.TryCompleteError(message.RequestId, message.Error);
+        var requestId = message.RequestId;
+        var error = message.Error;
+        _ui.DeferAction(() => _requests.TryCompleteError(requestId, error));
     }
 
     private void OnMapData(MappingMapDataMessage message)
     {
-        _requests.TryCompleteData(message.RequestId, message.Yml);
+        var requestId = message.RequestId;
+        var yml = message.Yml;
+        _ui.DeferAction(() => _requests.TryCompleteData(requestId, yml));
     }
 
     public async Task<MappingSaveResult> SaveMap()
@@ -105,7 +105,22 @@ public sealed class MappingManager : IPostInjectInit
 
     internal static byte[] EncodeSnapshot(string yml)
     {
-        return SnapshotEncoding.GetBytes(yml);
+        for (var i = 0; i < yml.Length; i++)
+        {
+            if (!char.IsSurrogate(yml[i]))
+                continue;
+
+            if (!char.IsHighSurrogate(yml[i]) ||
+                i + 1 >= yml.Length ||
+                !char.IsLowSurrogate(yml[i + 1]))
+            {
+                throw new ArgumentException("Mapping snapshots must contain valid UTF-16.", nameof(yml));
+            }
+
+            i++;
+        }
+
+        return Encoding.UTF8.GetBytes(yml);
     }
 }
 

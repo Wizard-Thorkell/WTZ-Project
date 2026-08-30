@@ -8,8 +8,12 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using Content.Client.Weather;
 using Content.Client.ZLevel.Commands;
 using Content.Client.Viewport;
+using Content.Shared.Maps;
+using Content.Shared.StatusEffectNew.Components;
+using Content.Shared.Weather;
 using Content.Shared.ZLevel.Systems;
 using Robust.Client;
 using Robust.Client.Console;
@@ -63,6 +67,10 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         new("soft-z2", 2, true, true, false),
         new("hard-preview-z1", 1, true, false, true),
         new("soft-preview-z1", 1, true, true, true),
+        new("weather-clear-z2", 2, false, false, false, WeatherCapture: true),
+        new("weather-clear-z3", 3, false, false, false, WeatherCapture: true),
+        new("weather-rain-z2", 2, false, false, false, WeatherCapture: true, WeatherEnabled: true),
+        new("weather-rain-z3", 3, false, false, false, WeatherCapture: true, WeatherEnabled: true),
     };
 
     [Dependency] private readonly IConfigurationManager _configuration = default!;
@@ -71,6 +79,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     [Dependency] private readonly IEyeManager _eyeManager = default!;
     [Dependency] private readonly IGameController _gameController = default!;
     [Dependency] private readonly ILightManager _lightManager = default!;
+    [Dependency] private readonly ITileDefinitionManager _tileDefinitions = default!;
     [Dependency] private readonly IClientNetManager _network = default!;
     [Dependency] private readonly IPlayerManager _player = default!;
     [Dependency] private readonly IResourceManager _resources = default!;
@@ -82,6 +91,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     [Dependency] private readonly ZLevelLightingProjectionSystem _lightingProjection = default!;
     [Dependency] private readonly ZLevelOverlaySystem _zLevelOverlay = default!;
     [Dependency] private readonly ZLevelTileProjectionSystem _tileProjection = default!;
+    [Dependency] private readonly ZLevelWeatherPresentationSystem _weatherPresentation = default!;
 
     private readonly List<CaptureMeasurement> _measurements = new();
     private readonly List<CaptureCheck> _checks = new();
@@ -97,10 +107,15 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private int _shutdownFrames;
     private int _requestedLocalZ;
     private int _originalPlayerLocalZ;
+    private MapId _fixtureMapId;
     private bool _autoShutdown;
     private bool _restored;
     private bool _fixturePrepared;
     private bool _playerViewMoved;
+    private bool _weatherActive;
+    private bool _originalWeatherTilePolicy;
+    private long _weatherObserved;
+    private ContentTileDefinition? _weatherTileDefinition;
     private EntityUid? _captureEntity;
     private EntityUid _fixtureGrid;
     private EyeComponent? _captureEye;
@@ -128,6 +143,9 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _captureIndex = 0;
         _restored = false;
         _fixturePrepared = false;
+        _weatherActive = false;
+        _weatherObserved = 0;
+        _weatherTileDefinition = null;
         _measurements.Clear();
         _checks.Clear();
         _signatures.Clear();
@@ -258,6 +276,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private void PrepareFixture(EntityUid grid)
     {
         _fixtureGrid = grid;
+        _fixtureMapId = Transform(grid).MapID;
         LogFixtureInventory(grid);
         _originalPlayerLocalZ = _player.LocalEntity is { } player
             ? _zLevels.GetZLevel(player)
@@ -280,6 +299,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _lightingCache.ResetMetrics();
         _lightingProjection.ResetMetrics();
         _tileProjection.ResetMetrics();
+        _weatherPresentation.ResetMetrics();
     }
 
     private void LogFixtureInventory(EntityUid gridUid)
@@ -344,6 +364,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         var spec = CaptureSpecs[_captureIndex];
         var entity = _captureEntity!.Value;
         var localZ = spec.LocalZ;
+        _eyeSystem.SetDrawLight((entity, _captureEye!), !spec.WeatherCapture);
         if (!_zLevels.SetZLevelPosition(entity, localZ))
             throw new InvalidOperationException("Unable to place the capture eye on the fixture floor.");
 
@@ -352,6 +373,28 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         _lightManager.DrawShadows = spec.DrawShadows;
         _configuration.SetCVar(CVars.LightSoftShadows, spec.SoftShadows);
         _zLevelOverlay.SetMappingPreview(spec.MappingPreview);
+
+        if (spec.WeatherCapture && _weatherTileDefinition == null)
+        {
+            var grid = Comp<MapGridComponent>(_fixtureGrid);
+            var tile = _map.GetZLevelTileRef(
+                _fixtureGrid,
+                grid,
+                new ZLevelTileIndices(3, 3, 3)).Tile;
+            if (tile.IsEmpty)
+                throw new InvalidOperationException("Weather capture fixture has no top-floor tile.");
+
+            _weatherTileDefinition = (ContentTileDefinition) _tileDefinitions[tile.TypeId];
+            _originalWeatherTilePolicy = _weatherTileDefinition.Weather;
+            _weatherTileDefinition.Weather = true;
+        }
+
+        if (spec.WeatherEnabled && !_weatherActive)
+        {
+            _weatherActive = true;
+            _weatherObserved = 0;
+            _console.RemoteExecuteCommand(null, $"weatherset {_fixtureMapId} WeatherRain");
+        }
 
         _requestedLocalZ = localZ;
         _serverViewRequested = Stopwatch.GetTimestamp();
@@ -378,12 +421,22 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             return;
         }
 
+        var spec = CaptureSpecs[_captureIndex];
         var inventory = GetFixtureLayerInventory(_fixtureGrid, _requestedLocalZ);
-        if (inventory.Tiles == 0 || inventory.EnabledLights == 0 || inventory.Occluders == 0)
+        if (inventory.Tiles == 0 ||
+            !spec.WeatherCapture && (inventory.EnabledLights == 0 || inventory.Occluders == 0))
             return;
 
-        var spec = CaptureSpecs[_captureIndex];
-        _stabilizationFrames = spec.MappingPreview ? 45 : 24;
+        if (spec.WeatherEnabled)
+        {
+            if (!HasFixtureWeather())
+                return;
+
+            if (_weatherObserved == 0)
+                _weatherObserved = Stopwatch.GetTimestamp();
+        }
+
+        _stabilizationFrames = spec.MappingPreview ? 45 : spec.WeatherCapture ? 45 : 24;
         _phase = CapturePhase.Stabilizing;
         _log.Info(
             "Preparing {0} after server/PVS convergence in {1:0.000}s: " +
@@ -399,6 +452,13 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     private void Stabilize()
     {
         _eyeManager.CurrentEye = _captureEye!.Eye;
+        var spec = CaptureSpecs[_captureIndex];
+        if (spec.WeatherEnabled &&
+            (_weatherObserved == 0 || Elapsed(_weatherObserved) < SharedWeatherSystem.StartupTime))
+        {
+            return;
+        }
+
         if (--_stabilizationFrames > 0)
             return;
 
@@ -460,6 +520,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
                 _captureEye.Eye.WorldZLevel,
                 spec.DrawShadows ? spec.SoftShadows ? "soft" : "hard" : "baseline",
                 spec.MappingPreview,
+                spec.WeatherCapture ? spec.WeatherEnabled ? "rain" : "clear" : "none",
                 image.Width,
                 image.Height,
                 ZLevelLightingCaptureAnalysis.SignatureLuminance(signature),
@@ -515,8 +576,10 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             $"captured {_measurements.Count}/{CaptureSpecs.Length} frames");
         AddCheck(
             "nonblank-output",
-            _measurements.All(frame => frame.Width > 0 && frame.Height > 0 && frame.MeanLuminance > 1d),
-            $"minimum mean luminance {_measurements.Min(frame => frame.MeanLuminance):0.000}");
+            _measurements.All(frame => frame.Width > 0 && frame.Height > 0) &&
+            _measurements.Where(frame => frame.Weather == "none").All(frame => frame.MeanLuminance > 1d),
+            $"minimum lighting-frame mean luminance " +
+            $"{_measurements.Where(frame => frame.Weather == "none").Min(frame => frame.MeanLuminance):0.000}");
 
         CheckDominantChannel("baseline-z0", 'R');
         CheckDominantChannel("baseline-z1", 'G');
@@ -538,6 +601,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
 
         CheckPreviewDifference("hard-z1", "hard-preview-z1");
         CheckPreviewDifference("soft-z1", "soft-preview-z1");
+        CheckWeatherPresentation();
 
         var lighting = _lightingProjection.Snapshot();
         AddCheck(
@@ -561,6 +625,57 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             tiles.MappingFrames > 0 && tiles.MappingRenderFrames > 0 && tiles.RenderTiles > 0,
             $"mapping build/render frames={tiles.MappingFrames}/{tiles.MappingRenderFrames}, " +
             $"rendered tiles={tiles.RenderTiles}");
+
+        var weather = _weatherPresentation.Snapshot();
+        AddCheck(
+            "weather-mask-rendered",
+            weather.MaskRenderFrames > 0 && weather.MaskTileChecks > 0 && weather.MaskRenderRuns > 0,
+            $"render frames/tile checks/runs={weather.MaskRenderFrames}/" +
+            $"{weather.MaskTileChecks}/{weather.MaskRenderRuns}");
+        AddCheck(
+            "weather-within-presentation-budgets",
+            weather.MaskFailClosedPlans == 0 &&
+            weather.MaskTileBudgetExhaustions == 0 &&
+            weather.MaskRunBudgetExhaustions == 0,
+            $"fail-closed/tile/run exhaustion={weather.MaskFailClosedPlans}/" +
+            $"{weather.MaskTileBudgetExhaustions}/{weather.MaskRunBudgetExhaustions}");
+    }
+
+    private void CheckWeatherPresentation()
+    {
+        var blockedDifference = ZLevelLightingCaptureAnalysis.SignatureDifference(
+            _signatures["weather-clear-z2"],
+            _signatures["weather-rain-z2"]);
+        var exposedDifference = ZLevelLightingCaptureAnalysis.SignatureDifference(
+            _signatures["weather-clear-z3"],
+            _signatures["weather-rain-z3"]);
+
+        AddCheck(
+            "weather-blocked-under-upper-floor",
+            blockedDifference < 0.003d,
+            $"normalized RMS difference {blockedDifference:0.000000}, maximum 0.003000");
+        AddCheck(
+            "weather-visible-on-top-floor",
+            exposedDifference > 0.006d,
+            $"normalized RMS difference {exposedDifference:0.000000}, minimum 0.006000");
+        AddCheck(
+            "weather-active-floor-contrast",
+            exposedDifference > blockedDifference + 0.005d,
+            $"exposed/blocked difference={exposedDifference:0.000000}/{blockedDifference:0.000000}, " +
+            "required gap 0.005000");
+    }
+
+    private bool HasFixtureWeather()
+    {
+        var mapUid = Transform(_fixtureGrid).MapUid;
+        var query = EntityQueryEnumerator<WeatherStatusEffectComponent, StatusEffectComponent>();
+        while (query.MoveNext(out _, out _, out var status))
+        {
+            if (status.AppliedTo == mapUid)
+                return true;
+        }
+
+        return false;
     }
 
     private void CheckDominantChannel(string name, char channel)
@@ -645,6 +760,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
     {
         var lighting = _lightingProjection.Snapshot();
         var tiles = _tileProjection.Snapshot();
+        var weather = _weatherPresentation.Snapshot();
         var metrics = new CaptureMetrics(
             lighting.ShadowAtlasRenders,
             lighting.RenderShadowLights,
@@ -654,7 +770,16 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             lighting.ShadowFloorGroupBudgetExhaustions,
             tiles.MappingFrames,
             tiles.MappingRenderFrames,
-            tiles.RenderTiles);
+            tiles.RenderTiles,
+            weather.MaskPlans,
+            weather.MaskTileChecks,
+            weather.MaskRuns,
+            weather.MaskFailClosedPlans,
+            weather.MaskTileBudgetExhaustions,
+            weather.MaskRunBudgetExhaustions,
+            weather.MaskRenderFrames,
+            weather.MaskRenderRuns,
+            weather.MaskRenderDrawCalls);
 
         using var stream = _resources.UserData.Open(
             OutputPath / "report.json",
@@ -723,6 +848,9 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         writer.Write("      \"mappingPreview\": ");
         WriteJsonBoolean(writer, measurement.MappingPreview);
         writer.WriteLine(",");
+        writer.Write("      \"weather\": ");
+        WriteJsonString(writer, measurement.Weather);
+        writer.WriteLine(",");
         writer.WriteLine($"      \"width\": {measurement.Width},");
         writer.WriteLine($"      \"height\": {measurement.Height},");
         writer.Write("      \"meanLuminance\": ");
@@ -765,7 +893,18 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
             $"    \"shadowFloorGroupBudgetExhaustions\": {metrics.ShadowFloorGroupBudgetExhaustions},");
         writer.WriteLine($"    \"mappingBuildFrames\": {metrics.MappingBuildFrames},");
         writer.WriteLine($"    \"mappingRenderFrames\": {metrics.MappingRenderFrames},");
-        writer.WriteLine($"    \"renderedTiles\": {metrics.RenderedTiles}");
+        writer.WriteLine($"    \"renderedTiles\": {metrics.RenderedTiles},");
+        writer.WriteLine($"    \"weatherMaskPlans\": {metrics.WeatherMaskPlans},");
+        writer.WriteLine($"    \"weatherMaskTileChecks\": {metrics.WeatherMaskTileChecks},");
+        writer.WriteLine($"    \"weatherMaskRuns\": {metrics.WeatherMaskRuns},");
+        writer.WriteLine($"    \"weatherMaskFailClosedPlans\": {metrics.WeatherMaskFailClosedPlans},");
+        writer.WriteLine(
+            $"    \"weatherMaskTileBudgetExhaustions\": {metrics.WeatherMaskTileBudgetExhaustions},");
+        writer.WriteLine(
+            $"    \"weatherMaskRunBudgetExhaustions\": {metrics.WeatherMaskRunBudgetExhaustions},");
+        writer.WriteLine($"    \"weatherMaskRenderFrames\": {metrics.WeatherMaskRenderFrames},");
+        writer.WriteLine($"    \"weatherMaskRenderRuns\": {metrics.WeatherMaskRenderRuns},");
+        writer.WriteLine($"    \"weatherMaskRenderDrawCalls\": {metrics.WeatherMaskRenderDrawCalls}");
         writer.Write("  }");
     }
 
@@ -848,6 +987,12 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         if (_playerViewMoved && _network.IsConnected)
             _console.RemoteExecuteCommand(null, $"zlevelset {_originalPlayerLocalZ}");
 
+        if (_weatherActive && _network.IsConnected)
+            _console.RemoteExecuteCommand(null, $"weatherset {_fixtureMapId} null");
+
+        if (_weatherTileDefinition != null)
+            _weatherTileDefinition.Weather = _originalWeatherTilePolicy;
+
         if (_captureEntity is { } captureEntity && Exists(captureEntity))
             QueueDel(captureEntity);
 
@@ -884,7 +1029,9 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         int LocalZ,
         bool DrawShadows,
         bool SoftShadows,
-        bool MappingPreview);
+        bool MappingPreview,
+        bool WeatherCapture = false,
+        bool WeatherEnabled = false);
 
     private sealed record CaptureMeasurement(
         string Name,
@@ -893,6 +1040,7 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         int WorldZ,
         string ShadowMode,
         bool MappingPreview,
+        string Weather,
         int Width,
         int Height,
         double MeanLuminance,
@@ -917,6 +1065,15 @@ public sealed class ZLevelLightingCaptureSystem : EntitySystem
         long ShadowFloorGroupBudgetExhaustions,
         long MappingBuildFrames,
         long MappingRenderFrames,
-        long RenderedTiles);
+        long RenderedTiles,
+        long WeatherMaskPlans,
+        long WeatherMaskTileChecks,
+        long WeatherMaskRuns,
+        long WeatherMaskFailClosedPlans,
+        long WeatherMaskTileBudgetExhaustions,
+        long WeatherMaskRunBudgetExhaustions,
+        long WeatherMaskRenderFrames,
+        long WeatherMaskRenderRuns,
+        long WeatherMaskRenderDrawCalls);
 
 }

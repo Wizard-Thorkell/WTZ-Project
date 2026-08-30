@@ -265,6 +265,33 @@ public sealed partial class CCVars
             CVar.CLIENTONLY | CVar.ARCHIVE);
 
     /// <summary>
+    /// Maximum active-floor weather exposure queries performed per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelWeatherMaskMaxTileChecksPerFrame =
+        CVarDef.Create(
+            "zlevel.weather_mask_max_tile_checks_per_frame",
+            16_384,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum horizontal weather-mask runs retained per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelWeatherMaskMaxRunsPerFrame =
+        CVarDef.Create(
+            "zlevel.weather_mask_max_runs_per_frame",
+            8_192,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
+    /// Maximum same-floor exposure queries used to place ambient weather audio per client frame.
+    /// </summary>
+    public static readonly CVarDef<int> ZLevelWeatherAudioMaxTileChecksPerFrame =
+        CVarDef.Create(
+            "zlevel.weather_audio_max_tile_checks_per_frame",
+            64,
+            CVar.CLIENTONLY | CVar.ARCHIVE);
+
+    /// <summary>
     /// Maximum hierarchical states expanded by one Z-level path request.
     /// </summary>
     public static readonly CVarDef<int> ZLevelPathfindingMaxStateExpansions =

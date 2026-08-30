@@ -2,6 +2,7 @@
 // Copyright (c) pedel and OpenAI Codex.
 
 using Content.Client.ZLevel;
+using Content.Client.Weather;
 using Content.Shared.Administration;
 using Robust.Client.Graphics;
 using Robust.Shared.Console;
@@ -25,13 +26,15 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
         var projection = _entityManager.System<ZLevelLightingProjectionSystem>();
         var sound = _entityManager.System<ZLevelSoundPresentationSystem>();
         var tileProjection = _entityManager.System<ZLevelTileProjectionSystem>();
+        var weather = _entityManager.System<ZLevelWeatherPresentationSystem>();
         if (args.Length == 1 && args[0].Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             cache.ResetMetrics();
             projection.ResetMetrics();
             sound.ResetMetrics();
             tileProjection.ResetMetrics();
-            shell.WriteLine("Reset local vertical rendering and sound counters.");
+            weather.ResetMetrics();
+            shell.WriteLine("Reset local vertical rendering, weather, and sound counters.");
             return;
         }
 
@@ -141,6 +144,34 @@ public sealed class ZLevelRenderMetricsCommand : IConsoleCommand
             $"{tiles.RenderVertices}/{tiles.RenderDrawCalls}, avg/last/max=" +
             $"{tiles.AverageRenderMilliseconds:0.000}/{tiles.LastRenderMilliseconds:0.000}/" +
             $"{tiles.MaxRenderMilliseconds:0.000}ms");
+
+        var weatherMetrics = weather.Snapshot();
+        shell.WriteLine(
+            $"vertical weather mask: plans={weatherMetrics.MaskPlans}, grids candidate/layer=" +
+            $"{weatherMetrics.MaskGridCandidates}/{weatherMetrics.MaskGridLayers}, checks/blocked/runs=" +
+            $"{weatherMetrics.MaskTileChecks}/{weatherMetrics.MaskBlockedTiles}/{weatherMetrics.MaskRuns}, " +
+            $"current batches/runs={weatherMetrics.CurrentMaskBatches}/{weatherMetrics.CurrentMaskRuns}");
+        shell.WriteLine(
+            $"vertical weather budget used/max tiles={weatherMetrics.CurrentMaskTileChecks}/" +
+            $"{weatherMetrics.MaxMaskTileChecksPerFrame}, runs={weatherMetrics.CurrentMaskRunsUsed}/" +
+            $"{weatherMetrics.MaxMaskRunsPerFrame}, exhausted tile/run=" +
+            $"{weatherMetrics.MaskTileBudgetExhaustions}/{weatherMetrics.MaskRunBudgetExhaustions}, " +
+            $"fail-closed={weatherMetrics.MaskFailClosedPlans}");
+        shell.WriteLine(
+            $"vertical weather build/draw avg/last/max=" +
+            $"{weatherMetrics.MaskAverageBuildMilliseconds:0.000}/" +
+            $"{weatherMetrics.MaskLastBuildMilliseconds:0.000}/" +
+            $"{weatherMetrics.MaskMaxBuildMilliseconds:0.000}ms, " +
+            $"{weatherMetrics.MaskAverageRenderMilliseconds:0.000}/" +
+            $"{weatherMetrics.MaskLastRenderMilliseconds:0.000}/" +
+            $"{weatherMetrics.MaskMaxRenderMilliseconds:0.000}ms");
+        shell.WriteLine(
+            $"vertical weather audio: queries/checks={weatherMetrics.AudioQueries}/" +
+            $"{weatherMetrics.AudioTileChecks}, direct/nearby/blocked/invalid=" +
+            $"{weatherMetrics.AudioDirectExposures}/{weatherMetrics.AudioNearbyExposures}/" +
+            $"{weatherMetrics.AudioBlockedQueries}/{weatherMetrics.AudioInvalidQueries}, " +
+            $"budget={weatherMetrics.AudioBudgetExhaustions}, used/max=" +
+            $"{weatherMetrics.CurrentAudioTileChecks}/{weatherMetrics.MaxAudioTileChecksPerFrame}");
 
         var soundMetrics = sound.Snapshot();
         shell.WriteLine(
