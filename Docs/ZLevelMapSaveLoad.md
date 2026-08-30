@@ -250,11 +250,18 @@ map/grid autosave retains Robust's legacy direct serializer.
 
 ## Supported Entry Points
 
-The supported initialized mapper paths are the mapping UI's manual save and
-server autosave registered on the complete map root. Both call
-`MappingSnapshotSystem`, and both therefore share transient filtering, detached
+The supported initialized mapper paths are the mapping UI's manual save, server
+autosave registered on the complete map root, and the explicit
+`zlevelcheckpoint <map-id> <checkpoint-name>` administrator command. All call
+`MappingSnapshotSystem`, and all therefore share transient filtering, detached
 normalization, fail-closed validation, and canonical YAML formatting before a
 destination becomes visible.
+
+The checkpoint command requires Server and Mapping permission, works even when
+scheduled autosave is disabled, and refuses pre-init maps and grid-only roots.
+It writes a unique timestamped `-CHECKPOINT.yml` file under the configured
+autosave directory and named subdirectory. Autosaves retain `-AUTO.yml`; neither
+path replaces an existing destination.
 
 Three existing administrative paths deliberately do not claim this contract:
 
@@ -267,6 +274,27 @@ Do not use those commands as substitutes for saving an initialized WTZ mapping
 session. Supporting resumable live rounds would require a separate format and
 restoration lifecycle; routing it through a mapper filter would silently discard
 state that live persistence is expected to retain.
+
+## Executable Recovery Rehearsal
+
+P8.4d2 adds `Tools/run_zlevel_recovery_rehearsal.ps1`. Its exact protected test
+creates a known-good checkpoint, corrupts authored Z state, requires the next
+checkpoint to fail without modifying the prior bytes, deletes the corrupt map,
+loads the known-good file, checkpoints the recovered map, and loads it a second
+time. Ordered map-format, grid, tile, and persistent-entity fingerprints must
+match across source and both loads; player and explicit-transient roots must not
+reappear.
+
+The runner binds that scenario to `WTZ-RECOVERY-1`, schema 1. It rejects missing,
+extra, skipped, or failed TRX results; mismatched project/engine/gitlink
+revisions; dirty source in strict mode; missing recovery steps; invalid hashes;
+unexpected counts; and leftover temporary files. A clean run reports `Passed`.
+Development-only dirty-source or skipped-build flags can report only
+`DevelopmentPassed`.
+
+The rehearsal does not turn the checkpoint command into an in-memory rollback
+transaction. Loading a known-good artifact and retiring the damaged map remain
+explicit operator actions, and the checkpoint still excludes live-round state.
 
 ## Current Limitations
 

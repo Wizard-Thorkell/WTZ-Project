@@ -152,6 +152,46 @@ public sealed class MappingSystem : EntitySystem
         out MappingSnapshotReport report,
         out string error)
     {
+        return TryPersistNow(
+            uid,
+            originalFileName,
+            "AUTO",
+            requireInitializedMap: false,
+            out savedPath,
+            out report,
+            out error);
+    }
+
+    /// <summary>
+    /// Creates an operator-requested checkpoint through the initialized mapper
+    /// snapshot path. Uninitialized maps and grid-only saves are refused.
+    /// </summary>
+    internal bool TryCreateCheckpointNow(
+        EntityUid uid,
+        string checkpointName,
+        out ResPath savedPath,
+        out MappingSnapshotReport report,
+        out string error)
+    {
+        return TryPersistNow(
+            uid,
+            checkpointName,
+            "CHECKPOINT",
+            requireInitializedMap: true,
+            out savedPath,
+            out report,
+            out error);
+    }
+
+    private bool TryPersistNow(
+        EntityUid uid,
+        string originalFileName,
+        string fileKind,
+        bool requireInitializedMap,
+        out ResPath savedPath,
+        out MappingSnapshotReport report,
+        out string error)
+    {
         savedPath = default;
         report = default;
         error = string.Empty;
@@ -171,7 +211,19 @@ public sealed class MappingSystem : EntitySystem
             return RecordAutosaveFailure(error);
         }
 
-        if (LifeStage(uid) >= EntityLifeStage.MapInitialized && !isMap)
+        if (requireInitializedMap && !isMap)
+        {
+            error = "Validated checkpoints require the complete initialized map root.";
+            return RecordAutosaveFailure(error);
+        }
+
+        if (requireInitializedMap && LifeStage(uid) < EntityLifeStage.MapInitialized)
+        {
+            error = "Validated checkpoints require a map that has reached MapInitialized.";
+            return RecordAutosaveFailure(error);
+        }
+
+        if (!requireInitializedMap && LifeStage(uid) >= EntityLifeStage.MapInitialized && !isMap)
         {
             error = "Initialized autosave requires the complete map root; grid-only snapshots are unsupported.";
             return RecordAutosaveFailure(error);
@@ -191,7 +243,7 @@ public sealed class MappingSystem : EntitySystem
             var saveDir = new ResPath(saveDirText).ToRootedPath();
             _resMan.UserData.CreateDir(saveDir);
 
-            var destination = GetAvailableAutosavePath(_resMan.UserData, saveDir, DateTime.Now);
+            var destination = GetAvailableSnapshotPath(_resMan.UserData, saveDir, DateTime.Now, fileKind);
             if (LifeStage(uid) >= EntityLifeStage.MapInitialized)
             {
                 if (!_snapshots.TryCreateMapSnapshotText(uid, out var yaml, out report, out error))
@@ -292,7 +344,24 @@ public sealed class MappingSystem : EntitySystem
         ResPath saveDir,
         DateTime timestamp)
     {
-        var stem = $"{timestamp:yyyy-MM-dd_HH.mm.ss.fff}-AUTO";
+        return GetAvailableSnapshotPath(directory, saveDir, timestamp, "AUTO");
+    }
+
+    internal static ResPath GetAvailableCheckpointPath(
+        IWritableDirProvider directory,
+        ResPath saveDir,
+        DateTime timestamp)
+    {
+        return GetAvailableSnapshotPath(directory, saveDir, timestamp, "CHECKPOINT");
+    }
+
+    private static ResPath GetAvailableSnapshotPath(
+        IWritableDirProvider directory,
+        ResPath saveDir,
+        DateTime timestamp,
+        string fileKind)
+    {
+        var stem = $"{timestamp:yyyy-MM-dd_HH.mm.ss.fff}-{fileKind}";
         for (var suffix = 0; suffix < 10_000; suffix++)
         {
             var name = suffix == 0 ? $"{stem}.yml" : $"{stem}-{suffix}.yml";

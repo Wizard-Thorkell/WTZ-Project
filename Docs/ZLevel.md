@@ -1236,6 +1236,15 @@ Collection remains administrator-triggered, so normal server ticks and the
 3/6/10-floor performance baseline are unchanged. P8.4d2 next owns explicit
 validated checkpoints and executable recovery rehearsal.
 
+P8.4d2 now provides `zlevelcheckpoint <map-id> <checkpoint-name>` for a complete
+initialized map root and the fail-closed `WTZ-RECOVERY-1` rehearsal. Checkpoints
+reuse canonical transient-filtered mapper snapshots and atomic file promotion,
+use a distinct `-CHECKPOINT.yml` suffix, and never replace an existing file.
+The rehearsal proves refusal of invalid authored state without damaging the
+known-good artifact, followed by two structurally identical recovery loads.
+This remains authored-map recovery rather than live-round persistence or an
+automatic in-memory rollback.
+
 ## Definition Of Done
 
 ZLevel becomes production-quality when:

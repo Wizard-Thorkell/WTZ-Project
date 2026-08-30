@@ -130,6 +130,29 @@ public sealed class MappingAutosaveFileWriterTest
         });
     }
 
+    [Test]
+    public void CheckpointPathIsDistinctAndCollisionSafe()
+    {
+        var directory = CreateDirectory();
+        var saveDirectory = new ResPath("/Autosaves");
+        var timestamp = new DateTime(2026, 8, 30, 18, 45, 12, 345, DateTimeKind.Local);
+        var autosave = saveDirectory / "2026-08-30_18.45.12.345-AUTO.yml";
+        var occupied = saveDirectory / "2026-08-30_18.45.12.345-CHECKPOINT.yml";
+        directory.WriteAllBytes(autosave, StrictUtf8.GetBytes("autosave\n"));
+        directory.WriteAllBytes(occupied, StrictUtf8.GetBytes("checkpoint\n"));
+
+        var available = MappingSystem.GetAvailableCheckpointPath(directory, saveDirectory, timestamp);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(available,
+                Is.EqualTo(saveDirectory / "2026-08-30_18.45.12.345-CHECKPOINT-1.yml"));
+            Assert.That(directory.ReadAllText(autosave), Is.EqualTo("autosave\n"));
+            Assert.That(directory.ReadAllText(occupied), Is.EqualTo("checkpoint\n"));
+            Assert.That(directory.Exists(available), Is.False);
+        });
+    }
+
     private static VirtualWritableDirProvider CreateDirectory()
     {
         var directory = new VirtualWritableDirProvider();

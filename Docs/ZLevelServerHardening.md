@@ -488,6 +488,37 @@ envelopes remain the performance authority. A PVS context-cache maximum is a
 historical peak rather than a configured capacity and is therefore reported
 without an over-capacity alert.
 
+## P8.4d2 Validated Checkpoints And Recovery
+
+`zlevelcheckpoint <map-id> <checkpoint-name>` requires Server and Mapping
+administration permission. It operates even when scheduled autosave is disabled
+but refuses uninitialized maps and grid-only roots. Successful files are written
+under the configured autosave directory in the named subdirectory with a
+timestamped `-CHECKPOINT.yml` suffix. They reuse the same validated canonical
+snapshot and atomic writer as initialized autosave; existing destinations are
+never replaced.
+
+`Tools/run_zlevel_recovery_rehearsal.ps1` executes one exact protected test and
+validates its TRX plus the `WTZ-RECOVERY-1` schema 1 JSON. A strict invocation
+requires clean paired project/engine source and performs a real build. During
+implementation only, `-AllowDirtySourceForDevelopment` and
+`-SkipBuildForDevelopment` downgrade the result to `DevelopmentPassed`.
+
+The rehearsal creates a three-floor initialized map with persistent and
+transient content, proves pre-init and grid-only refusal, and creates a known-good
+checkpoint through the command while autosave is disabled. It then introduces
+an out-of-range authored entity, requires checkpoint refusal with unchanged
+known-good bytes and no temporary destination, deletes the corrupt source, and
+loads the checkpoint. A second checkpoint/load cycle must retain an exact
+ordered structural fingerprint and no transient entities or critical health
+finding.
+
+This is mapper-state recovery, not automatic round rollback. Operators remain
+responsible for stopping structural edits, preserving logs, selecting the
+known-good path, and loading it through the normal map lifecycle. Players,
+minds, sessions, active simulation queues, and other live-round state are not
+part of the checkpoint contract.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,

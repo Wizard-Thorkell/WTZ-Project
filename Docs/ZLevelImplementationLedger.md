@@ -8598,6 +8598,107 @@ allocation is inside Robust physics enumeration.
 - Next package: P8.4d2 adds an explicit validated checkpoint operation and an
   executable save/load recovery rehearsal with a versioned result contract.
 
+## Active Package: P8.4d2 Validated Checkpoint And Recovery Rehearsal
+
+### Scope
+
+- Add a Server+Mapping administrator command that creates a manual checkpoint
+  only from a complete initialized map root.
+- Reuse initialized mapper validation, transient filtering, detached
+  normalization, strict UTF-8, exclusive temporary creation, flush, and atomic
+  promotion rather than introducing another serializer.
+- Distinguish manual checkpoint files from scheduled autosaves while preserving
+  collision-safe append-only destinations.
+- Add a fail-closed executable recovery rehearsal and bind its exact test,
+  source pair, steps, hashes, and structural result to `WTZ-RECOVERY-1`.
+
+### Evidence
+
+- The protected rehearsal passes 1/1 after refusing pre-init map and grid-only
+  requests, creating a checkpoint through the actual command with autosave
+  disabled, rejecting an invalid authored floor, and preserving the known-good
+  bytes and sole visible destination.
+- It deletes the corrupt source map, loads the first checkpoint, creates a
+  second checkpoint from the recovered map, loads it again, and compares exact
+  ordered map format, grid, tile, and persistent-entity fingerprints across all
+  three authored states. Players and explicit transients remain excluded.
+- Development runner `20260830T173056Z-33780-04cdcd0c` passes its exact TRX and
+  all report checks with report SHA-256
+  `5241b13ac7ca63646ab97cc3c66539ee98212e8942091d3319fdd20592c01aa5`.
+  A separate negative invocation rejects dirty source before test execution.
+- Focused mapping/health units pass 14/14; the comparable Z-level/mapping unit
+  matrix passes 27/27. The expanded persistence matrix passes 13/13.
+- The broad Debug Z-level suite passes 344, conditionally skips two pooled
+  fixture cases, and fails zero of 346 total cases.
+- Generated 3/6/10-floor baselines pass 3/3 at 13.6285, 19.1483, and 26.6672
+  ms. Every measured workload allocates 6,336 bytes, retains 100 percent warm
+  boundary/sky/gravity cache hits, and records zero relevant exhaustion or
+  eviction.
+- A non-incremental single-worker Debug solution build succeeds in 3m03.41s
+  with zero errors and 688 established warnings.
+
+### Decisions
+
+- `zlevelcheckpoint <map-id> <checkpoint-name>` works independently of the
+  scheduled-autosave CVar but still requires an initialized map root. It writes
+  beneath the configured autosave directory in the named subdirectory.
+- Checkpoints use `-CHECKPOINT.yml`; autosaves retain `-AUTO.yml`. Existing
+  files are never replaced, and same-millisecond collisions receive a numeric
+  suffix.
+- A checkpoint is mapper-authored recovery state, not live-round persistence.
+  Players, minds, sessions, explicit transients, active queues, and simulation
+  caches remain intentionally excluded.
+- Recovery remains an explicit operator procedure. The command neither deletes
+  a damaged live map nor automatically swaps a loaded checkpoint into a round.
+- `Passed` requires clean paired project/engine source and a real build.
+  Dirty-source or skipped-build invocations can report only
+  `DevelopmentPassed`.
+
+### Completion Gate
+
+- [x] Scope check: source changes are confined to the shared persistence
+      wrapper, checkpoint command, one path test, one recovery scenario/contract,
+      runner, and synchronized documentation.
+- [x] Invariant review: complete initialized map ownership, authored Z range,
+      Z 0 compatibility, transient filtering, atomic visibility, and structural
+      double-round-trip identity are covered.
+- [ ] Automated verification: all development matrices pass; publish the
+      implementation and require one clean-source `WTZ-RECOVERY-1 Passed` run.
+- [x] Performance evidence: checkpoint work is command-triggered and the
+      neutral 3/6/10 baseline remains at 6,336 bytes with fully warm caches.
+- [x] Documentation: command, storage, recovery sequence, report contract,
+      development evidence, and limitations are recorded in the save/load,
+      hardening, overview, and ledger documents.
+- [x] Dependency check: WTZ Engine source is unchanged and checkout/gitlink
+      remain paired at `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [ ] Git check: run final diff/status review, publish, verify the remote hash,
+      and rerun the gate from clean paired source.
+- [x] Mini review: serializer reuse, command authority, expected failure
+      handling, append-only naming, source identity, and recovery semantics
+      were reviewed.
+- [ ] Commit: save and push the package as an isolated implementation revision.
+
+### Mini Review
+
+- Finding: invoking an expected failing console command makes the integration
+  harness fail on `WriteError`. Successful checkpoints remain tested through
+  the real command; the deliberate corruption is tested through its exact
+  shared API without weakening operator error output.
+- Finding: a successful recovery still reports `Degraded` until metrics reset,
+  because the earlier refused checkpoint is retained as incident evidence.
+  Absence of critical findings, not a premature `Healthy`, is the correct
+  post-recovery assertion.
+- Finding: the first checkpoint bytes and directory entry count must both be
+  checked after refusal. Loadability alone would not prove that a known-good
+  artifact was not silently replaced.
+- Residual risk: checkpoints inherit filesystem rename/durability limits and do
+  not provide automatic stale-temporary scavenging after process or host crash.
+- Residual risk: the rehearsal uses a deterministic three-floor fixture. The
+  complete initialized-map and release matrices remain responsible for complex
+  references, atmosphere, elevators, moving grids, and production content.
+- Next package: P8.4d3 composes health, recovery, release, Z 0, porting, visual,
+  soak, baseline, and manual operations evidence into the final P0-P8 gate.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
