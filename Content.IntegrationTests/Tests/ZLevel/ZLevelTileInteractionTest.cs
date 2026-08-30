@@ -11,12 +11,16 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
 [TestFixture]
 public sealed class ZLevelTileInteractionTest : InteractionTest
 {
+    private static readonly ProtoId<ReagentPrototype> Carpetium = "Carpetium";
+    private static readonly ProtoId<ReagentPrototype> ChlorineTrifluoride = "ChlorineTrifluoride";
+
     [TestCase("FloorTileItemZLevelGrate", "ZLevelGrate")]
     [TestCase("FloorTileItemZLevelShaft", "FloorZLevelShaft")]
     public async Task VerticalSurfaceFloorItemsPlaceOnTheUsersZLevel(
@@ -95,9 +99,9 @@ public sealed class ZLevelTileInteractionTest : InteractionTest
             map.SetZLevelTile(MapData.Grid, grid, upper, new Tile(steel.TileId));
             var upperTile = map.GetZLevelTileRef(MapData.Grid, grid, upper);
 
-            ProtoMan.Index<ReagentPrototype>("ChlorineTrifluoride")
+            ProtoMan.Index(ChlorineTrifluoride)
                 .ReactionTile(upperTile, FixedPoint2.New(1), SEntMan, null);
-            ProtoMan.Index<ReagentPrototype>("Carpetium")
+            ProtoMan.Index(Carpetium)
                 .ReactionTile(upperTile, FixedPoint2.New(1), SEntMan, null);
         });
         await RunTicks(3);

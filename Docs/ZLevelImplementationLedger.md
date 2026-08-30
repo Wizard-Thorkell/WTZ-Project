@@ -7,8 +7,8 @@ goal. Update it in the same commit as every completed work package.
 
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
-- Active branch: `zlevel/vertical-content`.
-- Active package: `P8.1 deterministic server-scale soak harness`.
+- Active branch: `zlevel/server-hardening`.
+- Active package: `P8.2 evidence-driven runtime hardening`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -48,7 +48,7 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P5 | Hierarchical pathfinding with vertical transition edges | Complete |
 | P6 | Safe initialized-map save/load and automated round trips | Complete |
 | P7 | Roofs, grates, catwalks, shafts, elevators, weather, and flight | Complete |
-| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.1 active) |
+| P8 | Server hardening, scale tests, Z 0 regression, and porting guide | In progress (P8.2 active) |
 
 ## Phase P4 Packages
 
@@ -105,8 +105,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 
 | Package | Deliverable | Status |
 | --- | --- | --- |
-| P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Active |
-| P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Pending |
+| P8.1 | Deterministic multi-session scale/soak harness and operational metrics | Complete |
+| P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Active |
 | P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Pending |
 | P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Pending |
 
@@ -7390,10 +7390,142 @@ allocation is inside Robust physics enumeration.
   workloads, records per-subsystem throughput/memory/cache/budget evidence, and
   establishes release-sized thresholds before changing runtime policy.
 
+## Completed Package: P8.1 Deterministic Server-Scale Soak
+
+### Scope
+
+- Extend the generated P0 fixture with an optional, strictly bounded candidate
+  density while preserving density one for every existing baseline caller.
+- Add a deterministic server workload with configurable floors, in-game dummy
+  sessions, candidate density, warm-up, and measured iterations.
+- Exercise moving local frames, structural tile removal/restoration, boundary,
+  visibility, sky, gravity, PVS, sound portal/routing/playback, and traversal
+  snapshot build/reuse in one lifecycle-owned run.
+- Emit a validated schema-versioned JSON report and a parameterized Release
+  runner without committing generated artifacts.
+- Correct pre-existing Z-level Release analyzer failures encountered while
+  proving the runner, without changing their runtime behavior.
+
+### Acceptance Criteria
+
+- Every session owns one attached viewer and receives exactly one explicit PVS
+  refresh per measured iteration; no PVS candidate fails open.
+- Structural mutations always restore their tile through a local `finally`,
+  drain pending gravity work, and leave both grid inventories and map
+  declaration valid.
+- Vertical sound and traversal use real bounded production contracts; the graph
+  must rebuild after support changes and immediately reuse a current snapshot.
+- Boundary, sky, sound, and graph caches stay within configured capacities; no
+  PVS, sky, sound, or traversal work budget exhausts in the declared profile.
+- The report records host/build context, configuration, complete subsystem
+  counters, caches, allocation/heap/GC, and min/average/p50/p95/p99/max latency
+  summaries without machine-dependent timing assertions.
+- Two equivalent Release captures reproduce structural counters and support an
+  evidence-driven P8.2 target.
+
+### Evidence
+
+- The schema 2 Release profile passes twice with 10 floors, 32 sessions, 960
+  candidate entities, 36 traversal nodes, 8 warm-ups, and 128 measured
+  iterations. Total measured time is 8,083.789 and 7,863.530 ms; main-thread
+  allocation is 170,159,064 and 170,198,960 bytes; post-GC retained deltas are
+  -3,586,056 and -452,544 bytes.
+- Both runs record 7/2/0 Gen0/Gen1/Gen2 workload collections. Iteration
+  p50/p95/p99 is 25.449/147.554/167.452 ms and
+  21.572/131.913/158.816 ms. Per-session PVS p50/p95/p99/max is
+  0.719/4.774/5.555/29.190 ms and 0.473/3.591/5.168/27.814 ms.
+- Both reports exactly match at 4,096 PVS refreshes, 4,218,880 candidates and
+  checks, 2,330,864 boundary queries, 256 gravity builds, 128 vertical sound
+  successes, and 256 graph builds plus 256 cache hits. All relevant budget and
+  fail-open counters are zero.
+- Final cache state is boundary 8,192/8,192 with 16 evictions, sky 424/4,096,
+  sound portal 17/4,096, one traversal snapshot, and zero pending gravity work.
+- The checked-in runner validates schema and requested settings. Two earlier
+  bounded Debug captures also passed with deterministic counters and allocation.
+- The existing 3/6/10-floor baseline passes 3/3 after the density extension,
+  proving default density remains one. Z-aware tile/chemical interaction passes
+  5/5 in Release.
+- The final complete Debug `FullyQualifiedName~ZLevel` integration matrix passes
+  337/337 with no failure or skip. A preceding namespace-only Release pass covers
+  321/321, and the one pooled lighting-cache case skipped in an earlier Debug
+  batch passes 1/1 in isolation. Content structural, visual-analysis, and mapping
+  unit coverage passes 18/18.
+- `Content.IntegrationTests` builds in Release with zero errors. The build first
+  exposed two pre-existing analyzer violations in our Z-level code: the admin
+  verb now uses the Transform-specialized `TryComp` overload and reagent tests
+  use typed `ProtoId<ReagentPrototype>` values. Their behavior is unchanged.
+- The final non-incremental single-worker solution build passes in 2m44s with
+  zero errors and 688 established warnings.
+
+### Decisions
+
+- Keep the ordinary-suite profile at 4 sessions, 240 candidates, and 8 measured
+  iterations while the explicit runner defaults to the 32-session Release
+  profile. Both paths execute the same implementation and assertions.
+- Use structural and budget invariants as portable pass/fail policy. Record
+  latency, allocation, and retained heap for equivalent-host comparisons rather
+  than embedding workstation-specific thresholds in the test.
+- Do not increase cache capacities in P8.2: observed boundary eviction is
+  negligible and sky/sound caches have ample headroom. First decompose the
+  reproducible p95 iteration tail by subsystem, then address scheduling,
+  invalidation, or allocation at the measured owner.
+- Keep schema 2 as the P8.2 comparison contract. It corrects GC collection
+  accounting by sampling before the deliberate post-run collection and adds
+  percentile summaries without changing production telemetry.
+
+### Completion Gate
+
+- [x] Scope check: generated fixture density, server soak, runner, analyzer
+      compatibility, and P8 documentation only.
+- [x] Invariant review: Z 0 default callers, local/world frames, moving grids,
+      server session authority, structural restoration, independent boundary
+      channels, graph support, and bounded caches were reviewed.
+- [x] Automated verification: two final Release soaks, 337 complete Debug and
+      321 namespace-only Release integration cases, the isolated pooled cache
+      case, 18 unit/mapping, 5 tile/interaction, and 3 baseline cases pass.
+- [x] Performance evidence: two schema 2 reports reproduce all structural
+      counters and capture latency percentiles, allocation, heap, GC, caches,
+      and budget state.
+- [x] Documentation: workload, runner, schema, evidence, interpretation, limits,
+      and P8.2 direction are synchronized here and in the focused hardening doc.
+- [x] Dependency check: WTZ Engine remains clean and pinned to published
+      revision `7cbd778024`; P8.1 requires no engine change.
+- [x] Git check: the final full build and Debug broad matrix pass;
+      `git diff --check` reports only checkout line-ending notices; generated
+      reports are ignored; the project diff is package-scoped; WTZ Engine is
+      clean at published revision `7cbd778024`.
+- [x] Mini review: false assumptions about round-backed dummy sessions, sound
+      query range, empty traversal snapshots, failure restoration, GC accounting,
+      and latency tails were found and corrected during the package.
+- [x] Commit: package prepared as `Measure deterministic Z-level server scale`
+      on `zlevel/server-hardening`; push and remote-hash verification are the
+      immediate publication step.
+
+### Mini Review
+
+- Finding: 32 independent sessions and dense representative entities remain
+  correct under moving frames and paired structural mutations; no safety budget
+  is close to exhaustion and no state leaks after collection or teardown.
+- Finding: an empty graph snapshot would have produced misleading cache-only
+  evidence. Four authored logical ladder stacks now give the soak 36 real nodes
+  and support-sensitive invalidation without invoking traversal movement.
+- Finding: individual PVS p95 stays below 5 ms on this host, but complete
+  iteration p95 exceeds 130 ms in both final runs. P8.2 must profile consumers
+  inside that iteration before assigning the tail to PVS, gravity, GC, or cache
+  churn.
+- Residual risk: integration tests use workstation GC and synthetic viewers,
+  candidate entities, mutations, and traversal stacks. A dedicated server,
+  representative station, real players, item piles, networking, and hours-long
+  runtime remain P8.4 release evidence.
+- Next package: P8.2 adds per-owner soak timing/allocation attribution, then
+  changes only the budget, cache, invalidation, scheduling, or lifecycle path
+  shown to own the long tail.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.1 | `Measure deterministic Z-level server scale` | 2 Release soaks, 337 complete Debug, 321 namespace Release, isolated pooled cache, 18 unit/mapping, 5 interaction, 3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P7 gate | `Close Z-level vertical content phase` | 135 cross-package, all 336 broad covered, 18 unit/mapping, 2x3 baseline, 2x24 real GL, full build, architecture/diff review | Complete |
 | 2026-08-30 | P7.4b2b | `Navigate authored Z-level flight corridors` | 6 focused, 1 official map, 38 path, 336 broad, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b2a | `Trace active Z-level flight heights` | 3 new, 72 consumer, 330 broad cases covered, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |

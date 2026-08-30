@@ -1,0 +1,132 @@
+# WTZ Z-Level Server Hardening
+
+This document owns the P8 operational evidence for native Z-level servers. It
+starts with the deterministic P8.1 scale harness and will accumulate the
+evidence-driven runtime limits, Z 0 compatibility matrix, porting contract, and
+public-server release gate from P8.2 through P8.4.
+
+## P8.1 Workload Contract
+
+`ZLevelServerSoakTest` builds the same generated station and moving-grid fixture
+used by the P0 baseline, then adds configurable load in four independent axes:
+
+- native floor count;
+- simultaneously attached in-game sessions;
+- candidate entities copied at each representative station and moving-grid
+  tile;
+- warm-up and measured structural mutation iterations.
+
+Every iteration deterministically moves and rotates the secondary grid,
+redistributes viewers across both local Z frames, removes and restores one safe
+station floor tile, queries the boundary/visibility/sky/gravity consumers,
+routes sound through a stable vertical shaft, rebuilds and reuses the traversal
+snapshot, and refreshes Z-aware PVS plus sound playback for every session.
+
+The removed tile is restored before the next iteration completes. The harness
+also drains pending gravity refreshes and verifies the final tile inventory and
+map declaration, so a passing performance run is also a lifecycle check.
+
+## Running The Harness
+
+The ordinary integration suite uses a bounded profile of 10 floors, 4 sessions,
+2 candidate copies per tile, 2 warm-up iterations, and 8 measured iterations.
+Run that case directly with:
+
+```powershell
+dotnet test Content.IntegrationTests/Content.IntegrationTests.csproj `
+  --filter FullyQualifiedName~Content.IntegrationTests.Tests.ZLevel.ZLevelServerSoakTest
+```
+
+The checked-in runner defaults to the P8.1 release profile: Release build, 10
+floors, 32 sessions, 8 candidate copies per tile, 8 warm-up iterations, and 128
+measured iterations.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File Tools/run_zlevel_server_soak.ps1
+```
+
+All load axes are explicit script parameters. `-NoBuild` reuses an existing
+binary, and `-OutputDirectory` selects the report location. The runner rejects
+out-of-range settings, restores prior environment variables, removes stale
+output, and checks that the report contains the requested profile.
+
+## Report Contract
+
+The runner writes `artifacts/zlevel-server-soak/zlevel-server-soak.json`. Schema
+version 2 records:
+
+- host runtime, architecture, logical processors, GC mode, and build mode;
+- every configured cache and work budget consumed by the workload;
+- generated geometry, frame origin, entity density, and gravity source count;
+- warm-up and measured elapsed time, thread allocation, heap before and after a
+  forced collection, and GC collection counts;
+- min/average/p50/p95/p99/max latency summaries for complete iterations and
+  individual per-session PVS refresh calls;
+- shared boundary, sky, visibility, gravity, PVS, and trace metrics;
+- sound portal, route, and per-session playback metrics;
+- traversal snapshot metrics and final bounded-cache lifecycle state.
+
+Timing and heap values are evidence, not machine-independent assertions. The
+test instead enforces deterministic correctness and safety invariants: all
+sessions are evaluated, no configured PVS/sound budget is exhausted, no PVS
+candidate fails open, cache counts remain within capacity, structural changes
+produce invalidations and rebuilds, graph snapshots become current and reusable,
+pending gravity work drains, and authored geometry is restored.
+
+## P8.1 Release Evidence
+
+The confirming profile ran twice in a Release integration server on Windows
+10.0.19045 x64, .NET 10.0.4, 28 logical processors, and workstation GC. Each
+run used 10 floors, 32 attached sessions, 960 representative candidate
+entities, 36 traversal nodes, 8 warm-up iterations, and 128 measured structural
+iterations.
+
+| Measurement | Run 1 | Run 2 |
+| --- | ---: | ---: |
+| Total measured time | 8,083.789 ms | 7,863.530 ms |
+| Main-thread allocation | 170,159,064 B | 170,198,960 B |
+| Retained heap delta after GC | -3,586,056 B | -452,544 B |
+| Workload GC collections (Gen0/Gen1/Gen2) | 7 / 2 / 0 | 7 / 2 / 0 |
+| Iteration p50 / p95 / p99 | 25.449 / 147.554 / 167.452 ms | 21.572 / 131.913 / 158.816 ms |
+| PVS refresh p50 / p95 / p99 | 0.719 / 4.774 / 5.555 ms | 0.473 / 3.591 / 5.168 ms |
+| PVS refresh maximum | 29.190 ms | 27.814 ms |
+
+Both runs produced exactly 4,096 PVS refreshes, 4,218,880 candidates and
+visibility checks, 2,330,864 boundary queries, 256 gravity builds, 128
+successful vertical sound routes, and 256 traversal snapshot builds plus 256
+immediate cache hits. No PVS candidate failed open and no PVS, sky, sound
+portal, sound route, sound playback, or traversal budget exhausted.
+
+The final state remained bounded: boundary cache 8,192/8,192 with only 16
+evictions across 2.33 million queries, sky cache 424/4,096, sound portal cache
+17/4,096, one map-scoped traversal snapshot, and zero pending gravity refreshes.
+All authored tiles were restored. Deterministic counters matched between runs;
+wall time differed by 2.72 percent and allocation by 39,896 bytes.
+
+The evidence does not justify larger caches. It does expose a reproducible
+long-tail frame risk: median complete iterations fit under one 30 Hz tick, but
+p95 exceeds 130 ms even though individual PVS p95 remains below 5 ms. P8.2 must
+therefore instrument the iteration by subsystem, attribute allocation and
+latency tails, and bound or schedule the expensive work before changing cache
+capacity. The first candidates are per-session candidate discovery and culling,
+full gravity-field rebuilds after paired tile mutations, and stop-the-world
+Gen0/Gen1 collections. A dedicated-server GC profile remains required by P8.4;
+these workstation-GC captures must not be treated as portable production SLA.
+
+## P8 Package Gates
+
+- **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
+  traversal, and structural-mutation profile passes without correctness or
+  budget failure and establishes the schema 2 reference above.
+- **P8.2:** change budgets, cache policy, invalidation, or lifecycle ownership
+  only in response to P8.1 evidence, then compare the same report schema.
+- **P8.3:** execute the explicit Z 0 regression matrix and publish the minimal
+  engine/content porting contract with automated checks.
+- **P8.4:** run prolonged and release-sized profiles, broad gameplay/mapping
+  regression, operational diagnostics, and the final public-server checklist.
+
+Each package closes only after its source diff, focused and broad tests,
+performance evidence, generated artifacts, documentation, dependency pairing,
+working tree, commit, push, and remote hash have been reviewed and recorded in
+`Docs/ZLevelImplementationLedger.md`.

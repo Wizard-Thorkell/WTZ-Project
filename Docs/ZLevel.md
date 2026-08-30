@@ -1106,6 +1106,20 @@ visibility-distance, and PVS-check budgets. These can be tuned with
 `zlevel.pvs_visibility_check_budget`; see the baseline report for clamps and
 fail-soft behavior.
 
+Deterministic multi-session server soak:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_server_soak.ps1
+```
+
+The runner defaults to the P8.1 Release profile of 10 floors, 32 sessions, 960
+representative entities, 36 traversal nodes, and 128 measured structural
+iterations. Its schema 2 report includes subsystem counters and budgets,
+bounded-cache state, allocation/heap/GC evidence, and iteration/PVS latency
+percentiles. Load axes are script parameters; generated reports remain under
+ignored `artifacts/`. See `Docs/ZLevelServerHardening.md` for the workload
+contract, current evidence, and interpretation limits.
+
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.
 
@@ -1143,6 +1157,14 @@ passing evidence in `Docs/ZLevelImplementationLedger.md`. P8 now owns measured
 multi-session soaks, evidence-driven budget/cache hardening, the explicit Z 0
 compatibility matrix, porting guidance, and the final public-server release
 gate.
+
+P8.1's deterministic server soak is implemented and has repeatable passing
+Release evidence at 32 sessions without budget exhaustion or retained-heap
+growth. It also exposes a complete-iteration p95 above 130 ms on the reference
+host despite per-session PVS p95 below 5 ms. P8.2 owns subsystem attribution and
+evidence-driven scheduling/invalidation/allocation hardening; current cache
+capacities remain unchanged because the release profile showed no material
+cache pressure.
 
 ## Definition Of Done
 

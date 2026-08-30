@@ -24,6 +24,7 @@ internal static class ZLevelStressFixtureBuilder
 {
     public const int StationSize = 24;
     public const int MovingGridSize = 8;
+    public const int MaximumCandidateCopiesPerTile = 64;
 
     private static readonly Vector2i[] StationCandidateTiles =
     [
@@ -61,9 +62,14 @@ internal static class ZLevelStressFixtureBuilder
         EntityUid stationGridUid,
         int floorCount,
         Tile floorTile,
-        string gravityGeneratorPrototype)
+        string gravityGeneratorPrototype,
+        int candidateCopiesPerTile = 1)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(floorCount, 2);
+        ArgumentOutOfRangeException.ThrowIfLessThan(candidateCopiesPerTile, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            candidateCopiesPerTile,
+            MaximumCandidateCopiesPerTile);
 
         var map = entityManager.System<SharedMapSystem>();
         var transform = entityManager.System<SharedTransformSystem>();
@@ -122,8 +128,22 @@ internal static class ZLevelStressFixtureBuilder
         AddGravitySamples(gravitySamples, movingGrid.Owner, movingTiles, floorCount - 1);
 
         var candidates = new List<EntityUid>();
-        SpawnCandidates(entityManager, zLevels, stationGridUid, floorCount, StationCandidateTiles, candidates);
-        SpawnCandidates(entityManager, zLevels, movingGrid.Owner, floorCount, MovingCandidateTiles, candidates);
+        SpawnCandidates(
+            entityManager,
+            zLevels,
+            stationGridUid,
+            floorCount,
+            candidateCopiesPerTile,
+            StationCandidateTiles,
+            candidates);
+        SpawnCandidates(
+            entityManager,
+            zLevels,
+            movingGrid.Owner,
+            floorCount,
+            candidateCopiesPerTile,
+            MovingCandidateTiles,
+            candidates);
 
         var stationGenerator = SpawnGravityGenerator(
             entityManager,
@@ -155,6 +175,7 @@ internal static class ZLevelStressFixtureBuilder
             closedBoundaries + movingClosed,
             sealedColumns,
             movingFrameOrigin,
+            candidateCopiesPerTile,
             boundarySamples,
             gravitySamples,
             candidates,
@@ -270,6 +291,7 @@ internal static class ZLevelStressFixtureBuilder
         SharedZLevelSystem zLevels,
         EntityUid gridUid,
         int floorCount,
+        int copiesPerTile,
         IReadOnlyList<Vector2i> candidateTiles,
         List<EntityUid> candidates)
     {
@@ -277,12 +299,15 @@ internal static class ZLevelStressFixtureBuilder
         {
             foreach (var tile in candidateTiles)
             {
-                var coordinates = new EntityCoordinates(
-                    gridUid,
-                    new Vector2(tile.X + 0.5f, tile.Y + 0.5f));
-                var candidate = entityManager.SpawnEntity(null, coordinates);
-                zLevels.SetZLevelPosition(candidate, z);
-                candidates.Add(candidate);
+                for (var copy = 0; copy < copiesPerTile; copy++)
+                {
+                    var coordinates = new EntityCoordinates(
+                        gridUid,
+                        new Vector2(tile.X + 0.5f, tile.Y + 0.5f));
+                    var candidate = entityManager.SpawnEntity(null, coordinates);
+                    zLevels.SetZLevelPosition(candidate, z);
+                    candidates.Add(candidate);
+                }
             }
         }
     }
@@ -415,6 +440,7 @@ internal sealed record ZLevelStressFixture(
     int ClosedBoundaryCount,
     int SealedColumnCount,
     int MovingGridFrameOrigin,
+    int CandidateCopiesPerTile,
     IReadOnlyList<ZLevelStressBoundarySample> BoundarySamples,
     IReadOnlyList<ZLevelStressGravitySample> GravitySamples,
     IReadOnlyList<EntityUid> CandidateEntities,

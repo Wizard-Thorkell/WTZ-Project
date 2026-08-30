@@ -737,7 +737,7 @@ public sealed partial class AdminVerbSystem
             args.Verbs.Add(setCapacity);
         }
 
-        if (TryComp<TransformComponent>(args.Target, out var transform) &&
+        if (TryComp(args.Target, out TransformComponent? transform) &&
             TryComp<PhysicsComponent>(args.Target, out _))
         {
             var currentZ = TryComp<ZLevelPositionComponent>(args.Target, out var zLevelPosition)

@@ -310,7 +310,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
             (ZLevelStressFixtureBuilder.StationSize * ZLevelStressFixtureBuilder.StationSize +
              ZLevelStressFixtureBuilder.MovingGridSize * ZLevelStressFixtureBuilder.MovingGridSize) *
             (fixture.FloorCount - 1);
-        var expectedCandidates = fixture.FloorCount * 12;
+        var expectedCandidates = fixture.FloorCount * 12 * fixture.CandidateCopiesPerTile;
 
         Assert.Multiple(() =>
         {
@@ -319,6 +319,7 @@ public sealed class ZLevelStressBaselineTest : GameTest
             Assert.That(fixture.ClosedBoundaryCount, Is.GreaterThan(0));
             Assert.That(fixture.SealedColumnCount, Is.GreaterThan(0));
             Assert.That(fixture.BoundarySamples, Has.Count.EqualTo(expectedBoundarySamples));
+            Assert.That(fixture.CandidateCopiesPerTile, Is.EqualTo(1));
             Assert.That(fixture.CandidateEntities, Has.Count.EqualTo(expectedCandidates));
             Assert.That(fixture.GravityGenerators, Has.Count.EqualTo(2));
             Assert.That(fixture.StationGridUid, Is.Not.EqualTo(fixture.MovingGridUid));
