@@ -654,7 +654,25 @@ public sealed class ZLevelMovementTest : MovementTest
                 .IsEntityVisibleFrom(targetUid, MapId, 6), Is.False);
             Assert.That(SEntMan.System<EntityLookupSystem>()
                 .GetEntitiesInRange(Transform.GetMapCoordinates(targetUid), 1f), Does.Contain(targetUid));
-            SEntMan.System<ZLevelPvsSystem>().RefreshSession(ServerSession);
+            var pvs = SEntMan.System<ZLevelPvsSystem>();
+            pvs.ResetSchedulerMetrics();
+            pvs.RefreshSession(ServerSession);
+            var firstRefresh = pvs.SchedulerMetrics;
+            pvs.RefreshSession(ServerSession);
+            var repeatedRefresh = pvs.SchedulerMetrics;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(firstRefresh.VisibilityContextCacheHits, Is.Zero);
+                Assert.That(firstRefresh.VisibilityContextCacheMisses, Is.GreaterThan(0));
+                Assert.That(firstRefresh.VisibilityContextCacheEntries, Is.GreaterThan(0));
+                Assert.That(repeatedRefresh.VisibilityContextCacheHits, Is.Zero,
+                    "A direct refresh must not reuse entity geometry from a previous simulation batch.");
+                Assert.That(repeatedRefresh.VisibilityContextCacheMisses,
+                    Is.EqualTo(firstRefresh.VisibilityContextCacheMisses * 2));
+                Assert.That(repeatedRefresh.VisibilityContextCacheEntries,
+                    Is.EqualTo(firstRefresh.VisibilityContextCacheEntries));
+            });
         });
         await RunSeconds(0.5f);
 

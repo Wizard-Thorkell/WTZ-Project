@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/server-hardening`.
-- Active package: `P8.4 public-server release matrix and final roadmap gate`.
+- Active package: `P8.4b Server GC endurance, lifecycle, and memory envelope`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -109,6 +109,15 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P8.2 | Budget, cache, invalidation, and lifecycle hardening from scale evidence | Complete |
 | P8.3 | Z 0 compatibility matrix and documented porting contract/tooling | Complete |
 | P8.4 | Public-server release matrix, operations guide, and final roadmap gate | Active |
+
+## Phase P8.4 Packages
+
+| Package | Deliverable | Status |
+| --- | --- | --- |
+| P8.4a | Batch-local PVS context reuse and 32-session Release envelope | Complete |
+| P8.4b | Server GC endurance, repeated lifecycle, and retained-memory envelope | Active |
+| P8.4c | Executable `WTZ-RELEASE-1` gameplay, mapping, and persistence matrix | Planned |
+| P8.4d | Operational diagnostics, recovery guide, and final P0-P8 gate | Planned |
 
 ## Phase P8.2 Packages
 
@@ -8122,10 +8131,119 @@ allocation is inside Robust physics enumeration.
   runs prolonged/release-sized and representative gameplay/mapping evidence,
   publishes operator diagnostics and recovery steps, and closes the roadmap.
 
+## Completed Package: P8.4a PVS Context Reuse And Release Envelope
+
+### Scope
+
+- Reuse entity map, grid, tile, local-Z, and world-Z resolution across sessions
+  scheduled in the same PVS update without caching the final visibility answer.
+- Keep direct refreshes isolated, preserve every per-viewer range/boundary/render
+  decision, and expose cache hits, misses, occupancy, and high-water occupancy.
+- Extend the deterministic soak contract to schema 6 and add a fail-closed
+  32-session Release envelope with explicit latency, allocation, reuse, and
+  scheduler-debt thresholds.
+- Keep the WTZ Engine revision, cache capacities, refresh cadence, visibility
+  budget, sound authorization, and gameplay policy unchanged.
+
+### Evidence
+
+- Four pure scheduler tests and seven focused integration cases pass. They cover
+  direct-refresh cache isolation, opening mutation, lower-floor light and
+  occluder dependencies, PVS fail-open budgeting, remote-view overlays, and
+  fail-closed cross-floor sound authorization.
+- The complete Debug `FullyQualifiedName~ZLevel` matrix passes 341 cases; its
+  single fixture-conditioned aperture-cache case passes 1/1 in isolation, so
+  all 342 cases are covered without a failed assertion. Z-level/mapping units
+  and analyzers pass 22/22.
+- The paired schema 5 references record scheduler-frame p95 at 39.2928 and
+  39.1741 ms. Two schema 6 context runs record 23.4610 and 24.1598 ms p95,
+  28.1156 and 29.3039 ms p99, and an exact 90.625 percent hit rate.
+- The official `-RequireReleaseEnvelope` run passes at 24.7161 ms p95,
+  31.2166 ms p99, 48.3365 ms maximum, and 2,132,808 allocated bytes, or 16,663
+  bytes per measured iteration. It performs 4,218,880 visibility checks and
+  4,096 fair session refreshes with 3,823,360 hits, 395,520 misses, 1,030
+  entries, zero deferred refreshes, zero budget exhaustion, zero workload
+  collections, and a -100,568-byte retained-heap delta.
+- A discarded final-decision-cache experiment reached only 2.08 percent hits
+  and left p95 at 38.768 ms. That implementation is not retained in source.
+- The generated 3/6/10-floor baseline passes 3/3 at 15.7674, 21.5457, and
+  22.9755 ms with exactly 6,336 allocated bytes and zero warm-cache misses at
+  every depth.
+- The full non-incremental single-worker Debug solution build passes in
+  3m06.28s with zero errors and 704 established upstream warnings.
+
+### Decisions
+
+- Cache reusable geometry rather than a final visibility result. Viewer map and
+  world Z, range policy, current boundary state, and lower-floor render
+  dependency rules remain authoritative on every logical check.
+- Scope reuse to one synchronous scheduler batch. Both scheduled and direct
+  entry points clear the table before work, and tests prove two direct calls do
+  not share contexts across potential simulation updates.
+- Count one cache lookup for every logical PVS visibility check. Schema 6 asserts
+  that hits plus misses exactly equal shared PVS check metrics, so diagnostics
+  cannot silently omit fallback paths.
+- Set the official synthetic envelope to p95 <= 30 ms, p99 <= 33.333 ms,
+  maximum <= 66.667 ms, hit rate >= 85 percent, and allocation <= 24 KiB per
+  iteration, with no deferred refresh or budget exhaustion. These limits have
+  measured headroom while still rejecting the schema 5 regression.
+- Require the report itself to identify a Release testhost. A development
+  `-NoBuild` rehearsal intentionally found and rejected a stale Debug binary
+  before the clean Release gate passed.
+
+### Completion Gate
+
+- [x] Scope check: one shared visibility context API, one server batch cache,
+      diagnostics, soak schema/runner, focused assertions, and synchronized
+      documentation; no unrelated gameplay or engine behavior changed.
+- [x] Invariant review: Z 0, local/world frames, moving grids, per-viewer server
+      authority, mutable boundaries, visual fail-open, and audio fail-closed
+      behavior remain explicit and tested.
+- [x] Automated verification: 11 focused, all 342 broad cases covered, 22
+      unit/mapping cases, 3 baselines, one official envelope run, and the full
+      solution build pass.
+- [x] Performance evidence: two paired references, one rejected experiment,
+      two repeated context samples, and one executable envelope sample record
+      latency, allocation, cache reuse, scheduler debt, GC, and retained heap.
+- [x] Documentation: schema 6, cache lifetime, thresholds, rejected approach,
+      commands, evidence, tradeoffs, and interpretation limits are recorded.
+- [x] Dependency check: no WTZ Engine source changed; project gitlink and clean
+      engine checkout remain paired at
+      `7cbd778024e49b9d3b0f4fe259631fd8a1ffe3f2`.
+- [x] Git check: whitespace, ignored artifacts, source status, focused diff, and
+      dependency pairing pass review before publication.
+- [x] Mini review: cache semantics, direct/scheduled lifetimes, fallback paths,
+      mutable boundaries, allocation tradeoff, report identity, and residual
+      dedicated-server risk were reviewed before committing.
+- [x] Commit: package closes as `Reuse PVS geometry across Z-level viewers` on
+      `zlevel/server-hardening`.
+
+### Mini Review
+
+- Finding: final visibility decisions are too viewer-specific to cache well in
+  this workload. Reusing only candidate geometry removes repeated transform and
+  grid resolution while retaining the inexpensive authoritative decision.
+- Finding: the stable 90.625 percent hit rate follows from scheduler batching,
+  not a long-lived cache. Entries are cleared in `finally` before control
+  returns, while metrics retain only latest and high-water occupancy counts.
+- Finding: the Release identity assertion is meaningful. `dotnet test
+  --configuration Release --no-build` can execute the shared Debug artifact in
+  this repository layout, and the envelope correctly fails that case.
+- Residual risk: the context dictionary adds at most approximately 5.4 percent
+  allocation in the measured profile. It remains inside the declared envelope,
+  but P8.4b must inspect long-run heap and capacity after grid teardown.
+- Residual risk: these captures use workstation GC and synthetic colocated
+  viewers. They establish a deterministic regression gate, not the complete
+  dedicated-server or representative-station SLA.
+- Next package: P8.4b runs true Server GC profiles, prolonged 32/64-session
+  endurance, repeated map/grid creation and deletion, and verifies that owned
+  caches and retained memory return to explicit bounds.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P8.4a | `Reuse PVS geometry across Z-level viewers` | 11 focused, all 342 broad covered, 22 unit/mapping, 3 baseline, 2 repeated + 1 envelope Release soak, full build, performance/diff/dependency review | Complete |
 | 2026-08-30 | P8.3c / P8.3 gate | `Close the WTZ Z-level porting phase` | 2 clean modes, 100 probes, 4 Release builds, 6 self-tests, 18 Z 0, all 342 broad covered, 22 unit/mapping, 3 baseline, full build, cleanup/diff/dependency/remote review | Complete |
 | 2026-08-30 | P8.3b | `Define the WTZ Z-level port contract` | 6 self-tests, 20 capabilities, 50 probes, 2 builds, 18 Z 0, 342 broad, 22 unit/mapping, 2x3 baseline, full build, diff/dependency review | Complete |
 | 2026-08-30 | P8.3a | `Make Z 0 compatibility executable` | 3 new, 18 contract, all 342 broad covered, 2 isolated pooled, 22 unit/mapping, 3 baseline, full build, diff/dependency review | Complete |

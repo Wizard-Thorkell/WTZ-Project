@@ -117,6 +117,12 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"last={pvsScheduler.LastRefreshMilliseconds:0.000}ms, " +
             $"max={pvsScheduler.MaxRefreshMilliseconds:0.000}ms");
         shell.WriteLine(
+            $"  pvs context cache: hits/misses={pvsScheduler.VisibilityContextCacheHits}/" +
+            $"{pvsScheduler.VisibilityContextCacheMisses} " +
+            $"({pvsScheduler.VisibilityContextCacheHitPercent:0.00}%), " +
+            $"entries/max={pvsScheduler.VisibilityContextCacheEntries}/" +
+            $"{pvsScheduler.VisibilityContextCacheMaxEntries}");
+        shell.WriteLine(
             $"  trace: queries={metrics.TraceQueries}, completed={metrics.TraceCompleted}, " +
             $"closed={metrics.TraceClosedBoundaries}, invalid={metrics.TraceInvalidCoordinates}, " +
             $"different-maps={metrics.TraceDifferentMaps}, " +

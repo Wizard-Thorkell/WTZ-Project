@@ -97,6 +97,86 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
     }
 
     /// <summary>
+    /// Resolves the stable geometric inputs shared by repeated entity visibility
+    /// checks. Callers must not retain the context across simulation updates.
+    /// </summary>
+    public bool TryResolveEntityVisibilityContext(
+        EntityUid entity,
+        out ZLevelEntityVisibilityContext context)
+    {
+        context = default;
+        if (!_transformQuery.TryComp(entity, out var transform) ||
+            transform.MapID == MapId.Nullspace)
+        {
+            return false;
+        }
+
+        var mapCoordinates = _transform.GetMapCoordinates((entity, transform));
+        EntityUid gridUid;
+        MapGridComponent grid;
+        if (transform.GridUid is { } directGrid && _gridQuery.TryComp(directGrid, out var directGridComp))
+        {
+            gridUid = directGrid;
+            grid = directGridComp;
+        }
+        else if (!_mapManager.TryFindGridAt(mapCoordinates, out gridUid, out var foundGrid))
+        {
+            return false;
+        }
+        else
+        {
+            grid = foundGrid;
+        }
+
+        context = new ZLevelEntityVisibilityContext(
+            transform.MapID,
+            gridUid,
+            grid,
+            _map.TileIndicesFor(gridUid, grid, mapCoordinates),
+            _transform.GetZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity))),
+            _transform.GetWorldZLevel((entity, transform, CompOrNull<ZLevelPositionComponent>(entity))));
+        return true;
+    }
+
+    /// <summary>
+    /// Evaluates a batch-local context while preserving normal visibility metrics
+    /// and boundary policy.
+    /// </summary>
+    public bool IsEntityVisibleFrom(
+        in ZLevelEntityVisibilityContext context,
+        MapId viewerMap,
+        int viewerWorldZ,
+        bool allowAbove = false)
+    {
+        _metrics.RecordVisibilityEntityQuery();
+        if (context.MapId != viewerMap)
+        {
+            _metrics.RecordVisibilityEarlyRejection();
+            return false;
+        }
+
+        if (context.WorldZ == viewerWorldZ)
+        {
+            _metrics.RecordVisibilitySameLevel();
+            return true;
+        }
+
+        if (!IsWorldLevelWithinRange(viewerWorldZ, context.WorldZ, allowAbove))
+        {
+            _metrics.RecordVisibilityEarlyRejection();
+            return false;
+        }
+
+        return IsTileVisibleFrom(
+            context.GridUid,
+            context.Grid,
+            context.Tile,
+            viewerWorldZ,
+            context.LocalZ,
+            allowAbove);
+    }
+
+    /// <summary>
     /// Checks whether a coordinate identifies a non-empty tile visible from a
     /// viewer's world level on the same structural frame.
     /// </summary>
@@ -241,3 +321,11 @@ public sealed class SharedZLevelVisibilitySystem : EntitySystem
                Math.Abs(difference) <= _maxVisibleLevelDistance;
     }
 }
+
+public readonly record struct ZLevelEntityVisibilityContext(
+    MapId MapId,
+    EntityUid GridUid,
+    MapGridComponent Grid,
+    Vector2i Tile,
+    int LocalZ,
+    int WorldZ);

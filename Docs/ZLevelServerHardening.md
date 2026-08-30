@@ -49,12 +49,16 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 All load axes are explicit script parameters. `-NoBuild` reuses an existing
 binary, and `-OutputDirectory` selects the report location. The runner rejects
 out-of-range settings, restores prior environment variables, removes stale
-output, and checks that the report contains the requested profile.
+output, and checks that the report contains the requested profile. Add
+`-RequireReleaseEnvelope` to require the exact P8.4a 10-floor, 32-session,
+8-copy Release profile with at least 8 warm-up and 128 measured iterations.
+The gate also verifies the build mode recorded by the testhost, so `-NoBuild`
+cannot accidentally present a stale Debug binary as Release evidence.
 
 ## Report Contract
 
 The runner writes `artifacts/zlevel-server-soak/zlevel-server-soak.json`. Schema
-version 5 records:
+version 6 records:
 
 - host runtime, architecture, logical processors, GC mode, and build mode;
 - every configured cache and work budget consumed by the workload;
@@ -69,7 +73,8 @@ version 5 records:
 - complete-iteration latency split by whether a Gen0/Gen1/Gen2 collection was
   observed during that iteration;
 - scheduler-update counts, due/scheduled/deferred work, budget exhaustion, batch
-  maxima, and per-scheduler-frame latency;
+  maxima, per-scheduler-frame latency, and batch-local PVS visibility-context
+  cache hits, misses, latest-batch occupancy, and high-water occupancy;
 - shared boundary, sky, visibility, gravity, PVS, and trace metrics, including
   gravity builds that reused an existing per-grid workspace;
 - sound portal, route, and per-session playback metrics;
@@ -309,6 +314,47 @@ solution build completes in 2m39.24s with zero errors and 704 established
 warnings. P8.3 is complete; these source and compile proofs intentionally do not
 replace P8.4's representative runtime and public-server evidence.
 
+## P8.4a PVS Release Envelope
+
+PVS candidate lookup returns the same entity to many viewers in one scheduler
+update. `ZLevelPvsSystem` now resolves the candidate's map, grid, tile, local Z,
+and world Z once per scheduler batch and reuses that geometry for later
+sessions. The final visibility decision is deliberately not cached: every
+viewer still evaluates range, boundary state, render dependencies, and normal
+metrics. Scheduled batches clear the context table before collecting sessions,
+and direct `RefreshSession` calls clear it before every call, so simulation
+updates can never observe stale candidate geometry.
+
+An earlier final-decision cache was measured and rejected. It reached only a
+2.08 percent hit rate and left scheduler-frame p95 at 38.768 ms because viewer
+positions and levels made the final key too specific. The geometry cache instead
+reaches exactly 90.625 percent on the 32-session fixture.
+
+| Measurement | P8.2c run 1 | P8.2c run 2 | Context run 1 | Context run 2 | Envelope run |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Scheduler-frame p95 | 39.293 ms | 39.174 ms | 23.461 ms | 24.160 ms | 24.716 ms |
+| Scheduler-frame p99 | 43.208 ms | 44.408 ms | 28.116 ms | 29.304 ms | 31.217 ms |
+| Total measured time | 6,858.106 ms | 7,419.711 ms | 6,353.612 ms | 6,510.473 ms | 5,901.571 ms |
+| Main-thread allocation | 2,068,744 B | 2,064,688 B | 2,180,056 B | 2,126,128 B | 2,132,808 B |
+| Context-cache hit rate | n/a | n/a | 90.625% | 90.625% | 90.625% |
+
+All schema 6 runs preserve exactly 4,218,880 candidate checks and 4,096 fair
+session refreshes, with 3,823,360 context hits, 395,520 misses, 1,030 maximum
+entries, no deferred refresh, no budget exhaustion, no workload collection,
+and no retained-heap growth. The repeated p95 reduction is approximately 38 to
+40 percent against the paired P8.2c captures. Allocation increases by at most
+approximately 5.4 percent, remains below 17.1 KiB per measured iteration, and
+stays far below the 24 KiB envelope.
+
+`-RequireReleaseEnvelope` fails unless scheduler-frame p95 is at most 30 ms,
+p99 at most 33.333 ms, maximum at most 66.667 ms, context-cache hit rate at
+least 85 percent, and allocation at most 24 KiB per measured iteration. It also
+requires zero deferred refreshes and zero scheduler budget exhaustions. These are
+host-specific acceptance limits for the declared deterministic profile, not a
+portable promise for arbitrary hardware or station content. P8.4b owns true
+Server GC, longer endurance, repeated grid lifecycle, and retained-memory
+evidence.
+
 ## P8 Package Gates
 
 - **P8.1:** complete. The repeatable multi-session, dense-entity, moving-grid,
@@ -326,6 +372,9 @@ replace P8.4's representative runtime and public-server evidence.
   series with 50 source/consumer probes, two builds, and fail-closed self-tests.
 - **P8.3c:** complete. Both exact-history and rewritten shallow-history pairs
   pass from disposable clean trees with four protected Release builds.
+- **P8.4a:** complete. Batch-local candidate geometry reuse brings the
+  32-session scheduler-frame p95 under the executable 30 ms Release envelope
+  while final boundary decisions remain per viewer and authoritative.
 - **P8.4:** active. Run prolonged and release-sized profiles, broad
   gameplay/mapping regression, operational diagnostics, and the final
   public-server checklist.

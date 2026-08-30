@@ -20,12 +20,46 @@ param(
 
     [string] $OutputDirectory,
 
+    [switch] $RequireReleaseEnvelope,
+
     [switch] $NoBuild
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "Content.IntegrationTests\Content.IntegrationTests.csproj"
+$releaseEnvelope = [ordered]@{
+    Floors = 10
+    Sessions = 32
+    MinimumWarmupIterations = 8
+    MinimumMeasuredIterations = 128
+    CandidateCopies = 8
+    MaximumPvsSchedulerFrameP95Milliseconds = 30.0
+    MaximumPvsSchedulerFrameP99Milliseconds = 33.333
+    MaximumPvsSchedulerFrameMilliseconds = 66.667
+    MinimumVisibilityContextCacheHitPercent = 85.0
+    MaximumAllocatedBytesPerIteration = 24KB
+}
+
+if ($RequireReleaseEnvelope) {
+    if ($Configuration -ne "Release") {
+        throw "The release envelope requires -Configuration Release."
+    }
+
+    if ($Floors -ne $releaseEnvelope.Floors -or
+        $Sessions -ne $releaseEnvelope.Sessions -or
+        $WarmupIterations -lt $releaseEnvelope.MinimumWarmupIterations -or
+        $Iterations -lt $releaseEnvelope.MinimumMeasuredIterations -or
+        $CandidateCopies -ne $releaseEnvelope.CandidateCopies) {
+        throw (("The release envelope requires floors={0}, sessions={1}, warmup>={2}, " +
+            "iterations>={3}, and candidate-copies={4}.") -f
+            $releaseEnvelope.Floors,
+            $releaseEnvelope.Sessions,
+            $releaseEnvelope.MinimumWarmupIterations,
+            $releaseEnvelope.MinimumMeasuredIterations,
+            $releaseEnvelope.CandidateCopies)
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot "artifacts\zlevel-server-soak"
@@ -84,7 +118,7 @@ if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
 }
 
 $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-if ($report.schemaVersion -ne 5) {
+if ($report.schemaVersion -ne 6) {
     throw "Unsupported server soak report schema: $($report.schemaVersion)."
 }
 
@@ -100,6 +134,65 @@ foreach ($entry in $expected.GetEnumerator()) {
     if ($report.settings.($entry.Key) -ne $entry.Value) {
         throw "Server soak report setting '$($entry.Key)' is $($report.settings.($entry.Key)); expected $($entry.Value)."
     }
+}
+
+$releaseEnvelopeSummary = $null
+if ($RequireReleaseEnvelope) {
+    $failures = [System.Collections.Generic.List[string]]::new()
+    $scheduler = $report.measured.pvsScheduler
+    $frameLatency = $report.measured.pvsSchedulerFrameLatency
+    $allocatedBytesPerIteration =
+        [double] $report.measured.allocatedBytes / $report.measured.iterations
+
+    if ($report.host.buildConfiguration -ne "Release") {
+        $failures.Add("report build configuration is '$($report.host.buildConfiguration)'")
+    }
+    if ($frameLatency.p95Milliseconds -gt
+        $releaseEnvelope.MaximumPvsSchedulerFrameP95Milliseconds) {
+        $failures.Add(("PVS frame p95 is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.p95Milliseconds,
+            $releaseEnvelope.MaximumPvsSchedulerFrameP95Milliseconds))
+    }
+    if ($frameLatency.p99Milliseconds -gt
+        $releaseEnvelope.MaximumPvsSchedulerFrameP99Milliseconds) {
+        $failures.Add(("PVS frame p99 is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.p99Milliseconds,
+            $releaseEnvelope.MaximumPvsSchedulerFrameP99Milliseconds))
+    }
+    if ($frameLatency.maxMilliseconds -gt
+        $releaseEnvelope.MaximumPvsSchedulerFrameMilliseconds) {
+        $failures.Add(("PVS frame maximum is {0:N3} ms; maximum is {1:N3} ms" -f
+            $frameLatency.maxMilliseconds,
+            $releaseEnvelope.MaximumPvsSchedulerFrameMilliseconds))
+    }
+    if ($scheduler.visibilityContextCacheHitPercent -lt
+        $releaseEnvelope.MinimumVisibilityContextCacheHitPercent) {
+        $failures.Add(("PVS context-cache hit rate is {0:N2}%; minimum is {1:N2}%" -f
+            $scheduler.visibilityContextCacheHitPercent,
+            $releaseEnvelope.MinimumVisibilityContextCacheHitPercent))
+    }
+    if ($allocatedBytesPerIteration -gt
+        $releaseEnvelope.MaximumAllocatedBytesPerIteration) {
+        $failures.Add(("allocation is {0:N0} bytes/iteration; maximum is {1:N0}" -f
+            $allocatedBytesPerIteration,
+            $releaseEnvelope.MaximumAllocatedBytesPerIteration))
+    }
+    if ($scheduler.deferredRefreshes -ne 0 -or $scheduler.budgetExhaustions -ne 0) {
+        $failures.Add(("PVS scheduler has {0} deferred refreshes and {1} budget exhaustions" -f
+            $scheduler.deferredRefreshes,
+            $scheduler.budgetExhaustions))
+    }
+
+    if ($failures.Count -gt 0) {
+        throw "Z-level release envelope failed: $($failures -join '; ')."
+    }
+
+    $releaseEnvelopeSummary =
+        "p95={0:N3} ms, p99={1:N3} ms, cache={2:N2}%, allocated={3:N0} bytes/iteration" -f
+        $frameLatency.p95Milliseconds,
+        $frameLatency.p99Milliseconds,
+        $scheduler.visibilityContextCacheHitPercent,
+        $allocatedBytesPerIteration
 }
 
 Write-Host "Z-level server soak report written to $reportPath"
@@ -132,6 +225,11 @@ Write-Host ("  PVS scheduler updates/scheduled/deferred/exhausted={0}/{1}/{2}/{3
     $report.measured.pvsScheduler.deferredRefreshes,
     $report.measured.pvsScheduler.budgetExhaustions,
     $report.measured.pvsScheduler.maxRefreshesPerUpdate)
+Write-Host ("  PVS context cache hits/misses/rate/entries={0}/{1}/{2:N2}%/{3}" -f `
+    $report.measured.pvsScheduler.visibilityContextCacheHits,
+    $report.measured.pvsScheduler.visibilityContextCacheMisses,
+    $report.measured.pvsScheduler.visibilityContextCacheHitPercent,
+    $report.measured.pvsScheduler.visibilityContextCacheEntries)
 Write-Host "  stage attribution:"
 foreach ($stage in $report.measured.stages) {
     Write-Host ("    {0}: p50/p95/p99/max={1:N3}/{2:N3}/{3:N3}/{4:N3} ms, allocated={5:N0} bytes" -f `
@@ -145,3 +243,6 @@ foreach ($stage in $report.measured.stages) {
 Write-Host ("  iterations with/without GC collection={0}/{1}" -f `
     $report.measured.collectionCorrelation.iterationsWithCollection,
     $report.measured.collectionCorrelation.iterationsWithoutCollection)
+if ($null -ne $releaseEnvelopeSummary) {
+    Write-Host "  release envelope: PASS ($releaseEnvelopeSummary)"
+}

@@ -1121,15 +1121,25 @@ Deterministic multi-session server soak:
 powershell -NoProfile -ExecutionPolicy Bypass -File Tools/run_zlevel_server_soak.ps1
 ```
 
+The checked-in 32-session Release acceptance envelope is executable with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File Tools/run_zlevel_server_soak.ps1 -RequireReleaseEnvelope
+```
+
 The runner defaults to the P8.1 Release profile of 10 floors, 32 sessions, 960
 representative entities, 36 traversal nodes, and 128 measured structural
-iterations. Its schema 5 report includes subsystem counters and budgets,
+iterations. Its schema 6 report includes subsystem counters and budgets,
 bounded-cache state, allocation/heap/GC evidence, iteration/PVS latency
 percentiles, per-stage latency/allocation, GC correlation, and real scheduler
-frame metrics, including gravity builds that reused per-grid workspaces. Load
-axes are script parameters; generated reports remain under ignored `artifacts/`.
-See `Docs/ZLevelServerHardening.md` for the workload contract, current evidence,
-and interpretation limits.
+frame metrics, including gravity builds that reused per-grid workspaces and
+batch-local PVS candidate-context cache hits, misses, and occupancy. The
+optional envelope also checks Release build identity, latency, reuse,
+allocation, deferred work, and exhaustion. Load axes are script parameters;
+generated reports remain under ignored `artifacts/`. See
+`Docs/ZLevelServerHardening.md` for the workload contract, current evidence,
+thresholds, and interpretation limits.
 
 Run broader tests after touching shared map, serialization, placement, atmos, or
 movement code.
@@ -1185,8 +1195,13 @@ series to 20 named capabilities, 50 engine/consumer probes, two protected build
 targets, and a fail-closed compatibility verifier. P8.3c now proves both the
 exact pair and a rewritten depth-one pair from disposable clean checkouts with
 50/50 probes and 2/2 Release builds per mode. The consolidated P8.3 gate is
-complete; P8.4 owns representative runtime, operations, and public-server
-release evidence.
+complete. P8.4a now reuses candidate geometry only inside one PVS scheduler
+batch, preserving per-viewer boundary decisions while reducing the repeated
+32-session scheduler-frame p95 from approximately 39.2 ms to 23.5-24.2 ms. Its
+executable Release envelope passes at 24.716 ms p95, 90.625 percent cache hits,
+and zero deferred or exhausted refreshes. P8.4b owns Server GC endurance,
+repeated grid lifecycle, and retained-memory evidence before the gameplay and
+operations release gates.
 
 ## Definition Of Done
 

@@ -194,7 +194,7 @@ public sealed class ZLevelServerSoakTest : GameTest
                 AssertRestored(stressFixture);
 
                 report = new ZLevelServerSoakReport(
-                    5,
+                    6,
                     DateTimeOffset.UtcNow,
                     CreateHostSnapshot(),
                     settings,
@@ -752,6 +752,17 @@ public sealed class ZLevelServerSoakTest : GameTest
                 Is.LessThanOrEqualTo(expectedSchedulerLimit));
             Assert.That(scheduler.MaxDeferredRefreshesPerUpdate, Is.Zero);
             Assert.That(double.IsFinite(scheduler.MaxRefreshMilliseconds), Is.True);
+            Assert.That(scheduler.VisibilityContextCacheHits, Is.GreaterThan(0));
+            Assert.That(scheduler.VisibilityContextCacheMisses, Is.GreaterThan(0));
+            Assert.That(scheduler.VisibilityContextCacheHitPercent, Is.GreaterThan(0d));
+            Assert.That(
+                scheduler.VisibilityContextCacheHits + scheduler.VisibilityContextCacheMisses,
+                Is.EqualTo(metrics.PvsVisibilityChecks));
+            Assert.That(scheduler.VisibilityContextCacheEntries, Is.GreaterThan(0));
+            Assert.That(scheduler.VisibilityContextCacheEntries,
+                Is.LessThanOrEqualTo(scheduler.VisibilityContextCacheMaxEntries));
+            Assert.That(scheduler.VisibilityContextCacheMaxEntries,
+                Is.LessThanOrEqualTo(scheduler.VisibilityContextCacheMisses));
 
             Assert.That(portals.Invalidations, Is.GreaterThanOrEqualTo(settings.MeasuredIterations * 2));
             Assert.That(portals.Builds, Is.GreaterThan(0));
