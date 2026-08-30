@@ -3,10 +3,12 @@
 
 #nullable enable
 
+using System.Linq;
 using System.Numerics;
 using Content.IntegrationTests.Tests.Movement;
 using Content.Server.Power.Components;
 using Content.Server.ZLevel.Components;
+using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.Maps;
 using Content.Shared.Power;
@@ -246,6 +248,374 @@ public sealed class ZLevelElevatorTest : MovementTest
             {
                 Assert.That(zLevels.GetZLevel(cabin), Is.EqualTo(2));
                 Assert.That(zLevels.GetZLevel(player), Is.Zero);
+            });
+        });
+    }
+
+    [Test]
+    public async Task PhysicalStopsExposeDeterministicSupportedNavigationEdges()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(topFloor: 2, travelTimePerLevel: TimeSpan.Zero);
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var boundaries = SEntMan.System<SharedZLevelBoundarySystem>();
+            var grid = SEntMan.GetComponent<MapGridComponent>(MapData.Grid);
+            var map = SEntMan.System<SharedMapSystem>();
+            var tile = map.TileIndicesFor(MapData.Grid, grid, fixture.Coordinates);
+            var edges = graph.CreateSnapshot(MapData.MapId).Edges
+                .Where(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator)
+                .ToArray();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(edges, Has.Length.EqualTo(2));
+                Assert.That(edges[0].Source.Traversal, Is.EqualTo(fixture.BottomStop));
+                Assert.That(edges[0].Source.LocalZ, Is.Zero);
+                Assert.That(edges[0].Destination.LocalZ, Is.EqualTo(2));
+                Assert.That(edges[0].ZOffset, Is.EqualTo(2));
+                Assert.That(edges[0].Cost, Is.EqualTo(12f));
+                Assert.That(edges[0].RequireDirectDestinationSupport, Is.True);
+                Assert.That(edges[1].Source.Traversal, Is.EqualTo(fixture.TopStop));
+                Assert.That(edges[1].ZOffset, Is.EqualTo(-2));
+                Assert.That(boundaries.CanBodyPass(MapData.Grid, grid, tile, 0, -1), Is.False);
+                Assert.That(boundaries.CanBodyPass(MapData.Grid, grid, tile, 2, 1), Is.False);
+            });
+
+            SEntMan.GetComponent<ZLevelElevatorCabinComponent>(fixture.Cabin).NavigationCallCost = float.NaN;
+            SetPower(fixture.Cabin, false);
+            SetPower(fixture.Cabin, true);
+            Assert.That(graph.CreateSnapshot(MapData.MapId).Edges.Any(edge =>
+                edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.False,
+                "Malformed route costs must fail closed instead of entering pathfinding.");
+        });
+    }
+
+    [Test]
+    public async Task ThreeStopNetworkUsesOnlyAdjacentEdgesAndResolvesBothMiddleDirections()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(topFloor: 2, travelTimePerLevel: TimeSpan.Zero);
+            var middleStop = SpawnAnchored(StopPrototype, fixture.Coordinates, 1);
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var edges = graph.CreateSnapshot(MapData.MapId).Edges
+                .Where(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator)
+                .ToArray();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(edges.Select(edge => (edge.Source.LocalZ, edge.Destination.LocalZ)),
+                    Is.EqualTo(new[] { (0, 1), (1, 0), (1, 2), (2, 1) }));
+                Assert.That(edges.Any(edge =>
+                    edge.Source.LocalZ == 0 && edge.Destination.LocalZ == 2), Is.False);
+                Assert.That(edges.Count(edge => edge.Source.Traversal == middleStop), Is.EqualTo(2));
+                Assert.That(edges.All(edge => edge.Cost == 8f), Is.True);
+            });
+
+            foreach (var expected in edges.Where(edge => edge.Source.Traversal == middleStop))
+            {
+                Assert.That(graph.TryResolveEdge(expected, out var current),
+                    Is.EqualTo(ZLevelTraversalEdgeStatus.Valid));
+                Assert.That(ZLevelTraversalGraphSystem.HasEquivalentEdge(expected, current), Is.True);
+            }
+        });
+    }
+
+    [Test]
+    public async Task NavigationCallsCabinThenCarriesWaitingUserWithZeroDuration()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(topFloor: 2, travelTimePerLevel: TimeSpan.Zero);
+            var player = ToServer(Player);
+            var transform = SEntMan.System<SharedTransformSystem>();
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+
+            transform.SetCoordinates(player, fixture.Coordinates.Offset(Vector2.UnitX));
+            Assert.That(elevators.TryRequestFloor(fixture.Cabin, 2),
+                Is.EqualTo(ZLevelElevatorRequestResult.Started));
+            Assert.That(zLevels.GetZLevel(fixture.Cabin), Is.EqualTo(2));
+
+            transform.SetCoordinates(player, fixture.Coordinates);
+            Assert.That(zLevels.SetZLevelPosition(player, 0), Is.True);
+            var edge = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(MapData.MapId)
+                .Edges
+                .Single(candidate =>
+                    candidate.Source.Traversal == fixture.BottomStop &&
+                    candidate.Destination.LocalZ == 2);
+
+            elevators.ResetMetrics();
+            var traversal = SEntMan.System<ZLevelTraversalSystem>();
+            Assert.That(traversal.TryStartTraversal(edge, player), Is.True);
+            var navigation = elevators.NavigationSnapshot();
+            var physical = elevators.Snapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(zLevels.GetZLevel(fixture.Cabin), Is.EqualTo(2));
+                Assert.That(zLevels.GetZLevel(player), Is.EqualTo(2));
+                Assert.That(traversal.IsTraversalPending(player), Is.False);
+                Assert.That(navigation.Active, Is.Zero);
+                Assert.That(navigation.Started, Is.EqualTo(1));
+                Assert.That(navigation.Completed, Is.EqualTo(1));
+                Assert.That(navigation.Cancelled, Is.Zero);
+                Assert.That(physical.Started, Is.EqualTo(2));
+                Assert.That(physical.Completed, Is.EqualTo(2));
+            });
+        });
+    }
+
+    [Test]
+    public async Task PowerChangesInvalidateOnlyElevatorEdgeEnvironment()
+    {
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(topFloor: 2, travelTimePerLevel: TimeSpan.Zero);
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            var snapshot = graph.CreateSnapshot(MapData.MapId);
+            Assert.That(snapshot.Edges.Count(edge =>
+                edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.EqualTo(2));
+
+            SetPower(fixture.Cabin, false);
+            Assert.That(graph.ValidateSnapshot(snapshot),
+                Is.EqualTo(ZLevelTraversalGraphSnapshotStatus.EnvironmentChanged));
+            Assert.That(graph.CreateSnapshot(MapData.MapId).Edges.Any(edge =>
+                edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.False);
+
+            SetPower(fixture.Cabin, true);
+            Assert.That(graph.CreateSnapshot(MapData.MapId).Edges.Count(edge =>
+                edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task PowerLossWhileCallingCancelsNavigationAndLeavesUserAtSource()
+    {
+        EntityUid cabin = default;
+        EntityUid player = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(
+                topFloor: 2,
+                travelTimePerLevel: TimeSpan.FromSeconds(0.25));
+            cabin = fixture.Cabin;
+            player = ToServer(Player);
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var traversal = SEntMan.System<ZLevelTraversalSystem>();
+
+            Assert.That(zLevels.SetZLevelPosition(cabin, 2), Is.True);
+            var edge = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(MapData.MapId)
+                .Edges
+                .Single(candidate =>
+                    candidate.Source.Traversal == fixture.BottomStop &&
+                    candidate.Destination.LocalZ == 2);
+
+            elevators.ResetMetrics();
+            Assert.That(traversal.TryStartTraversal(edge, player), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(zLevels.GetZLevel(cabin), Is.EqualTo(2));
+                Assert.That(zLevels.GetZLevel(player), Is.Zero);
+                Assert.That(traversal.IsTraversalPending(player, fixture.BottomStop), Is.True);
+                Assert.That(elevators.IsTravelPending(cabin), Is.True);
+            });
+        });
+
+        await RunSeconds(0.1f);
+        await Server.WaitPost(() => SetPower(cabin, false));
+        await RunSeconds(0.1f);
+
+        await Server.WaitAssertion(() =>
+        {
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var navigation = elevators.NavigationSnapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(zLevels.GetZLevel(cabin), Is.EqualTo(2));
+                Assert.That(zLevels.GetZLevel(player), Is.Zero);
+                Assert.That(SEntMan.System<ZLevelTraversalSystem>().IsTraversalPending(player), Is.False);
+                Assert.That(elevators.IsTravelPending(cabin), Is.False);
+                Assert.That(navigation.Active, Is.Zero);
+                Assert.That(navigation.Cancelled, Is.EqualTo(1));
+                Assert.That(elevators.Snapshot().Cancelled, Is.EqualTo(1));
+                Assert.That(SEntMan.System<ZLevelTraversalGraphSystem>()
+                    .CreateSnapshot(MapData.MapId)
+                    .Edges.Any(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.False);
+            });
+        });
+    }
+
+    [Test]
+    public async Task RemovingDestinationStopCancelsRidingNavigation()
+    {
+        EntityUid cabin = default;
+        EntityUid player = default;
+        EntityUid topStop = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(
+                topFloor: 2,
+                travelTimePerLevel: TimeSpan.FromSeconds(0.25));
+            cabin = fixture.Cabin;
+            player = ToServer(Player);
+            topStop = fixture.TopStop;
+            var edge = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(MapData.MapId)
+                .Edges
+                .Single(candidate =>
+                    candidate.Source.Traversal == fixture.BottomStop &&
+                    candidate.Destination.LocalZ == 2);
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            elevators.ResetMetrics();
+
+            Assert.That(SEntMan.System<ZLevelTraversalSystem>().TryStartTraversal(edge, player), Is.True);
+            Assert.That(elevators.IsTravelPending(cabin), Is.True);
+        });
+
+        await RunSeconds(0.1f);
+        await Server.WaitPost(() => SEntMan.DeleteEntity(topStop));
+        await RunSeconds(0.1f);
+
+        await Server.WaitAssertion(() =>
+        {
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(cabin), Is.Zero);
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(player), Is.Zero);
+                Assert.That(SEntMan.System<ZLevelTraversalSystem>().IsTraversalPending(player), Is.False);
+                Assert.That(elevators.IsTravelPending(cabin), Is.False);
+                Assert.That(elevators.NavigationSnapshot().Cancelled, Is.EqualTo(1));
+                Assert.That(elevators.Snapshot().Cancelled, Is.EqualTo(1));
+                Assert.That(SEntMan.System<ZLevelTraversalGraphSystem>()
+                    .CreateSnapshot(MapData.MapId)
+                    .Edges.Any(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.False);
+            });
+        });
+    }
+
+    [Test]
+    public async Task NavigationHasOneOwnerAndCancellationDoesNotAbortTheCabinCall()
+    {
+        EntityUid cabin = default;
+        EntityUid player = default;
+        EntityUid waitingPassenger = default;
+        EntityUid bottomStop = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(
+                topFloor: 2,
+                travelTimePerLevel: TimeSpan.FromSeconds(0.2));
+            cabin = fixture.Cabin;
+            bottomStop = fixture.BottomStop;
+            player = ToServer(Player);
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var traversal = SEntMan.System<ZLevelTraversalSystem>();
+
+            Assert.That(zLevels.SetZLevelPosition(cabin, 2), Is.True);
+            var edge = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(MapData.MapId)
+                .Edges
+                .Single(candidate =>
+                    candidate.Source.Traversal == bottomStop &&
+                    candidate.Destination.LocalZ == 2);
+
+            elevators.ResetMetrics();
+            Assert.That(traversal.TryStartTraversal(edge, player), Is.True);
+            waitingPassenger = SEntMan.SpawnEntity(PassengerPrototype, fixture.Coordinates);
+            Assert.That(zLevels.SetZLevelPosition(waitingPassenger, 0), Is.True);
+            Assert.That(traversal.TryStartTraversal(edge, waitingPassenger), Is.False,
+                "Only one route may own a physical cabin while it is busy.");
+            Assert.That(traversal.TryCancelTraversal(player, bottomStop), Is.True);
+
+            var navigation = elevators.NavigationSnapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(traversal.IsTraversalPending(player), Is.False);
+                Assert.That(traversal.IsTraversalPending(waitingPassenger), Is.False);
+                Assert.That(elevators.IsTravelPending(cabin), Is.True,
+                    "Cancelling a route should release ownership without teleporting or aborting the cabin.");
+                Assert.That(navigation.Active, Is.Zero);
+                Assert.That(navigation.Started, Is.EqualTo(1));
+                Assert.That(navigation.Cancelled, Is.EqualTo(1));
+                Assert.That(navigation.Rejected, Is.EqualTo(1));
+            });
+        });
+
+        await RunSeconds(0.5f);
+        await Server.WaitAssertion(() =>
+        {
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            Assert.Multiple(() =>
+            {
+                Assert.That(zLevels.GetZLevel(cabin), Is.Zero);
+                Assert.That(zLevels.GetZLevel(player), Is.Zero);
+                Assert.That(zLevels.GetZLevel(waitingPassenger), Is.Zero);
+                Assert.That(elevators.IsTravelPending(cabin), Is.False);
+                Assert.That(elevators.NavigationSnapshot().Completed, Is.Zero);
+                Assert.That(elevators.Snapshot().Completed, Is.EqualTo(1));
+            });
+        });
+    }
+
+    [Test]
+    public async Task DeletingNavigationOwnerReleasesCabinWithoutASecondTrip()
+    {
+        EntityUid cabin = default;
+        EntityUid user = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            var fixture = SpawnElevator(
+                topFloor: 2,
+                travelTimePerLevel: TimeSpan.FromSeconds(0.2));
+            cabin = fixture.Cabin;
+            user = SEntMan.SpawnEntity(PassengerPrototype, fixture.Coordinates);
+            var zLevels = SEntMan.System<SharedZLevelSystem>();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+
+            Assert.That(zLevels.SetZLevelPosition(user, 0), Is.True);
+            Assert.That(zLevels.SetZLevelPosition(cabin, 2), Is.True);
+            var edge = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(MapData.MapId)
+                .Edges
+                .Single(candidate =>
+                    candidate.Source.Traversal == fixture.BottomStop &&
+                    candidate.Destination.LocalZ == 2);
+
+            elevators.ResetMetrics();
+            Assert.That(SEntMan.System<ZLevelTraversalSystem>().TryStartTraversal(edge, user), Is.True);
+            Assert.That(elevators.IsTravelPending(cabin), Is.True);
+            SEntMan.DeleteEntity(user);
+        });
+
+        await RunSeconds(0.5f);
+        await Server.WaitAssertion(() =>
+        {
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var navigation = elevators.NavigationSnapshot();
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.Deleted(user), Is.True);
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(cabin), Is.Zero);
+                Assert.That(elevators.IsTravelPending(cabin), Is.False);
+                Assert.That(navigation.Active, Is.Zero);
+                Assert.That(navigation.Started, Is.EqualTo(1));
+                Assert.That(navigation.Completed, Is.Zero);
+                Assert.That(navigation.Cancelled, Is.EqualTo(1));
+                Assert.That(elevators.Snapshot().Started, Is.EqualTo(1),
+                    "Deleting the route owner must not schedule a destination ride.");
+                Assert.That(elevators.Snapshot().Completed, Is.EqualTo(1));
             });
         });
     }

@@ -6,6 +6,7 @@ using System.Numerics;
 using Content.Server.Power.Components;
 using Content.Server.Power.EntitySystems;
 using Content.Server.ZLevel.Components;
+using Content.Server.ZLevel.Navigation;
 using Content.Shared.Maps;
 using Content.Shared.Popups;
 using Content.Shared.Power;
@@ -25,7 +26,7 @@ namespace Content.Server.ZLevel.Systems;
 /// Owns physical elevator cabin travel. The hierarchy remains two-dimensional;
 /// the cabin and passengers move together by changing their local Z-level.
 /// </summary>
-public sealed class ZLevelElevatorSystem : EntitySystem
+public sealed partial class ZLevelElevatorSystem : EntitySystem
 {
     public const int MaximumShaftIdLength = 64;
     public const int MaximumStopsPerNetwork = 64;
@@ -71,6 +72,11 @@ public sealed class ZLevelElevatorSystem : EntitySystem
     public int RegisteredCabinCount => _cabins.Count;
     public int RegisteredStopCount => _stops.Count;
 
+    public bool IsTravelPending(EntityUid cabin)
+    {
+        return _pending.ContainsKey(cabin);
+    }
+
     public override void Initialize()
     {
         base.Initialize();
@@ -102,6 +108,8 @@ public sealed class ZLevelElevatorSystem : EntitySystem
             subs.Event<BoundUIOpenedEvent>(OnUiOpened);
             subs.Event<ZLevelElevatorRequestFloorMessage>(OnRequestFloor);
         });
+
+        InitializeNavigation();
     }
 
     public override void Update(float frameTime)
@@ -281,6 +289,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
         _busyRejections = 0;
         _passengersCaptured = 0;
         _passengersMoved = 0;
+        ResetNavigationMetrics();
     }
 
     private void OnUiOpened(Entity<ZLevelElevatorControlComponent> entity, ref BoundUIOpenedEvent args)
@@ -353,7 +362,10 @@ public sealed class ZLevelElevatorSystem : EntitySystem
             CancelTravel(entity.Owner);
 
         if (_cabins.TryGetValue(entity.Owner, out var registration))
+        {
+            NotifyNavigationEnvironmentChanged(registration.MapId);
             UpdateNetwork(registration.Key);
+        }
     }
 
     private void OnStopStartup(Entity<ZLevelElevatorStopComponent> entity, ref ComponentStartup args)
@@ -462,6 +474,18 @@ public sealed class ZLevelElevatorSystem : EntitySystem
             UpdateNetwork(oldRegistration.Key);
         if (hasNew && (!hadOld || oldRegistration.Key != newRegistration.Key))
             UpdateNetwork(newRegistration.Key);
+
+        if (hadOld && (!hasNew || oldRegistration.Key != newRegistration.Key ||
+            oldRegistration.MapId != newRegistration.MapId))
+        {
+            NotifyNavigationTopologyChanged(oldRegistration.MapId);
+        }
+
+        if (hasNew && (!hadOld || oldRegistration.Key != newRegistration.Key ||
+            oldRegistration.MapId != newRegistration.MapId))
+        {
+            NotifyNavigationTopologyChanged(newRegistration.MapId);
+        }
     }
 
     private void RemoveCabin(EntityUid uid)
@@ -471,6 +495,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
 
         RemoveCabinFromNetwork(uid, registration.Key);
         UpdateNetwork(registration.Key);
+        NotifyNavigationTopologyChanged(registration.MapId);
     }
 
     private void RemoveCabinFromNetwork(EntityUid uid, ElevatorNetworkKey key)
@@ -529,6 +554,11 @@ public sealed class ZLevelElevatorSystem : EntitySystem
             ValidatePendingNetwork(newRegistration.Key);
             UpdateNetwork(newRegistration.Key);
         }
+
+        if (hadOld && (!hasNew || oldRegistration != newRegistration))
+            NotifyNavigationTopologyChanged(oldRegistration.MapId);
+        if (hasNew && (!hadOld || oldRegistration != newRegistration))
+            NotifyNavigationTopologyChanged(newRegistration.MapId);
     }
 
     private void RemoveStop(EntityUid uid)
@@ -539,6 +569,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
         RemoveStopFromNetwork(uid, registration);
         ValidatePendingNetwork(registration.Key);
         UpdateNetwork(registration.Key);
+        NotifyNavigationTopologyChanged(registration.MapId);
     }
 
     private void RemoveStopFromNetwork(EntityUid uid, ElevatorRegistration registration)
@@ -635,7 +666,8 @@ public sealed class ZLevelElevatorSystem : EntitySystem
         var localZ = _transform.GetZLevel((uid, transform, CompOrNull<ZLevelPositionComponent>(uid)));
         registration = new ElevatorRegistration(
             new ElevatorNetworkKey(gridUid, tile, shaftId.Trim()),
-            localZ);
+            localZ,
+            transform.MapID);
         return true;
     }
 
@@ -838,6 +870,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
         }
 
         UpdateNetwork(travel.Key);
+        ContinueNavigationAfterArrival(cabin, travel.TargetFloor);
     }
 
     private bool IsPassengerStillAboard(EntityUid passenger, PendingElevatorTravel travel)
@@ -876,6 +909,8 @@ public sealed class ZLevelElevatorSystem : EntitySystem
 
     private void CancelTravel(EntityUid cabin, bool updateComponent = true)
     {
+        CancelNavigationForCabin(cabin);
+
         if (!_pending.Remove(cabin, out var travel))
             return;
 
@@ -896,6 +931,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
         ZLevelElevatorCabinComponent component,
         ElevatorNetworkKey key)
     {
+        CancelNavigationForCabin(cabin);
         component.State = ZLevelElevatorState.Idle;
         component.TargetLevel = null;
         component.ArrivalTime = TimeSpan.Zero;
@@ -1024,7 +1060,7 @@ public sealed class ZLevelElevatorSystem : EntitySystem
 
     private readonly record struct ElevatorNetworkKey(EntityUid GridUid, Vector2i Tile, string ShaftId);
 
-    private readonly record struct ElevatorRegistration(ElevatorNetworkKey Key, int LocalZ);
+    private readonly record struct ElevatorRegistration(ElevatorNetworkKey Key, int LocalZ, MapId MapId);
 
     private sealed record PendingElevatorTravel(
         ElevatorNetworkKey Key,

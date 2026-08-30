@@ -8,9 +8,13 @@ using Content.Server.Administration.Managers;
 using Content.Server.Atmos.EntitySystems;
 using Content.Server.Decals;
 using Content.Server.Mapping;
+using Content.Server.ZLevel.Components;
+using Content.Server.ZLevel.Navigation;
+using Content.Server.ZLevel.Systems;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.Mapping;
+using Content.Shared.Maps;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -18,12 +22,15 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Player;
+using Robust.Shared.Prototypes;
 
 namespace Content.IntegrationTests.Tests.ZLevel;
 
 [TestFixture]
 public sealed class ZLevelInitializedMappingMutationTest : GameTest
 {
+    private static readonly ProtoId<ContentTileDefinition> ShaftTile = "FloorZLevelShaft";
+
     public override PoolSettings PoolSettings => new() { Connected = true, DummyTicker = false, Dirty = true };
 
     [Test]
@@ -42,6 +49,8 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
         var decals = SEntMan.System<DecalSystem>();
         var atmosphere = SEntMan.System<AtmosphereSystem>();
         var snapshots = SEntMan.System<MappingSnapshotSystem>();
+        var prototypes = Server.ResolveDependency<IPrototypeManager>();
+        var shaft = prototypes.Index(ShaftTile);
 
         EntityUid sourceAuthored = default;
         EntityUid sourcePipe = default;
@@ -56,11 +65,15 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
         NetEntity mapNet = default;
         NetEntity gridNet = default;
         EntityUid secondaryGridUid = default;
+        EntityUid elevatorCabin = default;
+        EntityUid sourceElevatorStop = default;
 
         await Server.WaitAssertion(() =>
         {
             var grid = testMap.Grid;
             format.Configure(testMap.MapUid, 0, 1, 0, ZLevelDefaultBoundaryMode.ExplicitOnly);
+            mapSystem.SetZLevelTile(grid.Owner, grid.Comp, new ZLevelTileIndices(0, 0, 0),
+                new Tile(shaft.TileId));
             mapSystem.SetZLevelTile(grid.Owner, grid.Comp, new ZLevelTileIndices(0, 0, 1), new Tile(1));
             mapSystem.SetZLevelTile(grid.Owner, grid.Comp, new ZLevelTileIndices(1, 0, 1), new Tile(1));
 
@@ -83,6 +96,11 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
             sourceAuthored = SpawnAnchored("ZLevelFloorOpeningMarker", new Vector2(0.5f, 0.5f), 0);
             sourcePipe = SpawnAnchored("GasPipeStraight", new Vector2(0.5f, 0.5f), 0);
             sourceCable = SpawnAnchored("CableApcExtension", new Vector2(0.5f, 0.5f), 0);
+            sourceElevatorStop = SpawnAnchored("ZLevelElevatorStop", new Vector2(0.5f, 0.5f), 0);
+            elevatorCabin = SpawnAnchored("ZLevelElevatorCabin", new Vector2(0.5f, 0.5f), 0);
+            var elevatorComponent = SEntMan.GetComponent<ZLevelElevatorCabinComponent>(elevatorCabin);
+            elevatorComponent.RequirePower = false;
+            elevatorComponent.TravelTimePerLevel = TimeSpan.FromSeconds(30);
             targetAuthored = SpawnAnchored("ZLevelSealedBoundaryMarker", new Vector2(0.5f, 0.5f), 1);
 
             sourceRuntimeChild = SEntMan.SpawnEntity(
@@ -163,6 +181,8 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
                 Assert.That(GetLocalZ(targetAuthored), Is.EqualTo(1));
                 Assert.That(snapshots.IsPersistentSnapshotEntity(sourceAuthored, testMap.MapUid), Is.True);
                 Assert.That(snapshots.IsPersistentSnapshotEntity(targetAuthored, testMap.MapUid), Is.True);
+                Assert.That(snapshots.IsPersistentSnapshotEntity(sourceElevatorStop, testMap.MapUid), Is.True);
+                Assert.That(snapshots.IsPersistentSnapshotEntity(elevatorCabin, testMap.MapUid), Is.True);
                 Assert.That(SEntMan.GetComponent<MetaDataComponent>(sourceAuthored).EntityPrototype?.MapSavable,
                     Is.Not.False);
                 Assert.That(SEntMan.GetComponent<MetaDataComponent>(targetAuthored).EntityPrototype?.MapSavable,
@@ -237,12 +257,26 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
             var copiedRoots = FindPrototypeRoots("ZLevelFloorOpeningMarker", 1);
             var copiedPipes = FindPrototypeRoots("GasPipeStraight", 1);
             var copiedCables = FindPrototypeRoots("CableApcExtension", 1);
+            var copiedStops = FindPrototypeRoots("ZLevelElevatorStop", 1);
+            var sourceCabins = FindPrototypeRoots("ZLevelElevatorCabin", 0);
+            var targetCabins = FindPrototypeRoots("ZLevelElevatorCabin", 1);
+            var elevatorEdges = SEntMan.System<ZLevelTraversalGraphSystem>()
+                .CreateSnapshot(testMap.MapId)
+                .Edges
+                .Where(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator)
+                .ToArray();
 
             Assert.Multiple(() =>
             {
                 Assert.That(copiedRoots, Has.Length.EqualTo(1));
                 Assert.That(copiedPipes, Has.Length.EqualTo(1));
                 Assert.That(copiedCables, Has.Length.EqualTo(1));
+                Assert.That(copiedStops, Has.Length.EqualTo(1));
+                Assert.That(sourceCabins, Is.EqualTo(new[] { elevatorCabin }));
+                Assert.That(targetCabins, Is.Empty,
+                    "Floor copying must preserve the one physical cabin instead of cloning it.");
+                Assert.That(elevatorEdges, Has.Length.EqualTo(2));
+                Assert.That(elevatorEdges.Select(edge => edge.ZOffset), Is.EqualTo(new[] { 1, -1 }));
                 Assert.That(SEntMan.GetComponent<MetaDataComponent>(copiedRoots[0]).EntityLifeStage,
                     Is.EqualTo(EntityLifeStage.MapInitialized));
                 Assert.That(SEntMan.GetComponent<MetaDataComponent>(copiedPipes[0]).EntityLifeStage,
@@ -291,6 +325,11 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
                     "Floor copying must not carry transient hotspot state into the authored clone.");
                 Assert.That(format.TryValidate(testMap.MapUid, out var error), Is.True, error);
             });
+
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            Assert.That(elevators.TryRequestFloor(elevatorCabin, 1),
+                Is.EqualTo(ZLevelElevatorRequestResult.Started));
+            Assert.That(elevators.IsTravelPending(elevatorCabin), Is.True);
         });
 
         await Server.WaitAssertion(() =>
@@ -326,6 +365,16 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
                 Assert.That(FindPrototypeRoots("ZLevelFloorOpeningMarker", 1), Is.Empty);
                 Assert.That(FindPrototypeRoots("GasPipeStraight", 1), Is.Empty);
                 Assert.That(FindPrototypeRoots("CableApcExtension", 1), Is.Empty);
+                Assert.That(FindPrototypeRoots("ZLevelElevatorStop", 1), Is.Empty);
+                Assert.That(FindPrototypeRoots("ZLevelElevatorCabin", 0),
+                    Is.EqualTo(new[] { elevatorCabin }));
+                Assert.That(SEntMan.EntityExists(sourceElevatorStop), Is.True);
+                Assert.That(SEntMan.System<ZLevelElevatorSystem>().IsTravelPending(elevatorCabin), Is.False);
+                Assert.That(SEntMan.GetComponent<ZLevelElevatorCabinComponent>(elevatorCabin).State,
+                    Is.EqualTo(ZLevelElevatorState.Idle));
+                Assert.That(SEntMan.System<ZLevelTraversalGraphSystem>()
+                    .CreateSnapshot(testMap.MapId)
+                    .Edges.Any(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.False);
                 Assert.That(mapSystem.GetExistingZLevelLayers(grid.Owner, grid.Comp),
                     Is.EquivalentTo(new[] { 0 }));
                 var secondaryGrid = SEntMan.GetComponent<MapGridComponent>(secondaryGridUid);
@@ -345,12 +394,17 @@ public sealed class ZLevelInitializedMappingMutationTest : GameTest
         await Server.WaitAssertion(() =>
         {
             var config = SEntMan.GetComponent<ZLevelMapComponent>(testMap.MapUid);
+            var mapping = SEntMan.System<ZLevelMappingSystem>();
+            var deleteException = Assert.Throws<InvalidOperationException>(() =>
+                mapping.DeleteLevel(testMap.MapUid, config, testMap.Grid, 0));
             Assert.Multiple(() =>
             {
                 Assert.That(config.MinimumLevel, Is.Zero);
                 Assert.That(config.MaximumLevel, Is.Zero);
                 Assert.That(SEntMan.Deleted(secondaryGridUid), Is.True,
                     "Removing the final tile-only floor may remove the now-empty grid.");
+                Assert.That(deleteException!.Message, Does.Contain("physical elevator cabin"));
+                Assert.That(SEntMan.EntityExists(elevatorCabin), Is.True);
                 Assert.That(format.TryValidate(testMap.MapUid, out var error), Is.True, error);
                 Assert.That(snapshots.TryCreateMapSnapshot(
                     testMap.MapUid,

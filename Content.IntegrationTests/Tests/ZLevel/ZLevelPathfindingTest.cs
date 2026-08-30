@@ -9,6 +9,7 @@ using System.Numerics;
 using System.Threading;
 using Content.IntegrationTests.Fixtures;
 using Content.IntegrationTests.Fixtures.Attributes;
+using Content.Server.Power.Components;
 using Content.Server.NPC;
 using Content.Server.NPC.Components;
 using Content.Server.NPC.HTN;
@@ -23,6 +24,7 @@ using Content.Shared.DoAfter;
 using Content.Shared.Maps;
 using Content.Shared.NPC;
 using Content.Shared.Physics;
+using Content.Shared.Power;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
 using Content.Shared.ZLevel.Systems;
@@ -1061,6 +1063,86 @@ public sealed class ZLevelPathfindingTest : GameTest
     }
 
     [Test]
+    public async Task NPCSteeringCallsAndRidesPhysicalElevator()
+    {
+        var testMap = await Pair.CreateTestMap();
+        EntityUid npc = default;
+        EntityUid target = default;
+        EntityUid cabin = default;
+
+        await Server.WaitAssertion(() =>
+        {
+            ConfigureCorridors(testMap);
+            cabin = SpawnPhysicalElevator(
+                testMap,
+                2.5f,
+                cabinFloor: 1,
+                travelTimePerLevel: TimeSpan.FromSeconds(0.15));
+            target = SEntMan.SpawnEntity(null, Coordinates(testMap, 5.5f));
+            Assert.That(SEntMan.System<SharedZLevelSystem>().SetZLevelPosition(target, 1), Is.True);
+            npc = SpawnTraversalUser(testMap, 0.5f);
+        });
+        await Pair.RunTicksSync(40);
+
+        await Server.WaitAssertion(() =>
+        {
+            var graph = SEntMan.System<ZLevelTraversalGraphSystem>();
+            Assert.That(graph.CreateSnapshot(testMap.MapId).Edges.Count(edge =>
+                edge.Source.Kind == ZLevelTraversalKind.Elevator), Is.EqualTo(2));
+
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var steering = SEntMan.System<NPCSteeringSystem>();
+            elevators.ResetMetrics();
+            steering.ResetZLevelMetrics();
+            steering.Register(npc, new EntityCoordinates(target, Vector2.Zero)).Range = 0.2f;
+            SEntMan.EnsureComponent<ActiveNPCComponent>(npc);
+        });
+
+        await Pair.RunSeconds(12f);
+        await Server.WaitAssertion(() =>
+        {
+            var steering = SEntMan.GetComponent<NPCSteeringComponent>(npc);
+            var steeringMetrics = SEntMan.System<NPCSteeringSystem>().SnapshotZLevelMetrics();
+            var elevators = SEntMan.System<ZLevelElevatorSystem>();
+            var navigation = elevators.NavigationSnapshot();
+            var physical = elevators.Snapshot();
+            var transform = SEntMan.GetComponent<TransformComponent>(npc);
+            var distance = transform.Coordinates.TryDistance(
+                SEntMan,
+                new EntityCoordinates(target, Vector2.Zero),
+                out var value)
+                ? value
+                : float.PositiveInfinity;
+            var state = $"status={steering.Status},z={SEntMan.System<SharedZLevelSystem>().GetZLevel(npc)}," +
+                        $"distance={distance:F2},replan={steering.LastZLevelReplanReason}," +
+                        $"failure={steering.LastZLevelExecutionFailureReason}," +
+                        $"nav={navigation.Started}/{navigation.Completed}/{navigation.Cancelled}/" +
+                        $"{navigation.Rejected}";
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(cabin), Is.EqualTo(1), state);
+                Assert.That(SEntMan.System<SharedZLevelSystem>().GetZLevel(npc), Is.EqualTo(1), state);
+                Assert.That(steering.Status, Is.EqualTo(SteeringStatus.InRange), state);
+                Assert.That(distance, Is.LessThanOrEqualTo(steering.Range), state);
+                Assert.That(navigation.Active, Is.Zero, state);
+                Assert.That(navigation.Started, Is.EqualTo(1), state);
+                Assert.That(navigation.Completed, Is.EqualTo(1), state);
+                Assert.That(navigation.Cancelled, Is.Zero, state);
+                Assert.That(navigation.Rejected, Is.Zero, state);
+                Assert.That(physical.Started, Is.EqualTo(2), state);
+                Assert.That(physical.Completed, Is.EqualTo(2), state);
+                Assert.That(steeringMetrics.RoutesInstalled, Is.EqualTo(1), state);
+                Assert.That(steeringMetrics.RoutesCompleted, Is.EqualTo(1), state);
+                Assert.That(steeringMetrics.TraversalsStarted, Is.EqualTo(1), state);
+                Assert.That(steeringMetrics.TraversalsCompleted, Is.EqualTo(1), state);
+                Assert.That(steeringMetrics.Replans, Is.Zero, state);
+                Assert.That(steeringMetrics.ExecutionFailures, Is.Zero, state);
+            });
+        });
+    }
+
+    [Test]
     public async Task NPCSteeringPlansAndExecutesCrossFloorRoute()
     {
         var testMap = await Pair.CreateTestMap();
@@ -1849,6 +1931,57 @@ public sealed class ZLevelPathfindingTest : GameTest
         var stairs = SEntMan.SpawnEntity("ZLevelStairsUp", Coordinates(testMap, x, lane));
         SEntMan.System<ZLevelTraversalGraphSystem>().RefreshTraversal(stairs);
         return stairs;
+    }
+
+    private EntityUid SpawnPhysicalElevator(
+        TestMapData testMap,
+        float x,
+        int cabinFloor,
+        TimeSpan travelTimePerLevel)
+    {
+        var map = SEntMan.System<SharedMapSystem>();
+        var prototypes = Server.ResolveDependency<IPrototypeManager>();
+        var grid = SEntMan.GetComponent<MapGridComponent>(testMap.Grid);
+        var coordinates = Coordinates(testMap, x);
+        var tile = map.TileIndicesFor(testMap.Grid, grid, coordinates);
+        var shaft = prototypes.Index(ShaftTile);
+        for (var z = 0; z <= 1; z++)
+        {
+            map.SetZLevelTile(
+                testMap.Grid,
+                grid,
+                new ZLevelTileIndices(tile.X, tile.Y, z),
+                new Tile(shaft.TileId));
+        }
+
+        SpawnAnchoredZLevelEntity("ZLevelElevatorStop", coordinates, 0);
+        SpawnAnchoredZLevelEntity("ZLevelElevatorStop", coordinates, 1);
+        var cabin = SpawnAnchoredZLevelEntity("ZLevelElevatorCabin", coordinates, cabinFloor);
+        var component = SEntMan.GetComponent<ZLevelElevatorCabinComponent>(cabin);
+        component.TravelTimePerLevel = travelTimePerLevel;
+        var power = SEntMan.GetComponent<ApcPowerReceiverComponent>(cabin);
+        power.NeedsPower = false;
+        power.PowerDisabled = false;
+        power.Powered = true;
+        var powerChanged = new PowerChangedEvent(true, power.Load);
+        SEntMan.EventBus.RaiseLocalEvent(cabin, ref powerChanged);
+        return cabin;
+    }
+
+    private EntityUid SpawnAnchoredZLevelEntity(
+        string prototype,
+        EntityCoordinates coordinates,
+        int localZ)
+    {
+        var uid = SEntMan.SpawnEntity(prototype, coordinates);
+        var zLevels = SEntMan.System<SharedZLevelSystem>();
+        var transform = SEntMan.System<SharedTransformSystem>();
+        var xform = SEntMan.GetComponent<TransformComponent>(uid);
+        Assert.That(zLevels.SetZLevelPosition(uid, localZ), Is.True);
+        if (!xform.Anchored)
+            transform.AnchorEntity(uid, xform);
+        Assert.That(xform.Anchored, Is.True);
+        return uid;
     }
 
     private EntityUid SpawnTraversalUser(TestMapData testMap, float x, int lane = 0)

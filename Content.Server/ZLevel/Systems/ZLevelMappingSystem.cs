@@ -8,6 +8,7 @@ using Content.Server.Administration.Managers;
 using Content.Server.Atmos.EntitySystems;
 using Content.Server.Decals;
 using Content.Server.Mapping;
+using Content.Server.ZLevel.Components;
 using Content.Shared.Administration;
 using Content.Shared.Decals;
 using Content.Shared.ZLevel;
@@ -174,6 +175,8 @@ public sealed class ZLevelMappingSystem : EntitySystem
 
         var sourceRoots = GetLevelRoots(mapUid, grid.Owner, sourceLevel);
         var targetRoots = GetLevelRoots(mapUid, grid.Owner, targetLevel);
+        sourceRoots.RemoveWhere(HasComp<ZLevelElevatorCabinComponent>);
+        targetRoots.RemoveWhere(HasComp<ZLevelElevatorCabinComponent>);
         IReadOnlyDictionary<EntityUid, int>? yamlIds = null;
         LoadResult? result = null;
 
@@ -333,6 +336,12 @@ public sealed class ZLevelMappingSystem : EntitySystem
             throw new InvalidOperationException(validationError);
 
         var entities = GetLevelRoots(mapUid, grid.Owner, level);
+        if (entities.Any(HasComp<ZLevelElevatorCabinComponent>))
+        {
+            throw new InvalidOperationException(
+                "Move or remove the physical elevator cabin before deleting its current Z level.");
+        }
+
         var usedByAnotherGrid = IsLevelUsedByAnotherGrid(mapUid, grid.Owner, level);
         var allTiles = _map.GetAllNonEmptyZLevelTiles(grid.Owner, grid.Comp).ToArray();
         var tiles = allTiles

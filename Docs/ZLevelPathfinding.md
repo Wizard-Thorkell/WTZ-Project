@@ -305,8 +305,10 @@ extra eviction in P5; longer public-server endurance belongs to P8.
 P5 is complete. Authored static and dynamic vertical connectors now participate
 in floor-specific local navigation, bounded hierarchical planning, exact
 server-authoritative traversal, stale-route recovery, and map-scoped caching.
-Physical elevator cabins and flight remain P7 content built on these contracts.
-The active roadmap work moves to P6 initialized-map save/load.
+P7.2 now supplies physical cabin edges through this same graph: each landing
+connects only to its nearest served neighbors, exact edge resolution preserves
+both directions at middle stops, and AI calls then rides the authoritative
+cabin. Flight remains later P7 content built on these contracts.
 
 ## P5.1 Verification
 

@@ -170,7 +170,7 @@ public sealed partial class PathfindingSystem
                     break;
                 case ZLevelPathLegKind.Traversal:
                     if (_zLevelTraversalGraph.TryResolveEdge(
-                            leg.Traversal.Source.Traversal,
+                            leg.Traversal,
                             out var current) != ZLevelTraversalEdgeStatus.Valid ||
                         !ZLevelTraversalGraphSystem.HasEquivalentEdge(leg.Traversal, current))
                     {

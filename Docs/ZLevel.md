@@ -126,7 +126,9 @@ Implemented traversal and debug tooling:
 - `ZLevelTraversalComponent`.
 - Powered physical elevator cabins, mapper-authored landing controls, bounded
   authoritative travel, rider capture, APC load changes, and cancellation on
-  power or topology loss. Mapping persistence and AI integration remain P7.2b.
+  power or topology loss. Adjacent-stop graph edges let AI call and ride the
+  same cabin; initialized mapping copies stops without cloning cabins and
+  double-round-trip tests preserve authored configuration without runtime trips.
 - `ZLevelStairsUp`, `ZLevelStairsDown`, and `ZLevelLadder` prototypes.
 - Interaction verbs for using traversal objects.
 - Step-trigger traversal support.
@@ -952,9 +954,9 @@ Tasks:
 - [Done] Represent authored ZLevel traversal edges in an indexed, directed
   navigation contract with local/world frames, costs, revisions, metrics, and
   bounded connected regions.
-- [Done except ramps and physical elevators] Teach pathfinding about stairs,
-  ladders, shafts, catwalk bridges, and dynamic traversal. P7.2b binds the new
-  physical cabins into that contract; ramps remain pending.
+- [Done except ramps] Teach pathfinding about stairs, ladders, shafts, catwalk
+  bridges, dynamic traversal, and powered physical elevator cabins. Ramps remain
+  pending.
 - [Done] Ensure AI cannot path through sealed ceilings or unsupported shafts.
 - [Done at connector-contract level] Add costs for vertical traversal.
 - [Done] Add hierarchical fallback behavior when no same-floor path exists.

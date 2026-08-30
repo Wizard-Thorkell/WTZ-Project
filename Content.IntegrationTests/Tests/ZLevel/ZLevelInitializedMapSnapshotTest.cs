@@ -11,6 +11,9 @@ using Content.Server.Atmos.EntitySystems;
 using Content.Server.DeviceNetwork.Systems;
 using Content.Server.Mapping;
 using Content.Server.Mind;
+using Content.Server.ZLevel.Components;
+using Content.Server.ZLevel.Navigation;
+using Content.Server.ZLevel.Systems;
 using Content.Shared.Atmos;
 using Content.Shared.Atmos.Components;
 using Content.Shared.DeviceNetwork.Components;
@@ -18,6 +21,7 @@ using Content.Shared.DeviceNetwork.Systems;
 using Content.Shared.Follower;
 using Content.Shared.Follower.Components;
 using Content.Shared.Mapping;
+using Content.Shared.Maps;
 using Content.Shared.Mind.Components;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
@@ -29,6 +33,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Player;
+using Robust.Shared.Prototypes;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Markdown.Mapping;
 using YamlDotNet.Core;
@@ -39,12 +44,17 @@ namespace Content.IntegrationTests.Tests.ZLevel;
 [TestFixture]
 public sealed class ZLevelInitializedMapSnapshotTest : GameTest
 {
-    private static readonly HashSet<string> RoundTripPrototypes =
+    private static readonly ProtoId<ContentTileDefinition> ShaftTile = "FloorZLevelShaft";
+
+    private static readonly string[] RoundTripPrototypes =
     [
         "APCBasic",
         "CableApcExtension",
         "GasPipeStraight",
         "RemoteSignaller",
+        "ZLevelElevatorCabin",
+        "ZLevelElevatorStop",
+        "ZLevelElevatorStop",
         "ZLevelFloorOpeningMarker",
         "ZLevelSealedBoundaryMarker",
     ];
@@ -275,6 +285,8 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
         var loader = entMan.System<MapLoaderSystem>();
         var deviceLists = entMan.System<DeviceListSystem>();
         var atmosphere = entMan.System<AtmosphereSystem>();
+        var prototypes = server.ResolveDependency<IPrototypeManager>();
+        var shaftTile = prototypes.Index(ShaftTile);
 
         MapId sourceMapId = default;
         MappingDataNode firstSnapshot = default!;
@@ -282,6 +294,7 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
         AuthoredMapState sourceState = default!;
         LoadResult firstLoad = default!;
         LoadResult secondLoad = default!;
+        EntityUid sourceCabin = default;
 
         await server.WaitAssertion(() =>
         {
@@ -299,9 +312,9 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
             Assert.That(transform.SetZLevelFrameOrigin(movingGrid.Owner, 6), Is.True);
 
             SetTile(stationGrid, 0, 0, -1);
-            SetTile(stationGrid, 0, 0, 0);
-            SetTile(stationGrid, 0, 0, 1);
-            SetTile(stationGrid, 0, 0, 2);
+            SetTile(stationGrid, 0, 0, 0, shaftTile.TileId);
+            SetTile(stationGrid, 0, 0, 1, shaftTile.TileId);
+            SetTile(stationGrid, 0, 0, 2, shaftTile.TileId);
             SetTile(movingGrid, 0, 0, 0);
             SetTile(movingGrid, 0, 0, 1);
 
@@ -309,6 +322,16 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
             var pipe = SpawnAnchored("GasPipeStraight", stationGrid, new Vector2(0.5f, 0.5f), 1);
             var apc = SpawnAnchored("APCBasic", stationGrid, new Vector2(0.5f, 0.5f), 2);
             var opening = SpawnAnchored("ZLevelFloorOpeningMarker", stationGrid, new Vector2(0.5f, 0.5f), 0);
+            var lowerStop = SpawnAnchored("ZLevelElevatorStop", stationGrid, new Vector2(0.5f, 0.5f), 0);
+            var upperStop = SpawnAnchored("ZLevelElevatorStop", stationGrid, new Vector2(0.5f, 0.5f), 2);
+            sourceCabin = SpawnAnchored("ZLevelElevatorCabin", stationGrid, new Vector2(0.5f, 0.5f), 0);
+            entMan.GetComponent<ZLevelElevatorStopComponent>(lowerStop).Label = "Engineering";
+            entMan.GetComponent<ZLevelElevatorStopComponent>(upperStop).Label = "Bridge";
+            var cabinComponent = entMan.GetComponent<ZLevelElevatorCabinComponent>(sourceCabin);
+            cabinComponent.RequirePower = false;
+            cabinComponent.TravelTimePerLevel = TimeSpan.FromSeconds(30);
+            cabinComponent.NavigationCallCost = 7.5f;
+            cabinComponent.NavigationCostPerLevel = 3.25f;
             var sealedBoundary = SpawnAnchored(
                 "ZLevelSealedBoundaryMarker",
                 movingGrid,
@@ -386,6 +409,16 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                 Assert.That(cable.IsValid() && apc.IsValid() && opening.IsValid() && sealedBoundary.IsValid(), Is.True);
             });
 
+            var elevators = entMan.System<ZLevelElevatorSystem>();
+            Assert.That(elevators.TryRequestFloor(sourceCabin, 2),
+                Is.EqualTo(ZLevelElevatorRequestResult.Started));
+            Assert.Multiple(() =>
+            {
+                Assert.That(elevators.IsTravelPending(sourceCabin), Is.True);
+                Assert.That(cabinComponent.State, Is.EqualTo(ZLevelElevatorState.Moving));
+                Assert.That(cabinComponent.TargetLevel, Is.EqualTo(2));
+            });
+
             Assert.That(snapshots.TryCreateMapSnapshot(
                     mapUid,
                     out firstSnapshot,
@@ -401,9 +434,13 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                 Assert.That(report.NormalizedReferences, Is.Zero);
             });
 
-            void SetTile(Entity<MapGridComponent> grid, int x, int y, int z)
+            void SetTile(Entity<MapGridComponent> grid, int x, int y, int z, ushort tileId = 1)
             {
-                mapSystem.SetZLevelTile(grid.Owner, grid.Comp, new ZLevelTileIndices(x, y, z), new Tile(1));
+                mapSystem.SetZLevelTile(
+                    grid.Owner,
+                    grid.Comp,
+                    new ZLevelTileIndices(x, y, z),
+                    new Tile(tileId));
             }
 
             EntityUid SpawnAnchored(
@@ -431,6 +468,7 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                     CreateSnapshotLoadOptions()),
                 Is.True);
             AssertLoadedSnapshot(entMan, format, firstLoad);
+            AssertLoadedElevatorNetwork(entMan, transform, firstLoad);
 
             var firstMap = firstLoad.Maps.Single().Owner;
             var firstState = CaptureAuthoredMapState(
@@ -471,6 +509,7 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                     CreateSnapshotLoadOptions()),
                 Is.True);
             AssertLoadedSnapshot(entMan, format, secondLoad);
+            AssertLoadedElevatorNetwork(entMan, transform, secondLoad);
 
             var firstState = CaptureAuthoredMapState(
                 entMan,
@@ -534,6 +573,58 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
             Assert.That(entMan.GetComponent<MetaDataComponent>(load.Maps.Single().Owner).EntityLifeStage,
                 Is.EqualTo(EntityLifeStage.MapInitialized));
             Assert.That(format.TryValidate(load.Maps.Single().Owner, out var error), Is.True, error);
+        });
+    }
+
+    private static void AssertLoadedElevatorNetwork(
+        IEntityManager entMan,
+        SharedTransformSystem transform,
+        LoadResult load)
+    {
+        var cabin = load.Entities.Single(uid =>
+            entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "ZLevelElevatorCabin");
+        var stops = load.Entities
+            .Where(uid =>
+                entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "ZLevelElevatorStop")
+            .OrderBy(uid => transform.GetZLevel((
+                uid,
+                entMan.GetComponent<TransformComponent>(uid),
+                entMan.GetComponentOrNull<ZLevelPositionComponent>(uid))))
+            .ToArray();
+        var cabinComponent = entMan.GetComponent<ZLevelElevatorCabinComponent>(cabin);
+        var elevators = entMan.System<ZLevelElevatorSystem>();
+        var graph = entMan.System<ZLevelTraversalGraphSystem>();
+        var mapId = load.Maps.Single().Comp.MapId;
+        var elevatorEdges = graph.CreateSnapshot(mapId).Edges
+            .Where(edge => edge.Source.Kind == ZLevelTraversalKind.Elevator)
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(stops, Has.Length.EqualTo(2));
+            Assert.That(transform.GetZLevel((
+                cabin,
+                entMan.GetComponent<TransformComponent>(cabin),
+                entMan.GetComponentOrNull<ZLevelPositionComponent>(cabin))), Is.Zero);
+            Assert.That(stops.Select(uid => transform.GetZLevel((
+                    uid,
+                    entMan.GetComponent<TransformComponent>(uid),
+                    entMan.GetComponentOrNull<ZLevelPositionComponent>(uid)))),
+                Is.EqualTo(new[] { 0, 2 }));
+            Assert.That(stops.Select(uid => entMan.GetComponent<ZLevelElevatorStopComponent>(uid).Label),
+                Is.EqualTo(new[] { "Engineering", "Bridge" }));
+            Assert.That(cabinComponent.ShaftId, Is.EqualTo("main"));
+            Assert.That(cabinComponent.TravelTimePerLevel, Is.EqualTo(TimeSpan.FromSeconds(30)));
+            Assert.That(cabinComponent.NavigationCallCost, Is.EqualTo(7.5f));
+            Assert.That(cabinComponent.NavigationCostPerLevel, Is.EqualTo(3.25f));
+            Assert.That(cabinComponent.RequirePower, Is.False);
+            Assert.That(cabinComponent.State, Is.EqualTo(ZLevelElevatorState.Idle));
+            Assert.That(cabinComponent.TargetLevel, Is.Null);
+            Assert.That(cabinComponent.ArrivalTime, Is.EqualTo(TimeSpan.Zero));
+            Assert.That(elevators.IsTravelPending(cabin), Is.False);
+            Assert.That(elevatorEdges, Has.Length.EqualTo(2));
+            Assert.That(elevatorEdges.Select(edge => edge.ZOffset), Is.EqualTo(new[] { 2, -2 }));
+            Assert.That(elevatorEdges.All(edge => edge.Cost == 14f), Is.True);
         });
     }
 
@@ -662,6 +753,8 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                 var xform = entMan.GetComponent<TransformComponent>(uid);
                 Assert.That(xform.GridUid, Is.Not.Null, $"Authored entity {metadata.EntityPrototype?.ID} lost its grid.");
                 var boundary = entMan.GetComponentOrNull<ZLevelBoundaryComponent>(uid);
+                var elevatorCabin = entMan.GetComponentOrNull<ZLevelElevatorCabinComponent>(uid);
+                var elevatorStop = entMan.GetComponentOrNull<ZLevelElevatorStopComponent>(uid);
                 var locator = new AuthoredEntityLocator(
                     metadata.EntityPrototype!.ID,
                     gridIndices[xform.GridUid!.Value],
@@ -678,7 +771,24 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
                     boundary?.Enabled,
                     boundary?.BoundaryOffset,
                     boundary?.Opens,
-                    boundary?.Closes);
+                    boundary?.Closes,
+                    elevatorCabin == null
+                        ? null
+                        : new AuthoredElevatorCabinState(
+                            elevatorCabin.ShaftId,
+                            elevatorCabin.TravelTimePerLevel,
+                            elevatorCabin.IdlePowerDraw,
+                            elevatorCabin.TravelPowerDraw,
+                            elevatorCabin.MaxTravelLevels,
+                            elevatorCabin.PassengerLimit,
+                            elevatorCabin.NavigationCallCost,
+                            elevatorCabin.NavigationCostPerLevel,
+                            elevatorCabin.RequirePower),
+                    elevatorStop == null
+                        ? null
+                        : new AuthoredElevatorStopState(
+                            elevatorStop.ShaftId,
+                            elevatorStop.Label));
                 return (Uid: uid, Locator: locator, State: state);
             })
             .OrderBy(entry => entry.Locator.Prototype)
@@ -843,7 +953,24 @@ public sealed class ZLevelInitializedMapSnapshotTest : GameTest
         bool? BoundaryEnabled,
         int? BoundaryOffset,
         ZLevelBoundaryChannels? Opens,
-        ZLevelBoundaryChannels? Closes);
+        ZLevelBoundaryChannels? Closes,
+        AuthoredElevatorCabinState? ElevatorCabin,
+        AuthoredElevatorStopState? ElevatorStop);
+
+    private readonly record struct AuthoredElevatorCabinState(
+        string ShaftId,
+        TimeSpan TravelTimePerLevel,
+        float IdlePowerDraw,
+        float TravelPowerDraw,
+        int MaxTravelLevels,
+        int PassengerLimit,
+        float NavigationCallCost,
+        float NavigationCostPerLevel,
+        bool RequirePower);
+
+    private readonly record struct AuthoredElevatorStopState(
+        string ShaftId,
+        string Label);
 
     private readonly record struct AuthoredReferenceState(
         string Kind,

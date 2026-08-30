@@ -223,6 +223,13 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{ZLevelElevatorSystem.MaximumStopsPerNetwork}/" +
             $"{ZLevelElevatorSystem.MaximumTravelLevels}/" +
             $"{ZLevelElevatorSystem.MaximumPassengers}");
+        var elevatorNavigation = elevators.NavigationSnapshot();
+        shell.WriteLine(
+            $"  elevator navigation: active={elevatorNavigation.Active}, " +
+            $"edges queries/valid={elevatorNavigation.EdgeQueries}/{elevatorNavigation.ValidEdges}, " +
+            $"started/completed/cancelled/rejected={elevatorNavigation.Started}/" +
+            $"{elevatorNavigation.Completed}/{elevatorNavigation.Cancelled}/" +
+            $"{elevatorNavigation.Rejected}");
         shell.WriteLine(
             $"  traversal snapshots: cached={traversalMetrics.CachedSnapshots}, " +
             $"requests/hits/builds/edges={traversalMetrics.SnapshotRequests}/" +

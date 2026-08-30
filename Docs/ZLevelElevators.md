@@ -2,9 +2,10 @@
 
 WTZ Project native Z-level prototype. Copyright (c) pedel and OpenAI Codex.
 
-This document defines the P7.2a contract for powered physical elevator cabins,
-mapper-authored stops, and player controls. Navigation, initialized-map round
-trip coverage, and mapper hardening are completed separately in P7.2b.
+This document defines the P7.2 contract for powered physical elevator cabins,
+mapper-authored stops, player controls, hierarchical navigation, and initialized
+mapping persistence. P7.2a introduced authoritative travel; P7.2b binds that
+same cabin to the existing traversal graph without creating a second pathfinder.
 
 ## Network Model
 
@@ -23,6 +24,10 @@ The cabin is a real anchored entity. It owns power demand, current floor,
 travel state, timing, capacity, and the cabin floor selector. Stops are anchored
 landing controls. Landing controls can request only their own floor; a forged
 request for another floor is rejected by the server.
+
+Every landing closes only the `Body` boundary below itself. It therefore remains
+a supported navigation destination while the cabin is on another floor without
+sealing light, atmosphere, sound, projectiles, or the shaft's traversal channels.
 
 ## Mapping Workflow
 
@@ -43,6 +48,41 @@ without sealing visibility, atmosphere, sound, or projectile channels.
 Stops and cabins must remain anchored. Moving, unanchoring, reparenting, or
 changing the Z position of a cabin cancels its active trip unless the move is
 the system's own validated arrival. Stop topology is reindexed immediately.
+
+Initialized floor copying clones authored stops but never clones a physical
+cabin. A cabin already present on the destination floor is preserved. Deleting
+a floor that contains the cabin is rejected with an explicit mapping error;
+move or remove the cabin first. Removing a served stop cancels any trip that
+depends on it and invalidates the corresponding navigation topology.
+
+## Hierarchical Navigation
+
+Physical elevators contribute dynamic edges to the existing
+`ZLevelTraversalGraphSystem`. A valid stop exposes at most two edges: one to the
+nearest served floor below and one to the nearest served floor above. Sparse
+shafts are supported, but the graph never creates a direct edge that skips an
+intermediate served stop. The maximum network of 64 stops therefore contributes
+at most 128 directed edges.
+
+An edge exists only while the network has one cabin, unique stops, valid bounded
+configuration, power when required, open directed shaft geometry, and direct
+`Body` support at both landings. Route cost is the cabin's fixed
+`navigationCallCost` plus `navigationCostPerLevel` for every crossed local floor.
+Non-finite, negative, excessive, unsupported, closed, or unpowered edges fail
+closed before entering a route snapshot.
+
+Topology changes include cabin/stop registration, deletion, movement, grid, or
+floor changes. Power, tile, boundary, and frame changes invalidate only the
+owning map's environment revision. Route validation resolves the complete
+captured edge because a middle stop can offer both directions from one entity.
+
+At execution, the server calls the cabin to the route source, verifies that the
+waiting actor is still on the exact landing, and then carries that actor to the
+captured adjacent destination. The operation is idempotent for its owner. One
+route owns a cabin at a time; competing routes are rejected and may replan.
+Cancelling or deleting the route owner releases ownership without teleporting
+the cabin or aborting a call already in progress. NPC steering uses this same
+path and has integration coverage for call, boarding, travel, and route finish.
 
 ## Authoritative Travel
 
@@ -78,8 +118,10 @@ Shaft IDs are limited to 64 characters. Values outside these limits fail closed.
 
 `zlevelmetrics` reports registered cabins and stops, active trips, requests,
 starts, completions, cancellations, rejections, unpowered/busy rejections, and
-captured/moved rider counts. `zlevelmetrics reset` resets elevator counters with
-the other process-local Z-level counters.
+captured/moved rider counts. It also reports active navigation ownership, edge
+queries/validations, and navigation starts, completions, cancellations, and
+rejections. `zlevelmetrics reset` resets these process-local counters with the
+other Z-level metrics.
 
 ## Persistence Boundary
 
@@ -89,26 +131,30 @@ and captured rider set) is intentionally transient and is not serialized. An
 initialized mapping snapshot must therefore represent an idle cabin at its last
 completed floor rather than resume an in-flight request.
 
-P7.2b adds explicit double-round-trip tests, mapping mutation coverage, dynamic
-navigation edges, AI execution, and broader malformed-map hardening before this
-content is considered mapper-complete.
+The initialized-map contract is proven across two consecutive save/load cycles,
+including custom cabin costs, stop labels, sparse floors, boundaries, and graph
+edges. A snapshot deliberately taken during a pending trip loads an idle cabin
+at its last completed authored floor with no target, timer, passenger set, or
+navigation owner. Floor copy/delete tests exercise the same policy on an already
+initialized map.
 
 ## Current Product Limits
 
 - Movement is a timed discrete floor transition; there is no interpolated cabin
   animation between decks yet.
-- Calls are not queued or scheduled across multiple riders.
+- Calls are not queued or scheduled across multiple route owners. Contending AI
+  can replan until the cabin becomes available; a fair scheduler is future work.
 - Networks do not cross grids or use different XY coordinates between stops.
 - Landing doors, interlocks, emergency controls, and construction recipes are
   not yet authored.
-- Pathfinding and AI do not use the physical cabin until P7.2b.
 - Saving a live round during active travel is outside the supported initialized
   mapping snapshot contract.
 
-## P7.2a Verification
+## P7.2 Verification
 
 Focused integration coverage proves delayed cabin/rider movement, same-floor
-user authority, landing-request spoof rejection, power-loss cancellation,
-duplicate-stop rejection, closed-shaft rejection, and riders leaving before
-arrival. Broader Z-level, baseline, build, and persistence evidence is recorded
-in `Docs/ZLevelImplementationLedger.md` at the package gate.
+authority, spoof rejection, malformed configuration, power/topology loss,
+nearest-stop graph construction, exact bidirectional resolution, single-owner
+lifecycle, AI execution, initialized floor mutation, and two persistence cycles.
+Broader Z-level, baseline, build, and persistence evidence is recorded in
+`Docs/ZLevelImplementationLedger.md` at the package gate.

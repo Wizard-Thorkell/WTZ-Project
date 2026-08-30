@@ -30,6 +30,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelSystem _zLevel = default!;
     [Dependency] private readonly ZLevelTraversalGraphSystem _graph = default!;
+    [Dependency] private readonly ZLevelElevatorSystem _elevators = default!;
 
     private readonly Dictionary<EntityUid, PendingTraversal> _pendingTraversals = new();
     private readonly Dictionary<EntityUid, StartingTraversal> _startingTraversals = new();
@@ -232,16 +233,24 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         bool popupOnFailure = false)
     {
         var traversal = edge.Source.Traversal;
+        if (_elevators.IsPhysicalNavigationStop(traversal))
+        {
+            return _graph.TryResolveEdge(edge, out var currentElevator) ==
+                       ZLevelTraversalEdgeStatus.Valid &&
+                   ZLevelTraversalGraphSystem.HasEquivalentEdge(edge, currentElevator) &&
+                   _elevators.TryStartNavigationTraversal(currentElevator, user);
+        }
+
         if (_pendingTraversals.TryGetValue(user, out var pending))
         {
             return pending.Traversal == traversal &&
                    ZLevelTraversalGraphSystem.HasEquivalentEdge(pending.Edge, edge) &&
-                   _graph.TryResolveEdge(traversal, out var currentPending) == ZLevelTraversalEdgeStatus.Valid &&
+                   _graph.TryResolveEdge(edge, out var currentPending) == ZLevelTraversalEdgeStatus.Valid &&
                    ZLevelTraversalGraphSystem.HasEquivalentEdge(edge, currentPending);
         }
 
         return TryComp<ZLevelTraversalComponent>(traversal, out var component) &&
-               _graph.TryResolveEdge(traversal, out var current) == ZLevelTraversalEdgeStatus.Valid &&
+               _graph.TryResolveEdge(edge, out var current) == ZLevelTraversalEdgeStatus.Valid &&
                ZLevelTraversalGraphSystem.HasEquivalentEdge(edge, current) &&
                TryStartTraversal((traversal, component), current, user, popupOnFailure);
     }
@@ -252,7 +261,8 @@ public sealed class ZLevelTraversalSystem : EntitySystem
     public bool IsTraversalPending(EntityUid user, EntityUid? traversal = null)
     {
         return _pendingTraversals.TryGetValue(user, out var pending) &&
-               (traversal == null || pending.Traversal == traversal);
+                   (traversal == null || pending.Traversal == traversal) ||
+               _elevators.IsNavigationTraversalPending(user, traversal);
     }
 
     /// <summary>
@@ -264,7 +274,7 @@ public sealed class ZLevelTraversalSystem : EntitySystem
         if (!_pendingTraversals.TryGetValue(user, out var pending) ||
             traversal != null && pending.Traversal != traversal)
         {
-            return false;
+            return _elevators.TryCancelNavigationTraversal(user, traversal);
         }
 
         _pendingTraversals.Remove(user);

@@ -30,6 +30,18 @@ public sealed partial class ZLevelElevatorCabinComponent : Component
     [DataField]
     public int PassengerLimit = 32;
 
+    /// <summary>
+    /// Fixed route cost for calling and boarding this elevator.
+    /// </summary>
+    [DataField]
+    public float NavigationCallCost = 4f;
+
+    /// <summary>
+    /// Route cost added for every crossed local Z-level.
+    /// </summary>
+    [DataField]
+    public float NavigationCostPerLevel = 4f;
+
     [DataField]
     public bool RequirePower = true;
 

@@ -47,6 +47,8 @@
     travelPowerDraw: 2500
     maxTravelLevels: 16
     passengerLimit: 32
+    navigationCallCost: 4
+    navigationCostPerLevel: 4
   - type: ZLevelElevatorControl
     mode: Cabin
   - type: ActivatableUI
@@ -110,3 +112,7 @@
     interfaces:
       enum.ZLevelElevatorUiKey.Key:
         type: ZLevelElevatorBoundUserInterface
+  - type: ZLevelBoundary
+    boundaryOffset: -1
+    closes:
+    - Body

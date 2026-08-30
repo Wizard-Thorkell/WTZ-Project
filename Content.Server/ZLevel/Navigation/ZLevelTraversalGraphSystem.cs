@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using Content.Server.Power.Components;
 using Content.Server.ZLevel.Components;
+using Content.Server.ZLevel.Systems;
 using Content.Shared.Power;
 using Content.Shared.ZLevel;
 using Content.Shared.ZLevel.Components;
@@ -27,6 +28,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
     [Dependency] private readonly SharedZLevelBoundarySystem _boundaries = default!;
+    [Dependency] private readonly ZLevelElevatorSystem _elevators = default!;
 
     private readonly Dictionary<EntityUid, TraversalRegistration> _registrations = new();
     private readonly Dictionary<ZLevelTraversalNodeKey, List<EntityUid>> _byLocation = new();
@@ -93,6 +95,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         SubscribeLocalEvent<ZLevelTileChangedEvent>(OnZLevelTileChanged);
         SubscribeLocalEvent<ZLevelBoundaryChangedEvent>(OnBoundaryChanged);
         SubscribeLocalEvent<ZLevelFrameChangedEvent>(OnFrameChanged);
+        SubscribeLocalEvent<ZLevelElevatorNavigationChangedEvent>(OnElevatorNavigationChanged);
         SubscribeLocalEvent<MapRemovedEvent>(OnMapRemoved);
     }
 
@@ -306,6 +309,50 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     }
 
     /// <summary>
+    /// Resolves the live counterpart of a complete captured edge. Physical
+    /// elevator stops can expose two directions from one source entity, so
+    /// their expected direction cannot be recovered from the UID alone.
+    /// </summary>
+    public ZLevelTraversalEdgeStatus TryResolveEdge(
+        in ZLevelTraversalNavigationEdge expected,
+        out ZLevelTraversalNavigationEdge edge)
+    {
+        if (expected.Source.Kind != ZLevelTraversalKind.Elevator ||
+            !_elevators.IsPhysicalNavigationStop(expected.Source.Traversal))
+        {
+            return TryResolveEdge(expected.Source.Traversal, out edge);
+        }
+
+        var started = Stopwatch.GetTimestamp();
+        _edgeQueries++;
+        var status = _elevators.TryResolveNavigationEdge(
+            expected,
+            GetVersion(expected.Source.MapId),
+            out edge);
+        switch (status)
+        {
+            case ZLevelTraversalEdgeStatus.Valid:
+                _validEdges++;
+                break;
+            case ZLevelTraversalEdgeStatus.ClosedBoundary:
+                _closedEdges++;
+                break;
+            case ZLevelTraversalEdgeStatus.MissingDestinationSupport:
+                _unsupportedEdges++;
+                break;
+            case ZLevelTraversalEdgeStatus.Unpowered:
+                _unpoweredEdges++;
+                break;
+            default:
+                _invalidEdges++;
+                break;
+        }
+
+        RecordQueryTime(started);
+        return status;
+    }
+
+    /// <summary>
     /// Copies all currently valid authored edges on a map in deterministic order.
     /// </summary>
     public void GetEdges(MapId mapId, List<ZLevelTraversalNavigationEdge> results)
@@ -323,6 +370,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             if (TryResolveEdge(uid, out var edge) == ZLevelTraversalEdgeStatus.Valid)
                 results.Add(edge);
         }
+
+        _elevators.AppendNavigationEdges(mapId, GetVersion(mapId), results);
     }
 
     /// <summary>
@@ -677,6 +726,17 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             InvalidateEnvironment(registration.MapId);
             return;
         }
+
+        if (_elevators.HasNavigationGrid(args.GridUid, out var mapId))
+            InvalidateEnvironment(mapId);
+    }
+
+    private void OnElevatorNavigationChanged(ZLevelElevatorNavigationChangedEvent args)
+    {
+        if (args.TopologyChanged)
+            InvalidateTopology(args.MapId);
+        else
+            InvalidateEnvironment(args.MapId);
     }
 
     private void OnMapRemoved(MapRemovedEvent args)
@@ -919,19 +979,19 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         out MapId mapId)
     {
         mapId = MapId.Nullspace;
-        if (!_byLocation.TryGetValue(new ZLevelTraversalNodeKey(gridUid, tile, localZ), out var traversals))
-            return false;
-
-        foreach (var traversal in traversals)
+        if (_byLocation.TryGetValue(new ZLevelTraversalNodeKey(gridUid, tile, localZ), out var traversals))
         {
-            if (!_registrations.TryGetValue(traversal, out var registration))
-                continue;
+            foreach (var traversal in traversals)
+            {
+                if (!_registrations.TryGetValue(traversal, out var registration))
+                    continue;
 
-            mapId = registration.MapId;
-            return true;
+                mapId = registration.MapId;
+                return true;
+            }
         }
 
-        return false;
+        return _elevators.TryGetNavigationMapAt(gridUid, tile, out mapId);
     }
 
     private ZLevelTraversalMapRevision GetMapRevision(MapId mapId)
