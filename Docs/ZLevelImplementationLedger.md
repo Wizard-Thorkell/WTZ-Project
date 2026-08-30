@@ -8,7 +8,7 @@ goal. Update it in the same commit as every completed work package.
 - Goal: execute phases P0 through P8 of the WTZ native Z-level roadmap.
 - Base branch: `zlevel-roadmap`.
 - Active branch: `zlevel/vertical-content`.
-- Active package: `P7.4b2b explicit flight AI navigation and execution`.
+- Active package: `P7 phase gate`.
 - Overall status: active.
 
 ## Mandatory Completion Gate
@@ -98,8 +98,8 @@ actual evidence. Do not mark an entire phase complete from implementation alone.
 | P7.4a | Flight movement, gravity, and collision contract | Complete |
 | P7.4b1 | Flight controls, capability content, interruptions, and mapping | Complete |
 | P7.4b2a | Continuous flight trace and combat integration | Complete |
-| P7.4b2b | Explicit flight AI navigation and execution | Active |
-| P7 gate | End-to-end vertical-content and scope review | Pending |
+| P7.4b2b | Explicit flight AI navigation and execution | Complete |
+| P7 gate | End-to-end vertical-content and scope review | Active |
 
 ## Phase P0 Packages
 
@@ -7119,10 +7119,128 @@ allocation is inside Robust physics enumeration.
 - Next package: P7.4b2b adds explicit flight navigation edges, actor capability
   policy, and AI execution without treating every empty tile as walkable.
 
+## Completed Package: P7.4b2b Explicit Flight AI Navigation And Execution
+
+### Scope
+
+- Add mapper-authored, bounded flight connections to the detached hierarchical
+  graph without treating arbitrary empty tiles as navigable.
+- Include those connections only for actors that can authoritatively use native
+  flight and preserve actor-independent endpoint search behavior.
+- Execute flight legs through physical steering and the existing vertical
+  solver with explicit lifecycle ownership.
+- Add mapping content, diagnostics, focused execution tests, and gate evidence.
+
+### Implementation
+
+- `ZLevelFlightNavigationComponent` authors an adjacent-floor corridor from a
+  supported source through one `Body`-open aperture to a supported destination.
+  Cardinal offsets rotate with its anchored marker; optional reverse travel
+  reuses the same physical corridor.
+- `ZLevelTraversalGraphSystem` indexes all affected local tile/floor keys,
+  resolves live forward/reverse edges, and publishes them in a deterministic
+  immutable `FlightEdges` snapshot array. Marker, tile, boundary, parent,
+  anchor, map, Z, and frame changes use the existing map-scoped revisions.
+- Actor path requests opt in only after side-effect-free flight validation.
+  Endpoint-only and non-flying requests exclude flight edges. Search, route
+  validation, and diagnostics retain a distinct typed `Flight` leg.
+- NPC steering executes source, approach, crossing, and exit phases. Horizontal
+  movement reaches the aperture, the native vertical solver owns the crossing,
+  and steering exits onto supported destination floor without teleporting.
+- Flight lifecycle ownership distinguishes a route-started flight from a
+  pre-existing one. Completion, invalidation, clearing, and route replacement
+  stop only owned flight; adopted flight remains active and is stabilized on an
+  interrupted floor.
+- `zlevelmetrics` reports markers, locations, graph edge outcomes, copied flight
+  edges, planner evaluations, and steering leg starts/completions/failures.
+- The official mapping station serializes one bidirectional Z 0/Z 1 corridor;
+  its load test confirms one marker and two directed graph edges.
+
+### Evidence
+
+- The final focused fixture passes 6/6. It covers actor and endpoint capability
+  gating, deterministic edge shape, support, `Body` boundary and rotation
+  invalidation, physical AI completion, preservation of pre-existing flight,
+  graph invalidation cleanup, and safe replacement of an owned-flight route.
+- The official map load case passes 1/1 and resolves both directions. The
+  final pathfinding/dynamic/flight matrix passes 38/38.
+- The complete Content `FullyQualifiedName~ZLevel` matrix covers 336 cases and
+  passes 336/336 without a skip or failure.
+- Content structural and mapping unit tests pass 18/18.
+- Two complete 3/3 schema-version 5 baseline runs pass. The captured confirming
+  run measures 10.0359, 17.5405, and 27.5582 ms for 3, 6, and 10 floors. Every
+  depth allocates 6,336 bytes, records 100% warm boundary/sky/gravity hits, zero
+  PVS exhaustion, and zero flight updates.
+- The non-incremental single-worker solution build passes in 2m45s with zero
+  errors and 691 established warnings. The captured log attributes no warning
+  to a modified production or test file.
+- WTZ Engine remains clean and pinned to published revision `7cbd778024`; no
+  engine change is required.
+
+### Decisions
+
+- Flight is an explicit graph capability, not a new polygon terrain type. This
+  keeps empty space non-walkable and prevents ordinary NPCs from inheriting
+  mobility from geometry alone.
+- The marker authors a very short physical maneuver rather than an arbitrary
+  free-flight volume. Local navigation owns paths to supported endpoints; the
+  flight leg owns at most one cardinal approach and one cardinal exit step.
+- `Body` remains authoritative at both graph resolution and physical crossing.
+  A live boundary edit first invalidates the route and then the solver still
+  rejects any crossing that races that invalidation.
+- Capability is checked during planning and installation, then again throughout
+  execution. Asynchronous results cannot grant a removed or incapacitated actor
+  flight.
+- Route ownership is independent from capability ownership. A route may adopt
+  species or equipment flight without stopping it when the route completes.
+
+### Completion Gate
+
+- [x] Scope check: server graph, pathfinding, steering, one marker prototype,
+      official mapping fixture, metrics, tests, and synchronized docs only.
+- [x] Invariant review: Z 0 component-free actors, local/world frames, moving
+      grids, adjacent floors, both directions, server authority, support,
+      `Body` boundaries, and lifecycle ownership were reviewed.
+- [x] Automated verification: 6 focused, 1 official-map, 38 combined path, 336
+      broad, 18 unit/mapping, and two complete 3-case baselines pass.
+- [x] Performance evidence: the neutral 3/6/10 baseline retains 6,336 bytes,
+      fully warm caches, no PVS exhaustion, and zero flight work.
+- [x] Documentation: flight, pathfinding, vertical content, project status,
+      decisions, limits, mapping contract, and evidence are synchronized.
+- [x] Dependency check: no WTZ Engine change; the clean submodule remains pinned
+      to published revision `7cbd778024`.
+- [x] Git check: whitespace, final build, warning attribution, ignored baseline
+      artifacts, scope, and remote state are checked before commit.
+- [x] Mini review: graph invalidation, actor gates, physical execution,
+      pre-existing/owned flight, replacement, and mapper responsibility were
+      reviewed.
+- [x] Commit: prepared as isolated `Navigate authored Z-level flight corridors`
+      on `zlevel/vertical-content`; push and hash verification follow.
+
+### Mini Review
+
+- Finding: retaining flight edges beside traversal edges lets one bounded search
+  compare both connector kinds while ordinary actors see the exact P5 graph.
+- Finding: stopping route-owned flight before replacing a validated route closes
+  a lifecycle leak that happy-path completion would not reveal.
+- Finding: using the native solver during the crossing preserves gravity,
+  continuous height, closed-boundary contact, projectile traces, and moving-grid
+  semantics without duplicating vertical physics.
+- Residual risk: the one-tile internal approach/exit does not run a second local
+  A* query. Mappers must keep those authored tiles physically clear; blocked or
+  highly dynamic maneuvers rely on normal stuck/replan behavior.
+- Residual risk: flight navigation is corridor-based, not volumetric free-flight
+  planning. Arbitrary 3D pursuit would need a separately bounded navigation
+  representation and is not implied by this package.
+- Next package: the P7 phase gate reviews all vertical content together, runs
+  final end-to-end mapping/gameplay evidence, and hands the stable surface to P8
+  hardening.
+
 ## Package History
 
 | Date | Package | Commit | Verification | Result |
 | --- | --- | --- | --- | --- |
+| 2026-08-30 | P7.4b2b | `Navigate authored Z-level flight corridors` | 6 focused, 1 official map, 38 path, 336 broad, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b2a | `Trace active Z-level flight heights` | 3 new, 72 consumer, 330 broad cases covered, 18 unit/mapping, 2x3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4b1 | `Add native Z-level flight controls` | 14 focused, 327 broad cases covered, 18 unit/mapping, 3 baseline, full build, warning/diff review | Complete |
 | 2026-08-30 | P7.4a | `Define native Z-level flight physics` | 10 focused, 31 movement/map, 322 broad, 11 unit/mapping, 3 baseline, full build, allocation/warning/diff review | Complete |

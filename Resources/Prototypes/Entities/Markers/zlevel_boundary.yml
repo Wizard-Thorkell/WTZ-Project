@@ -79,3 +79,15 @@
   parent: ZLevelSealedBoundaryMarker
   name: Z-level roof
   description: A durable mapping roof that seals the boundary above the highest authored floor.
+
+- type: entity
+  id: ZLevelFlightNavigationMarker
+  parent: MarkerBase
+  name: Z-level flight corridor
+  description: Connects supported approach tiles through one adjacent Body-open vertical aperture for flight-capable AI.
+  components:
+  - type: Sprite
+    layers:
+    - state: blue
+      shader: unshaded
+  - type: ZLevelFlightNavigation

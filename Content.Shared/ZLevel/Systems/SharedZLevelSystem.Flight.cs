@@ -55,6 +55,32 @@ public sealed partial class SharedZLevelSystem
     }
 
     /// <summary>
+    /// Performs the side-effect-free portion of flight validation for route
+    /// planning and installation.
+    /// </summary>
+    public ZLevelFlightResult GetFlightNavigationAvailability(
+        EntityUid uid,
+        ZLevelFlightComponent? flight = null)
+    {
+        if (!_flightQuery.Resolve(uid, ref flight, false))
+            return ZLevelFlightResult.MissingCapability;
+
+        var result = ValidateFlightEntity(uid, flight, out var transform, out _, out _);
+        if (result != ZLevelFlightResult.Success)
+            return result;
+
+        if (flight.Active && flight.ActiveGridUid != transform.GridUid)
+            return ZLevelFlightResult.InvalidGrid;
+
+        return ZLevelFlightResult.Success;
+    }
+
+    public bool CanUseFlightNavigation(EntityUid uid, ZLevelFlightComponent? flight = null)
+    {
+        return GetFlightNavigationAvailability(uid, flight) == ZLevelFlightResult.Success;
+    }
+
+    /// <summary>
     /// Returns the continuous trace offset of an active flyer. Ordinary entities
     /// retain the established floor-center trace model.
     /// </summary>

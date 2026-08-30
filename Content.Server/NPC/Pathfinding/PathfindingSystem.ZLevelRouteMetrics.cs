@@ -23,6 +23,7 @@ public sealed partial class PathfindingSystem
     private long _zLevelRouteStatesExpanded;
     private long _zLevelRouteLocalPathsRequested;
     private long _zLevelRouteTraversalEdgesEvaluated;
+    private long _zLevelRouteFlightEdgesEvaluated;
     private long _zLevelRouteLegs;
     private long _zLevelRouteTimestampTicks;
     private long _zLevelRouteLastTimestampTicks;
@@ -46,6 +47,7 @@ public sealed partial class PathfindingSystem
             Interlocked.Read(ref _zLevelRouteStatesExpanded),
             Interlocked.Read(ref _zLevelRouteLocalPathsRequested),
             Interlocked.Read(ref _zLevelRouteTraversalEdgesEvaluated),
+            Interlocked.Read(ref _zLevelRouteFlightEdgesEvaluated),
             Interlocked.Read(ref _zLevelRouteLegs),
             TimestampToMilliseconds(Interlocked.Read(ref _zLevelRouteTimestampTicks)),
             TimestampToMilliseconds(Interlocked.Read(ref _zLevelRouteLastTimestampTicks)),
@@ -69,6 +71,7 @@ public sealed partial class PathfindingSystem
         Interlocked.Exchange(ref _zLevelRouteStatesExpanded, 0);
         Interlocked.Exchange(ref _zLevelRouteLocalPathsRequested, 0);
         Interlocked.Exchange(ref _zLevelRouteTraversalEdgesEvaluated, 0);
+        Interlocked.Exchange(ref _zLevelRouteFlightEdgesEvaluated, 0);
         Interlocked.Exchange(ref _zLevelRouteLegs, 0);
         Interlocked.Exchange(ref _zLevelRouteTimestampTicks, 0);
         Interlocked.Exchange(ref _zLevelRouteLastTimestampTicks, 0);
@@ -124,6 +127,7 @@ public sealed partial class PathfindingSystem
         Interlocked.Add(ref _zLevelRouteStatesExpanded, diagnostics.StatesExpanded);
         Interlocked.Add(ref _zLevelRouteLocalPathsRequested, diagnostics.LocalPathsRequested);
         Interlocked.Add(ref _zLevelRouteTraversalEdgesEvaluated, diagnostics.TraversalEdgesEvaluated);
+        Interlocked.Add(ref _zLevelRouteFlightEdgesEvaluated, diagnostics.FlightEdgesEvaluated);
         Interlocked.Add(ref _zLevelRouteLegs, route?.Legs.Length ?? 0);
         var elapsed = Stopwatch.GetTimestamp() - started;
         Interlocked.Add(ref _zLevelRouteTimestampTicks, elapsed);
@@ -149,6 +153,7 @@ public readonly record struct ZLevelPathRouteMetricsSnapshot(
     long StatesExpanded,
     long LocalPathsRequested,
     long TraversalEdgesEvaluated,
+    long FlightEdgesEvaluated,
     long Legs,
     double TotalMilliseconds,
     double LastMilliseconds,

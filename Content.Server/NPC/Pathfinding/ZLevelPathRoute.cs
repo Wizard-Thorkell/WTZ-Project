@@ -26,6 +26,7 @@ public enum ZLevelPathLegKind : byte
 {
     Local,
     Traversal,
+    Flight,
 }
 
 public enum ZLevelPathRouteValidationStatus : byte
@@ -103,6 +104,7 @@ public readonly record struct ZLevelPathSearchDiagnostics(
     int StatesExpanded,
     int LocalPathsRequested,
     int TraversalEdgesEvaluated,
+    int FlightEdgesEvaluated,
     long TopologyRevision,
     long EnvironmentRevision);
 
@@ -118,6 +120,7 @@ public readonly struct ZLevelPathLeg
     public float Cost { get; }
     public ImmutableArray<PathPoly> LocalPath { get; }
     public ZLevelTraversalNavigationEdge Traversal { get; }
+    public ZLevelFlightNavigationEdge Flight { get; }
 
     private ZLevelPathLeg(
         ZLevelPathLegKind kind,
@@ -125,7 +128,8 @@ public readonly struct ZLevelPathLeg
         ZLevelPathEndpoint end,
         float cost,
         ImmutableArray<PathPoly> localPath,
-        ZLevelTraversalNavigationEdge traversal)
+        ZLevelTraversalNavigationEdge traversal,
+        ZLevelFlightNavigationEdge flight)
     {
         Kind = kind;
         Start = start;
@@ -133,6 +137,7 @@ public readonly struct ZLevelPathLeg
         Cost = cost;
         LocalPath = localPath;
         Traversal = traversal;
+        Flight = flight;
     }
 
     public static bool TryCreateLocal(
@@ -158,6 +163,7 @@ public readonly struct ZLevelPathLeg
             end,
             cost,
             path,
+            default,
             default);
         return true;
     }
@@ -189,7 +195,40 @@ public readonly struct ZLevelPathLeg
             end,
             traversal.Cost,
             ImmutableArray<PathPoly>.Empty,
-            traversal);
+            traversal,
+            default);
+        return true;
+    }
+
+    public static bool TryCreateFlight(
+        ZLevelPathEndpoint start,
+        ZLevelPathEndpoint end,
+        ZLevelFlightNavigationEdge flight,
+        out ZLevelPathLeg leg)
+    {
+        leg = default;
+        if (!IsFiniteCost(flight.Cost) ||
+            start.MapId == MapId.Nullspace ||
+            start.MapId != end.MapId ||
+            start.MapId != flight.Source.MapId ||
+            end.MapId != flight.Destination.MapId ||
+            start.Coordinates.EntityId != flight.Source.GridUid ||
+            end.Coordinates.EntityId != flight.Destination.GridUid ||
+            start.WorldZ != flight.Source.WorldZ ||
+            end.WorldZ != flight.Destination.WorldZ ||
+            end.WorldZ - start.WorldZ != flight.ZOffset)
+        {
+            return false;
+        }
+
+        leg = new ZLevelPathLeg(
+            ZLevelPathLegKind.Flight,
+            start,
+            end,
+            flight.Cost,
+            ImmutableArray<PathPoly>.Empty,
+            default,
+            flight);
         return true;
     }
 
@@ -253,9 +292,12 @@ public sealed class ZLevelPathRoute
                 return false;
             }
 
-            if (leg.Kind == ZLevelPathLegKind.Traversal &&
-                (leg.Traversal.TopologyRevision != graphVersion.TopologyRevision ||
-                 leg.Traversal.EnvironmentRevision != graphVersion.EnvironmentRevision))
+            if ((leg.Kind == ZLevelPathLegKind.Traversal &&
+                 (leg.Traversal.TopologyRevision != graphVersion.TopologyRevision ||
+                  leg.Traversal.EnvironmentRevision != graphVersion.EnvironmentRevision)) ||
+                (leg.Kind == ZLevelPathLegKind.Flight &&
+                 (leg.Flight.TopologyRevision != graphVersion.TopologyRevision ||
+                  leg.Flight.EnvironmentRevision != graphVersion.EnvironmentRevision)))
             {
                 return false;
             }

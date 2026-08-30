@@ -19,7 +19,7 @@ namespace Content.Server.ZLevel.Navigation;
 /// <summary>
 /// Maintains the authored vertical traversal graph independently from local 2D navigation.
 /// </summary>
-public sealed class ZLevelTraversalGraphSystem : EntitySystem
+public sealed partial class ZLevelTraversalGraphSystem : EntitySystem
 {
     public const int ConnectedTraversalVisitBudget = 512;
     public const float MaximumDynamicWaitNavigationCost = 1_000_000f;
@@ -36,6 +36,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private readonly HashSet<Vector2i> _connectedVisited = new();
     private readonly List<EntityUid> _entityBuffer = new();
     private readonly List<ZLevelTraversalNavigationEdge> _edgeBuffer = new();
+    private readonly List<ZLevelFlightNavigationEdge> _flightEdgeBuffer = new();
     private readonly Dictionary<MapId, ZLevelTraversalGraphSnapshot> _snapshotCache = new();
     private readonly Dictionary<MapId, ZLevelTraversalMapRevision> _mapRevisions = new();
 
@@ -61,6 +62,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
     private long _snapshotCacheHits;
     private long _snapshotBuilds;
     private long _snapshotEdges;
+    private long _snapshotFlightEdges;
     private long _snapshotTimestampTicks;
     private long _lastSnapshotTimestampTicks;
     private long _maxSnapshotTimestampTicks;
@@ -97,6 +99,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         SubscribeLocalEvent<ZLevelFrameChangedEvent>(OnFrameChanged);
         SubscribeLocalEvent<ZLevelElevatorNavigationChangedEvent>(OnElevatorNavigationChanged);
         SubscribeLocalEvent<MapRemovedEvent>(OnMapRemoved);
+
+        InitializeFlightNavigation();
     }
 
     /// <summary>
@@ -396,17 +400,22 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         GetEdges(mapId, _edgeBuffer);
         _edgeBuffer.Sort(ZLevelTraversalNavigationEdgeComparer.Instance);
         var edges = _edgeBuffer.ToImmutableArray();
+        GetFlightEdges(mapId, _flightEdgeBuffer);
+        _flightEdgeBuffer.Sort(ZLevelFlightNavigationEdgeComparer.Instance);
+        var flightEdges = _flightEdgeBuffer.ToImmutableArray();
         var snapshot = new ZLevelTraversalGraphSnapshot(
             mapId,
             version.TopologyRevision,
             version.EnvironmentRevision,
-            edges);
+            edges,
+            flightEdges);
         _snapshotCache[mapId] = snapshot;
 
         var elapsed = Stopwatch.GetTimestamp() - started;
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         _snapshotBuilds++;
         _snapshotEdges += edges.Length;
+        _snapshotFlightEdges += flightEdges.Length;
         _snapshotTimestampTicks += elapsed;
         _lastSnapshotTimestampTicks = elapsed;
         _maxSnapshotTimestampTicks = Math.Max(_maxSnapshotTimestampTicks, elapsed);
@@ -479,6 +488,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             _snapshotCacheHits,
             _snapshotBuilds,
             _snapshotEdges,
+            _snapshotFlightEdges,
             TimestampToMilliseconds(_snapshotTimestampTicks),
             TimestampToMilliseconds(_lastSnapshotTimestampTicks),
             TimestampToMilliseconds(_maxSnapshotTimestampTicks),
@@ -487,7 +497,15 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             _maxSnapshotAllocatedBytes,
             TimestampToMilliseconds(_queryTimestampTicks),
             TimestampToMilliseconds(_lastQueryTimestampTicks),
-            TimestampToMilliseconds(_maxQueryTimestampTicks));
+            TimestampToMilliseconds(_maxQueryTimestampTicks),
+            FlightNavigationMarkerCount,
+            FlightNavigationLocationCount,
+            _flightNavigationRefreshes,
+            _flightEdgeQueries,
+            _validFlightEdges,
+            _closedFlightEdges,
+            _unsupportedFlightEdges,
+            _invalidFlightEdges);
     }
 
     public void ResetMetrics()
@@ -512,6 +530,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         _snapshotCacheHits = 0;
         _snapshotBuilds = 0;
         _snapshotEdges = 0;
+        _snapshotFlightEdges = 0;
         _snapshotTimestampTicks = 0;
         _lastSnapshotTimestampTicks = 0;
         _maxSnapshotTimestampTicks = 0;
@@ -521,6 +540,7 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         _queryTimestampTicks = 0;
         _lastQueryTimestampTicks = 0;
         _maxQueryTimestampTicks = 0;
+        ResetFlightNavigationMetrics();
     }
 
     public void RefreshTraversal(EntityUid uid)
@@ -681,11 +701,13 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
 
     private void OnPlacement(PlacementEntityEvent args)
     {
-        if (args.PlacementEventAction == PlacementEventAction.Create &&
-            HasComp<ZLevelTraversalComponent>(args.EditedEntity))
-        {
+        if (args.PlacementEventAction != PlacementEventAction.Create)
+            return;
+
+        if (HasComp<ZLevelTraversalComponent>(args.EditedEntity))
             RefreshRegistration(args.EditedEntity);
-        }
+        if (HasComp<ZLevelFlightNavigationComponent>(args.EditedEntity))
+            RefreshFlightNavigation(args.EditedEntity);
     }
 
     private void OnTileChanged(ref TileChangedEvent args)
@@ -728,6 +750,8 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
         }
 
         if (_elevators.HasNavigationGrid(args.GridUid, out var mapId))
+            InvalidateEnvironment(mapId);
+        else if (TryGetFlightNavigationMap(args.GridUid, out mapId))
             InvalidateEnvironment(mapId);
     }
 
@@ -991,6 +1015,9 @@ public sealed class ZLevelTraversalGraphSystem : EntitySystem
             }
         }
 
+        if (TryGetRelevantFlightNavigationMap(gridUid, tile, localZ, out mapId))
+            return true;
+
         return _elevators.TryGetNavigationMapAt(gridUid, tile, out mapId);
     }
 
@@ -1129,7 +1156,8 @@ public readonly record struct ZLevelTraversalGraphSnapshot(
     MapId MapId,
     long TopologyRevision,
     long EnvironmentRevision,
-    ImmutableArray<ZLevelTraversalNavigationEdge> Edges)
+    ImmutableArray<ZLevelTraversalNavigationEdge> Edges,
+    ImmutableArray<ZLevelFlightNavigationEdge> FlightEdges)
 {
     public ZLevelTraversalGraphVersion Version =>
         new(MapId, TopologyRevision, EnvironmentRevision);
@@ -1175,6 +1203,7 @@ public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     long SnapshotCacheHits,
     long SnapshotBuilds,
     long SnapshotEdges,
+    long SnapshotFlightEdges,
     double TotalSnapshotMilliseconds,
     double LastSnapshotMilliseconds,
     double MaxSnapshotMilliseconds,
@@ -1183,12 +1212,20 @@ public readonly record struct ZLevelTraversalGraphMetricsSnapshot(
     long MaxSnapshotAllocatedBytes,
     double TotalQueryMilliseconds,
     double LastQueryMilliseconds,
-    double MaxQueryMilliseconds)
+    double MaxQueryMilliseconds,
+    int FlightNavigationMarkers,
+    int FlightNavigationLocations,
+    long FlightNavigationRefreshes,
+    long FlightEdgeQueries,
+    long ValidFlightEdges,
+    long ClosedFlightEdges,
+    long UnsupportedFlightEdges,
+    long InvalidFlightEdges)
 {
     public double LocationHitPercent => LocationQueries == 0 ? 0d : LocationHits * 100d / LocationQueries;
-    public double AverageQueryMilliseconds => ConnectedQueries + EdgeQueries == 0
+    public double AverageQueryMilliseconds => ConnectedQueries + EdgeQueries + FlightEdgeQueries == 0
         ? 0d
-        : TotalQueryMilliseconds / (ConnectedQueries + EdgeQueries);
+        : TotalQueryMilliseconds / (ConnectedQueries + EdgeQueries + FlightEdgeQueries);
     public double AverageSnapshotMilliseconds => SnapshotBuilds == 0
         ? 0d
         : TotalSnapshotMilliseconds / SnapshotBuilds;

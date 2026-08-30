@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Content.Server.ZLevel.Navigation;
 using Content.Shared.NPC;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics;
@@ -18,6 +19,7 @@ public sealed partial class PathfindingSystem
     private const float ZLevelRouteCostEpsilon = 0.0001f;
 
     [Dependency] private readonly ZLevelTraversalGraphSystem _zLevelTraversalGraph = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
 
     /// <summary>
     /// Plans a typed route between the current positions and floors of two entities.
@@ -63,6 +65,7 @@ public sealed partial class PathfindingSystem
             cancelToken,
             flags,
             budget ?? CreateDefaultZLevelPathBudget(),
+            _zLevelSystem.CanUseFlightNavigation(entity),
             started);
     }
 
@@ -104,6 +107,7 @@ public sealed partial class PathfindingSystem
             cancelToken,
             flags,
             budget ?? CreateDefaultZLevelPathBudget(),
+            _zLevelSystem.CanUseFlightNavigation(entity),
             started);
     }
 
@@ -129,6 +133,7 @@ public sealed partial class PathfindingSystem
             cancelToken,
             flags,
             budget ?? CreateDefaultZLevelPathBudget(),
+            false,
             Stopwatch.GetTimestamp());
     }
 
@@ -179,6 +184,17 @@ public sealed partial class PathfindingSystem
                             i);
                     }
                     break;
+                case ZLevelPathLegKind.Flight:
+                    if (_zLevelTraversalGraph.TryResolveFlightEdge(
+                            leg.Flight,
+                            out var currentFlight) != ZLevelTraversalEdgeStatus.Valid ||
+                        !ZLevelTraversalGraphSystem.HasEquivalentFlightEdge(leg.Flight, currentFlight))
+                    {
+                        return new ZLevelPathRouteValidationResult(
+                            ZLevelPathRouteValidationStatus.TraversalChanged,
+                            i);
+                    }
+                    break;
                 default:
                     return new ZLevelPathRouteValidationResult(
                         ZLevelPathRouteValidationStatus.InvalidRoute,
@@ -198,6 +214,7 @@ public sealed partial class PathfindingSystem
         CancellationToken cancelToken,
         PathFlags flags,
         ZLevelPathSearchBudget budget,
+        bool includeFlightNavigation,
         long started)
     {
         if (!budget.IsValid ||
@@ -228,12 +245,12 @@ public sealed partial class PathfindingSystem
         }
 
         var snapshot = _zLevelTraversalGraph.CreateSnapshot(start.MapId);
-        if (!TryBuildConnectorGroups(snapshot, out var connectorGroups))
+        if (!TryBuildConnectorGroups(snapshot, includeFlightNavigation, out var connectorGroups))
         {
             return FinishZLevelPathRoute(
                 ZLevelPathRouteStatus.InvalidRequest,
                 null,
-                CreateDiagnostics(snapshot, 0, 0, 0),
+                CreateDiagnostics(snapshot, 0, 0, 0, 0),
                 started);
         }
 
@@ -249,6 +266,7 @@ public sealed partial class PathfindingSystem
         var statesExpanded = 0;
         var localPathsRequested = 0;
         var traversalEdgesEvaluated = 0;
+        var flightEdgesEvaluated = 0;
         var bestTargetCost = float.PositiveInfinity;
         var bestTargetState = -1;
         ZLevelPathLeg? bestTargetLeg = null;
@@ -264,6 +282,7 @@ public sealed partial class PathfindingSystem
                     statesExpanded,
                     localPathsRequested,
                     traversalEdgesEvaluated,
+                    flightEdgesEvaluated,
                     started);
             }
 
@@ -280,6 +299,7 @@ public sealed partial class PathfindingSystem
                     statesExpanded,
                     localPathsRequested,
                     traversalEdgesEvaluated,
+                    flightEdgesEvaluated,
                     started);
             }
 
@@ -316,6 +336,7 @@ public sealed partial class PathfindingSystem
                         null,
                         ref budget,
                         ref traversalEdgesEvaluated,
+                        ref flightEdgesEvaluated,
                         bestTargetCost,
                         stateLookup,
                         states,
@@ -328,6 +349,7 @@ public sealed partial class PathfindingSystem
                         statesExpanded,
                         localPathsRequested,
                         traversalEdgesEvaluated,
+                        flightEdgesEvaluated,
                         started);
                 }
             }
@@ -349,6 +371,7 @@ public sealed partial class PathfindingSystem
                     statesExpanded,
                     localPathsRequested,
                     traversalEdgesEvaluated,
+                    flightEdgesEvaluated,
                     started);
             }
 
@@ -380,6 +403,7 @@ public sealed partial class PathfindingSystem
                     statesExpanded,
                     localPathsRequested,
                     traversalEdgesEvaluated,
+                    flightEdgesEvaluated,
                     started);
             }
 
@@ -393,6 +417,7 @@ public sealed partial class PathfindingSystem
                     statesExpanded,
                     localPathsRequested,
                     traversalEdgesEvaluated,
+                    flightEdgesEvaluated,
                     started);
             }
 
@@ -423,6 +448,7 @@ public sealed partial class PathfindingSystem
                             attempt.Leg,
                             ref budget,
                             ref traversalEdgesEvaluated,
+                            ref flightEdgesEvaluated,
                             bestTargetCost,
                             stateLookup,
                             states,
@@ -435,6 +461,7 @@ public sealed partial class PathfindingSystem
                             statesExpanded,
                             localPathsRequested,
                             traversalEdgesEvaluated,
+                            flightEdgesEvaluated,
                             started);
                     }
                 }
@@ -450,6 +477,7 @@ public sealed partial class PathfindingSystem
                 statesExpanded,
                 localPathsRequested,
                 traversalEdgesEvaluated,
+                flightEdgesEvaluated,
                 started);
         }
 
@@ -463,6 +491,7 @@ public sealed partial class PathfindingSystem
                 statesExpanded,
                 localPathsRequested,
                 traversalEdgesEvaluated,
+                flightEdgesEvaluated,
                 started);
         }
 
@@ -482,6 +511,7 @@ public sealed partial class PathfindingSystem
                 statesExpanded,
                 localPathsRequested,
                 traversalEdgesEvaluated,
+                flightEdgesEvaluated,
                 started);
         }
 
@@ -495,6 +525,7 @@ public sealed partial class PathfindingSystem
                 statesExpanded,
                 localPathsRequested,
                 traversalEdgesEvaluated,
+                flightEdgesEvaluated,
                 started);
         }
 
@@ -507,6 +538,7 @@ public sealed partial class PathfindingSystem
                 statesExpanded,
                 localPathsRequested,
                 traversalEdgesEvaluated,
+                flightEdgesEvaluated,
                 started);
         }
 
@@ -517,6 +549,7 @@ public sealed partial class PathfindingSystem
             statesExpanded,
             localPathsRequested,
             traversalEdgesEvaluated,
+            flightEdgesEvaluated,
             started);
     }
 
@@ -601,6 +634,7 @@ public sealed partial class PathfindingSystem
 
     private bool TryBuildConnectorGroups(
         ZLevelTraversalGraphSnapshot snapshot,
+        bool includeFlightNavigation,
         out List<ZLevelConnectorGroup> groups)
     {
         groups = new List<ZLevelConnectorGroup>();
@@ -616,21 +650,70 @@ public sealed partial class PathfindingSystem
                 return false;
             }
 
-            if (!lookup.TryGetValue(source, out var groupIndex))
+            if (!ZLevelPathLeg.TryCreateTraversal(source, destination, edge, out var leg))
+                return false;
+
+            AddConnectorTransition(groups, lookup, source, destination, leg);
+        }
+
+        if (!includeFlightNavigation)
+            return true;
+
+        foreach (var edge in snapshot.FlightEdges)
+        {
+            if (edge.Source.MapId != snapshot.MapId ||
+                edge.Destination.MapId != snapshot.MapId ||
+                !TryGetNodeEndpoint(edge.Source, out var source) ||
+                !TryGetNodeEndpoint(edge.Destination, out var destination) ||
+                !ZLevelPathLeg.TryCreateFlight(source, destination, edge, out var leg))
             {
-                groupIndex = groups.Count;
-                lookup.Add(source, groupIndex);
-                groups.Add(new ZLevelConnectorGroup(source));
+                return false;
             }
 
-            groups[groupIndex].Transitions.Add(new ZLevelConnectorTransition(destination, edge));
+            AddConnectorTransition(groups, lookup, source, destination, leg);
         }
 
         return true;
     }
 
+    private static void AddConnectorTransition(
+        List<ZLevelConnectorGroup> groups,
+        Dictionary<ZLevelPathEndpoint, int> lookup,
+        ZLevelPathEndpoint source,
+        ZLevelPathEndpoint destination,
+        ZLevelPathLeg leg)
+    {
+        if (!lookup.TryGetValue(source, out var groupIndex))
+        {
+            groupIndex = groups.Count;
+            lookup.Add(source, groupIndex);
+            groups.Add(new ZLevelConnectorGroup(source));
+        }
+
+        groups[groupIndex].Transitions.Add(new ZLevelConnectorTransition(destination, leg));
+    }
+
     private bool TryGetNodeEndpoint(
         ZLevelTraversalNavigationNode node,
+        out ZLevelPathEndpoint endpoint)
+    {
+        endpoint = default;
+        if (!TryComp<MapGridComponent>(node.GridUid, out var grid) ||
+            !TryComp(node.GridUid, out TransformComponent? transform) ||
+            transform.MapID != node.MapId)
+        {
+            return false;
+        }
+
+        endpoint = new ZLevelPathEndpoint(
+            node.MapId,
+            _maps.GridTileToLocal(node.GridUid, grid, node.Tile),
+            node.WorldZ);
+        return true;
+    }
+
+    private bool TryGetNodeEndpoint(
+        ZLevelFlightNavigationNode node,
         out ZLevelPathEndpoint endpoint)
     {
         endpoint = default;
@@ -655,6 +738,7 @@ public sealed partial class PathfindingSystem
         ZLevelPathLeg? localLeg,
         ref ZLevelPathSearchBudget budget,
         ref int traversalEdgesEvaluated,
+        ref int flightEdgesEvaluated,
         float bestTargetCost,
         Dictionary<ZLevelPathEndpoint, int> stateLookup,
         List<ZLevelRouteSearchState> states,
@@ -670,18 +754,13 @@ public sealed partial class PathfindingSystem
                 return false;
             }
 
-            traversalEdgesEvaluated++;
-            if (!ZLevelPathLeg.TryCreateTraversal(
-                    group.Source,
-                    transition.Destination,
-                    transition.Edge,
-                    out var traversalLeg))
-            {
-                failure = ZLevelPathRouteStatus.InvalidRequest;
-                return false;
-            }
+            var verticalLeg = transition.Leg;
+            if (verticalLeg.Kind == ZLevelPathLegKind.Flight)
+                flightEdgesEvaluated++;
+            else
+                traversalEdgesEvaluated++;
 
-            var nextCost = current.Cost + localCost + traversalLeg.Cost;
+            var nextCost = current.Cost + localCost + verticalLeg.Cost;
             if (!float.IsFinite(nextCost) ||
                 nextCost + ZLevelRouteCostEpsilon >= bestTargetCost)
             {
@@ -697,7 +776,7 @@ public sealed partial class PathfindingSystem
                 existing.Cost = nextCost;
                 existing.PreviousState = currentIndex;
                 existing.IncomingLocal = localLeg;
-                existing.IncomingTraversal = traversalLeg;
+                existing.IncomingTraversal = verticalLeg;
                 existing.Settled = false;
                 continue;
             }
@@ -708,7 +787,7 @@ public sealed partial class PathfindingSystem
                 nextCost,
                 currentIndex,
                 localLeg,
-                traversalLeg));
+                verticalLeg));
         }
 
         return true;
@@ -723,7 +802,7 @@ public sealed partial class PathfindingSystem
     {
         foreach (var transition in group.Transitions)
         {
-            var lowerBound = current.Cost + transition.Edge.Cost;
+            var lowerBound = current.Cost + transition.Leg.Cost;
             if (lowerBound + ZLevelRouteCostEpsilon >= bestTargetCost)
                 continue;
 
@@ -820,6 +899,7 @@ public sealed partial class PathfindingSystem
         int statesExpanded,
         int localPathsRequested,
         int traversalEdgesEvaluated,
+        int flightEdgesEvaluated,
         long started)
     {
         return FinishZLevelPathRoute(
@@ -829,7 +909,8 @@ public sealed partial class PathfindingSystem
                 snapshot,
                 statesExpanded,
                 localPathsRequested,
-                traversalEdgesEvaluated),
+                traversalEdgesEvaluated,
+                flightEdgesEvaluated),
             started);
     }
 
@@ -837,12 +918,14 @@ public sealed partial class PathfindingSystem
         ZLevelTraversalGraphSnapshot snapshot,
         int statesExpanded,
         int localPathsRequested,
-        int traversalEdgesEvaluated)
+        int traversalEdgesEvaluated,
+        int flightEdgesEvaluated)
     {
         return new ZLevelPathSearchDiagnostics(
             statesExpanded,
             localPathsRequested,
             traversalEdgesEvaluated,
+            flightEdgesEvaluated,
             snapshot.TopologyRevision,
             snapshot.EnvironmentRevision);
     }
@@ -919,7 +1002,7 @@ public sealed partial class PathfindingSystem
 
     private readonly record struct ZLevelConnectorTransition(
         ZLevelPathEndpoint Destination,
-        ZLevelTraversalNavigationEdge Edge);
+        ZLevelPathLeg Leg);
 
     private readonly record struct ZLevelLocalQueryKey(ZLevelPathEndpoint End, float Range);
 

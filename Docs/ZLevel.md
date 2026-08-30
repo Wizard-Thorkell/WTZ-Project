@@ -1133,7 +1133,8 @@ Native flight's movement, gravity, collision, lifecycle, and save-state
 contracts are documented in `Docs/ZLevelFlight.md`. P7.4b1 supplies native
 actions, intrinsic/jetpack content, interruption policy, and mapping coverage.
 P7.4b2a supplies continuous flight-aware trace, hitscan, and physical trajectory
-endpoints. Explicit AI navigation/execution remains P7.4b2b.
+endpoints. P7.4b2b supplies explicit capability-gated flight corridors and
+server-authoritative AI execution through the native vertical solver.
 
 ## Definition Of Done
 

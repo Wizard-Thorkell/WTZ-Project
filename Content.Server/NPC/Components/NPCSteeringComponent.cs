@@ -110,6 +110,16 @@ public sealed partial class NPCSteeringComponent : Component
     /// </summary>
     [ViewVariables] public EntityUid? ZLevelPendingTraversal;
 
+    /// <summary>
+    /// Current execution phase of a mapper-authored flight corridor.
+    /// </summary>
+    [ViewVariables] public NPCZLevelFlightStage ZLevelFlightStage;
+
+    /// <summary>
+    /// True when this route activated flight and must stop it on release.
+    /// </summary>
+    [ViewVariables] public bool ZLevelRouteOwnsFlight;
+
     [ViewVariables] public long ZLevelValidatedTopologyRevision = -1;
 
     [ViewVariables] public long ZLevelValidatedEnvironmentRevision = -1;
@@ -190,6 +200,15 @@ public enum NPCZLevelReplanReason : byte
     UnexpectedFloor,
     LocalPathInvalid,
     TraversalUnavailable,
+    FlightUnavailable,
+}
+
+public enum NPCZLevelFlightStage : byte
+{
+    None,
+    Approach,
+    Crossing,
+    Exit,
 }
 
 public enum NPCZLevelExecutionFailureReason : byte

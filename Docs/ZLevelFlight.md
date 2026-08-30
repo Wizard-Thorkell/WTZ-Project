@@ -4,8 +4,8 @@ P7.4a defines the shared movement, gravity, and collision contract for entities
 that can fly between native Z-level floors. P7.4b1 adds authoritative player
 controls, intrinsic and jetpack capability sources, gameplay interruptions, and
 mapping content. P7.4b2a makes traces, hitscan, and bounded physical trajectories
-consume active flight height. Explicit AI navigation remains P7.4b2b work over
-the same typed contract.
+consume active flight height. P7.4b2b adds explicit authored AI corridors and
+executes them through the same typed flight contract.
 
 ## State Model
 
@@ -113,6 +113,33 @@ ownership flags ensure shutdown removes only what that jetpack granted. A
 jetpack does not stop or remove an intrinsic flight that was already active.
 Removing the native map configuration disables an active jetpack cleanly.
 
+## AI Navigation And Execution
+
+`ZLevelFlightNavigationComponent` is a server-side anchored mapping marker for
+one bounded corridor between adjacent floors. The marker sits on a supported
+source approach. Its aperture and destination offsets rotate with the marker,
+each internal horizontal step is limited to one cardinal tile, and an optional
+reverse edge uses the same aperture. Navigation cost is finite and bounded.
+
+The traversal graph publishes flight edges in a separate immutable snapshot
+array. An edge exists only while both approach tiles have direct support and
+the aperture passes the `Body` boundary channel. Tile, boundary, marker,
+anchoring, parent, Z, map, and frame changes invalidate the map-scoped graph
+revision. Runtime component edits must call `RefreshFlightNavigation()`.
+
+Only actor-aware path requests may include these edges, and only when the actor
+passes side-effect-free flight capability validation. Explicit endpoint
+requests and ordinary mobs cannot infer flight. A successful route contains a
+typed `Flight` leg rather than marking shaft space as a walkable polygon.
+
+NPC steering executes four states: arrive at the supported source, activate or
+adopt flight, move horizontally to the aperture, hold XY while the native
+vertical solver crosses the boundary, then move to the supported destination.
+It never teleports or bypasses a live `Body` check. A route stops flight only
+when it activated that flight; pre-existing flight remains active and is
+stabilized on interruption. Clearing, invalidating, or replacing a route
+releases its owned flight before another plan is installed.
+
 ## Mapping Contract
 
 Control action entity references and jetpack ownership flags are replicated
@@ -122,28 +149,31 @@ and custom action prototype IDs but never save an airborne state or process-
 local entity reference. Actions are reconstructed after the loaded map reaches
 map initialization.
 
-The official mapping station includes one filled blue jetpack on local Z 0 as
-the playable flight fixture. Snapshot coverage saves an initialized entity while
-it is actively flying, inspects its YAML for runtime leakage, reloads it, and
-proves that it is inactive with fresh action entities.
+The official mapping station includes one filled blue jetpack on local Z 0 and
+one bidirectional authored flight corridor from local Z 0 to Z 1. Its load test
+materializes both directed graph edges. Snapshot coverage saves an initialized
+entity while it is actively flying, inspects its YAML for runtime leakage,
+reloads it, and proves that it is inactive with fresh action entities.
 
 ## Observability
 
 `zlevelmetrics` and the client debug overlay report active flights, starts,
 stops, target changes, solver updates, successful boundary crossings, blocked
 boundaries, and lifecycle invalidations. `ResetCounters()` resets every flight
-counter. The stress artifact schema is version 5 after the metrics contract
-change.
+counter. Server metrics additionally report marker locations, graph resolution
+outcomes, snapshot flight edges, path evaluations, and steering leg
+started/completed/failed counts. The stress artifact schema is version 5 after
+the shared metrics contract change.
 
 ## P7.4b2 Status
 
-P7.4b2a carries active source and entity-target offsets through `ZLevelTrace`,
-hitscan range and collision, and ballistic crossing timing. Coordinate targets
-and inactive entities remain at the floor center. P7.4b2b adds explicit flight
-navigation connections and execution for AI. It must not make every empty tile
-walkable, bypass `Body` boundary checks, or reinterpret `LocalZOffset` as a
-second collision layer. Specialized trace, combat, and pathfinding rules remain
-outside the flight movement solver.
+P7.4b2 is complete. Active source and entity-target offsets flow through
+`ZLevelTrace`, hitscan range and collision, and ballistic crossing timing.
+Explicit, capability-gated graph edges provide bounded AI navigation and
+physical steering execution. Empty space remains non-walkable, `Body`
+boundaries remain authoritative, and `LocalZOffset` is not a second collision
+layer. Specialized trace, combat, and pathfinding rules remain outside the
+flight movement solver.
 
 ## Verification
 
@@ -184,3 +214,16 @@ outside the flight movement solver.
 - The P7.4b2a non-incremental full build completes in 2m46s with zero errors and
   691 established warnings. A dedicated project rebuild attributes zero warning
   to a modified code or test file.
+- P7.4b2b passes 6/6 focused graph/planning/execution/ownership cases. They
+  cover capability gating, deterministic bidirectional edges, support,
+  boundary and rotation invalidation, physical NPC execution, preservation of
+  pre-existing flight, interruption cleanup, and safe route replacement.
+- The official mapping map loads one marker and two directed flight edges. The
+  final combined pathfinding/traversal matrix passes 38/38, and the complete
+  Content Z-level matrix passes 336/336 without a skip.
+- Two 3/3 neutral baseline runs pass. The captured run measures
+  10.0359/17.5405/27.5582 ms and 6,336 bytes for 3/6/10 floors, with 100% warm
+  boundary/sky/gravity hits, zero PVS exhaustion, and zero flight updates.
+- The non-incremental single-worker solution build completes in 2m45s with zero
+  errors and 691 established warnings. Log attribution finds no warning in a
+  modified production or test file.

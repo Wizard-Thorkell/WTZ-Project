@@ -294,8 +294,7 @@ P7.4b1 makes that capability playable. Entities with
 `ZLevelFlightControlsComponent` receive toggle/up/down actions only on configured
 native grids. Existing jetpacks preserve legacy space behavior and become an
 owned capability source on native grids with gravity. `FlyingMobBase` supplies
-the dormant intrinsic capability while dragons supply controls; future flying
-NPC steering remains separate.
+the dormant intrinsic capability while dragons supply controls.
 
 Critical state, stun, knockdown, throws, and buckling interrupt active flight.
 Initialized mapping snapshots retain authored flight tuning but strip active
@@ -305,5 +304,12 @@ official mapping station provides a filled jetpack on Z 0 for manual testing.
 P7.4b2a exposes an active flyer's continuous local offset to `ZLevelTrace`,
 hitscan, and bounded physical trajectories. Inactive entities and coordinate
 targets keep the compatibility center offset, while ordinary planar fixtures
-remain owned by one discrete world floor. Flying-NPC route planning and
-execution remain the separate P7.4b2b package.
+remain owned by one discrete world floor.
+
+P7.4b2b adds mapper-authored, adjacent-floor flight corridors to the detached
+hierarchical graph. Only validated flight-capable actors consume them. NPCs
+activate or adopt native flight, approach the aperture, cross through the live
+`Body` boundary, and exit onto supported floor without teleporting or making
+empty space globally walkable. Route ownership is explicit across completion,
+invalidation, interruption, and replacement. The official mapping station
+contains one bidirectional Z 0/Z 1 corridor.

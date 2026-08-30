@@ -4,6 +4,7 @@
 using System.Linq;
 using System.Numerics;
 using Content.Server.Decals;
+using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.IntegrationTests.Fixtures;
 using Content.Shared.ZLevel;
@@ -150,6 +151,11 @@ public sealed class ZLevelMapFormatTest : GameTest
             var flightJetpacks = entities
                 .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID == "JetpackBlueFilled")
                 .ToArray();
+            var flightMarkers = entities
+                .Where(uid => entMan.GetComponent<MetaDataComponent>(uid).EntityPrototype?.ID ==
+                    "ZLevelFlightNavigationMarker")
+                .ToArray();
+            var flightEdges = entMan.System<ZLevelTraversalGraphSystem>().CreateSnapshot(map.Comp.MapId).FlightEdges;
 
             Assert.Multiple(() =>
             {
@@ -165,6 +171,9 @@ public sealed class ZLevelMapFormatTest : GameTest
                     "ZLevelStairsUp" or "ZLevelStairsDown"), Is.EqualTo(4));
                 Assert.That(apertureMarkers, Has.Length.EqualTo(4));
                 Assert.That(flightJetpacks, Has.Length.EqualTo(1));
+                Assert.That(flightMarkers, Has.Length.EqualTo(1));
+                Assert.That(flightEdges, Has.Length.EqualTo(2));
+                Assert.That(flightEdges.Select(edge => edge.Source.WorldZ), Is.EquivalentTo(new[] { 0, 1 }));
                 Assert.That(transform.GetZLevel((
                     flightJetpacks[0],
                     entMan.GetComponent<TransformComponent>(flightJetpacks[0]),

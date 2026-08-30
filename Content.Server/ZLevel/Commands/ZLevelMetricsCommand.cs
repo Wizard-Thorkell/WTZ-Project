@@ -209,6 +209,12 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{traversalMetrics.LastQueryMilliseconds:0.000}/" +
             $"{traversalMetrics.MaxQueryMilliseconds:0.000}ms");
         shell.WriteLine(
+            $"  flight navigation: markers/locations={traversalMetrics.FlightNavigationMarkers}/" +
+            $"{traversalMetrics.FlightNavigationLocations}, refreshes={traversalMetrics.FlightNavigationRefreshes}, " +
+            $"edges queries/valid/closed/unsupported/invalid={traversalMetrics.FlightEdgeQueries}/" +
+            $"{traversalMetrics.ValidFlightEdges}/{traversalMetrics.ClosedFlightEdges}/" +
+            $"{traversalMetrics.UnsupportedFlightEdges}/{traversalMetrics.InvalidFlightEdges}");
+        shell.WriteLine(
             $"  dynamic traversals: disabled/unavailable/unpowered=" +
             $"{traversalMetrics.DisabledEdges}/{traversalMetrics.UnavailableEdges}/" +
             $"{traversalMetrics.UnpoweredEdges}, state/destination changes=" +
@@ -237,9 +243,10 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{elevatorNavigation.Rejected}");
         shell.WriteLine(
             $"  traversal snapshots: cached={traversalMetrics.CachedSnapshots}, " +
-            $"requests/hits/builds/edges={traversalMetrics.SnapshotRequests}/" +
+            $"requests/hits/builds/edges/flight-edges={traversalMetrics.SnapshotRequests}/" +
             $"{traversalMetrics.SnapshotCacheHits}/" +
-            $"{traversalMetrics.SnapshotBuilds}/{traversalMetrics.SnapshotEdges}, " +
+            $"{traversalMetrics.SnapshotBuilds}/{traversalMetrics.SnapshotEdges}/" +
+            $"{traversalMetrics.SnapshotFlightEdges}, " +
             $"hit-rate={traversalMetrics.SnapshotHitPercent:0.00}%, avg/last/max=" +
             $"{traversalMetrics.AverageSnapshotMilliseconds:0.000}/" +
             $"{traversalMetrics.LastSnapshotMilliseconds:0.000}/" +
@@ -270,9 +277,10 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"  hierarchical paths: queries/success/no-path/invalid/cancelled=" +
             $"{pathRouteMetrics.Queries}/{pathRouteMetrics.Successes}/{pathRouteMetrics.NoPaths}/" +
             $"{pathRouteMetrics.InvalidRequests}/{pathRouteMetrics.Cancellations}, " +
-            $"states/local-paths/edges/legs={pathRouteMetrics.StatesExpanded}/" +
+            $"states/local-paths/traversal-edges/flight-edges/legs={pathRouteMetrics.StatesExpanded}/" +
             $"{pathRouteMetrics.LocalPathsRequested}/{pathRouteMetrics.TraversalEdgesEvaluated}/" +
-            $"{pathRouteMetrics.Legs}, avg/last/max={pathRouteMetrics.AverageMilliseconds:0.000}/" +
+            $"{pathRouteMetrics.FlightEdgesEvaluated}/{pathRouteMetrics.Legs}, " +
+            $"avg/last/max={pathRouteMetrics.AverageMilliseconds:0.000}/" +
             $"{pathRouteMetrics.LastMilliseconds:0.000}/{pathRouteMetrics.MaxMilliseconds:0.000}ms");
         shell.WriteLine(
             $"  hierarchical path limits: state/local/edge=" +
@@ -286,6 +294,8 @@ public sealed class ZLevelMetricsCommand : IConsoleCommand
             $"{steeringMetrics.RoutesInstalled}/{steeringMetrics.RoutesCompleted}, " +
             $"traversals started/completed=" +
             $"{steeringMetrics.TraversalsStarted}/{steeringMetrics.TraversalsCompleted}, " +
+            $"flight legs started/completed/failed={steeringMetrics.FlightLegsStarted}/" +
+            $"{steeringMetrics.FlightLegsCompleted}/{steeringMetrics.FlightLegsFailed}, " +
             $"replans/failures/stale-results=" +
             $"{steeringMetrics.Replans}/{steeringMetrics.ExecutionFailures}/{steeringMetrics.StaleResults}");
         shell.WriteLine(

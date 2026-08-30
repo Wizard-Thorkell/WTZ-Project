@@ -9,6 +9,8 @@ using Content.Server.NPC.Pathfinding;
 using Content.Server.ZLevel.Navigation;
 using Content.Server.ZLevel.Systems;
 using Content.Shared.ZLevel;
+using Content.Shared.ZLevel.Components;
+using Content.Shared.ZLevel.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
@@ -22,11 +24,15 @@ public sealed partial class NPCSteeringSystem
 
     [Dependency] private readonly ZLevelTraversalSystem _zLevelTraversal = default!;
     [Dependency] private readonly ZLevelTraversalGraphSystem _zLevelTraversalGraph = default!;
+    [Dependency] private readonly SharedZLevelSystem _zLevelSystem = default!;
 
     private long _zLevelRoutesInstalled;
     private long _zLevelRoutesCompleted;
     private long _zLevelTraversalsStarted;
     private long _zLevelTraversalsCompleted;
+    private long _zLevelFlightLegsStarted;
+    private long _zLevelFlightLegsCompleted;
+    private long _zLevelFlightLegsFailed;
     private long _zLevelReplans;
     private long _zLevelExecutionFailures;
     private long _zLevelStaleResults;
@@ -71,6 +77,8 @@ public sealed partial class NPCSteeringSystem
             route.Start.MapId != xform.MapID ||
             route.Start.WorldZ != GetWorldZ(uid, xform) ||
             route.End.WorldZ != steering.TargetWorldZ ||
+            (route.Legs.Any(leg => leg.Kind == ZLevelPathLegKind.Flight) &&
+             !_zLevelSystem.CanUseFlightNavigation(uid)) ||
             !IsZLevelRouteActorCurrent(uid, route, steering, xform) ||
             !IsZLevelRouteTargetCurrent(route, steering) ||
             _pathfindingSystem.ValidateZLevelPathRoute(route) is not { IsValid: true })
@@ -84,11 +92,16 @@ public sealed partial class NPCSteeringSystem
         if (targetMap.MapId == MapId.Nullspace || targetFrame == null)
             return false;
 
+        if (steering.ZLevelRoute != null)
+            ClearZLevelRoute(uid, steering);
+
         steering.ZLevelRoute = route;
         steering.ZLevelLegIndex = 0;
         steering.LoadedZLevelLegIndex = -1;
         steering.ZLevelPlannedTargetCoordinates = _transform.ToCoordinates(targetFrame.Value, targetMap);
         steering.ZLevelPendingTraversal = null;
+        steering.ZLevelFlightStage = NPCZLevelFlightStage.None;
+        steering.ZLevelRouteOwnsFlight = false;
         StampZLevelRouteValidation(route, steering);
         steering.LastZLevelExecutionFailureReason = NPCZLevelExecutionFailureReason.None;
         steering.Status = SteeringStatus.Moving;
@@ -135,6 +148,9 @@ public sealed partial class NPCSteeringSystem
             Interlocked.Read(ref _zLevelRoutesCompleted),
             Interlocked.Read(ref _zLevelTraversalsStarted),
             Interlocked.Read(ref _zLevelTraversalsCompleted),
+            Interlocked.Read(ref _zLevelFlightLegsStarted),
+            Interlocked.Read(ref _zLevelFlightLegsCompleted),
+            Interlocked.Read(ref _zLevelFlightLegsFailed),
             Interlocked.Read(ref _zLevelReplans),
             Interlocked.Read(ref _zLevelExecutionFailures),
             Interlocked.Read(ref _zLevelStaleResults));
@@ -146,6 +162,9 @@ public sealed partial class NPCSteeringSystem
         Interlocked.Exchange(ref _zLevelRoutesCompleted, 0);
         Interlocked.Exchange(ref _zLevelTraversalsStarted, 0);
         Interlocked.Exchange(ref _zLevelTraversalsCompleted, 0);
+        Interlocked.Exchange(ref _zLevelFlightLegsStarted, 0);
+        Interlocked.Exchange(ref _zLevelFlightLegsCompleted, 0);
+        Interlocked.Exchange(ref _zLevelFlightLegsFailed, 0);
         Interlocked.Exchange(ref _zLevelReplans, 0);
         Interlocked.Exchange(ref _zLevelExecutionFailures, 0);
         Interlocked.Exchange(ref _zLevelStaleResults, 0);
@@ -254,6 +273,9 @@ public sealed partial class NPCSteeringSystem
                 return ZLevelRoutePreparation.Repath;
             }
 
+            if (leg.Kind == ZLevelPathLegKind.Flight)
+                return PrepareZLevelFlightLeg(uid, steering, leg, currentWorldZ);
+
             if (currentWorldZ != leg.Start.WorldZ)
             {
                 ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.UnexpectedFloor);
@@ -281,9 +303,16 @@ public sealed partial class NPCSteeringSystem
             return steering.Coordinates;
 
         var leg = route.Legs[steering.ZLevelLegIndex];
-        return leg.Kind == ZLevelPathLegKind.Local
-            ? leg.End.Coordinates
-            : leg.Start.Coordinates;
+        return leg.Kind switch
+        {
+            ZLevelPathLegKind.Local => leg.End.Coordinates,
+            ZLevelPathLegKind.Flight when steering.ZLevelFlightStage == NPCZLevelFlightStage.Exit =>
+                leg.End.Coordinates,
+            ZLevelPathLegKind.Flight when steering.ZLevelFlightStage is
+                NPCZLevelFlightStage.Approach or NPCZLevelFlightStage.Crossing =>
+                GetFlightApertureCoordinates(leg.Flight),
+            _ => leg.Start.Coordinates,
+        };
     }
 
     private ZLevelRouteArrival HandleZLevelRouteArrival(
@@ -309,6 +338,9 @@ public sealed partial class NPCSteeringSystem
                 : ZLevelRouteArrival.Advanced;
         }
 
+        if (leg.Kind == ZLevelPathLegKind.Flight)
+            return HandleZLevelFlightArrival(uid, steering, xform, leg);
+
         var validation = _pathfindingSystem.ValidateZLevelPathRoute(route);
         if (!validation.IsValid)
         {
@@ -330,6 +362,205 @@ public sealed partial class NPCSteeringSystem
             TrackStartedZLevelTraversal(steering, traversal);
 
         return ZLevelRouteArrival.Hold;
+    }
+
+    private ZLevelRoutePreparation PrepareZLevelFlightLeg(
+        EntityUid uid,
+        NPCSteeringComponent steering,
+        ZLevelPathLeg leg,
+        int currentWorldZ)
+    {
+        if (!TryComp<ZLevelFlightComponent>(uid, out var flight) ||
+            !_zLevelSystem.CanUseFlightNavigation(uid, flight))
+        {
+            return ReplanFailedZLevelFlight(uid, steering);
+        }
+
+        switch (steering.ZLevelFlightStage)
+        {
+            case NPCZLevelFlightStage.None:
+                if (currentWorldZ != leg.Start.WorldZ)
+                {
+                    ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.UnexpectedFloor);
+                    return ZLevelRoutePreparation.Repath;
+                }
+
+                return ZLevelRoutePreparation.Ready;
+            case NPCZLevelFlightStage.Approach:
+                if (!flight.Active ||
+                    flight.TargetLocalZLevel != leg.Flight.Source.LocalZ ||
+                    currentWorldZ != leg.Start.WorldZ)
+                {
+                    return ReplanFailedZLevelFlight(uid, steering);
+                }
+
+                return ZLevelRoutePreparation.Ready;
+            case NPCZLevelFlightStage.Crossing:
+                if (!flight.Active || flight.TargetLocalZLevel != leg.Flight.Destination.LocalZ)
+                    return ReplanFailedZLevelFlight(uid, steering);
+
+                if (currentWorldZ == leg.End.WorldZ)
+                {
+                    steering.ZLevelFlightStage = NPCZLevelFlightStage.Exit;
+                    return ZLevelRoutePreparation.Ready;
+                }
+
+                if (currentWorldZ != leg.Start.WorldZ)
+                {
+                    ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.UnexpectedFloor);
+                    return ZLevelRoutePreparation.Repath;
+                }
+
+                return ZLevelRoutePreparation.Hold;
+            case NPCZLevelFlightStage.Exit:
+                if (!flight.Active ||
+                    flight.TargetLocalZLevel != leg.Flight.Destination.LocalZ ||
+                    currentWorldZ != leg.End.WorldZ)
+                {
+                    return ReplanFailedZLevelFlight(uid, steering);
+                }
+
+                return ZLevelRoutePreparation.Ready;
+            default:
+                return ReplanFailedZLevelFlight(uid, steering);
+        }
+    }
+
+    private ZLevelRouteArrival HandleZLevelFlightArrival(
+        EntityUid uid,
+        NPCSteeringComponent steering,
+        TransformComponent xform,
+        ZLevelPathLeg leg)
+    {
+        var route = steering.ZLevelRoute;
+        if (route == null ||
+            !_pathfindingSystem.ValidateZLevelPathRoute(route).IsValid ||
+            !TryComp<ZLevelFlightComponent>(uid, out var flight) ||
+            !_zLevelSystem.CanUseFlightNavigation(uid, flight))
+        {
+            ReplanFailedZLevelFlight(uid, steering);
+            return ZLevelRouteArrival.Repath;
+        }
+
+        StampZLevelRouteValidation(route, steering);
+        switch (steering.ZLevelFlightStage)
+        {
+            case NPCZLevelFlightStage.None:
+            {
+                var wasActive = flight.Active;
+                var result = wasActive
+                    ? _zLevelSystem.TrySetFlightTarget(
+                        uid,
+                        leg.Flight.Source.LocalZ,
+                        flight.HoverOffset,
+                        flight)
+                    : _zLevelSystem.TryStartFlight(
+                        uid,
+                        leg.Flight.Source.LocalZ,
+                        flight.HoverOffset,
+                        flight);
+                if (!IsSuccessfulFlightCommand(result))
+                {
+                    ReplanFailedZLevelFlight(uid, steering);
+                    return ZLevelRouteArrival.Repath;
+                }
+
+                steering.ZLevelRouteOwnsFlight = !wasActive;
+                steering.ZLevelFlightStage = NPCZLevelFlightStage.Approach;
+                Interlocked.Increment(ref _zLevelFlightLegsStarted);
+                return ZLevelRouteArrival.Advanced;
+            }
+            case NPCZLevelFlightStage.Approach:
+            {
+                var result = _zLevelSystem.TrySetFlightTarget(
+                    uid,
+                    leg.Flight.Destination.LocalZ,
+                    flight.HoverOffset,
+                    flight);
+                if (!IsSuccessfulFlightCommand(result))
+                {
+                    ReplanFailedZLevelFlight(uid, steering);
+                    return ZLevelRouteArrival.Repath;
+                }
+
+                steering.ZLevelFlightStage = NPCZLevelFlightStage.Crossing;
+                return ZLevelRouteArrival.Hold;
+            }
+            case NPCZLevelFlightStage.Crossing:
+                return ZLevelRouteArrival.Hold;
+            case NPCZLevelFlightStage.Exit:
+                if (steering.ZLevelRouteOwnsFlight &&
+                    _zLevelSystem.TryStopFlight(uid, flight: flight) != ZLevelFlightResult.Success)
+                {
+                    ReplanFailedZLevelFlight(uid, steering);
+                    return ZLevelRouteArrival.Repath;
+                }
+
+                steering.ZLevelRouteOwnsFlight = false;
+                steering.ZLevelFlightStage = NPCZLevelFlightStage.None;
+                Interlocked.Increment(ref _zLevelFlightLegsCompleted);
+                steering.ZLevelLegIndex++;
+                steering.LoadedZLevelLegIndex = -1;
+                steering.CurrentPath.Clear();
+                if (!TryLoadCurrentZLevelLeg(uid, steering, xform))
+                    return ZLevelRouteArrival.Failed;
+
+                return steering.ZLevelRoute == null
+                    ? ZLevelRouteArrival.Completed
+                    : ZLevelRouteArrival.Advanced;
+            default:
+                ReplanFailedZLevelFlight(uid, steering);
+                return ZLevelRouteArrival.Repath;
+        }
+    }
+
+    private ZLevelRoutePreparation ReplanFailedZLevelFlight(
+        EntityUid uid,
+        NPCSteeringComponent steering)
+    {
+        Interlocked.Increment(ref _zLevelFlightLegsFailed);
+        ReplanZLevelRoute(uid, steering, NPCZLevelReplanReason.FlightUnavailable);
+        return ZLevelRoutePreparation.Repath;
+    }
+
+    private EntityCoordinates GetFlightApertureCoordinates(ZLevelFlightNavigationEdge edge)
+    {
+        return TryComp<MapGridComponent>(edge.Source.GridUid, out var grid)
+            ? _mapSystem.GridTileToLocal(edge.Source.GridUid, grid, edge.ApertureTile)
+            : EntityCoordinates.Invalid;
+    }
+
+    private void ReleaseZLevelRouteFlight(EntityUid uid, NPCSteeringComponent steering)
+    {
+        if (steering.ZLevelFlightStage == NPCZLevelFlightStage.None &&
+            !steering.ZLevelRouteOwnsFlight)
+        {
+            return;
+        }
+
+        if (TryComp<ZLevelFlightComponent>(uid, out var flight) && flight.Active)
+        {
+            if (steering.ZLevelRouteOwnsFlight)
+            {
+                _zLevelSystem.TryStopFlight(uid, flight: flight);
+            }
+            else if (_xformQuery.TryComp(uid, out var transform))
+            {
+                var localZ = _transform.GetZLevel((
+                    uid,
+                    transform,
+                    CompOrNull<ZLevelPositionComponent>(uid)));
+                _zLevelSystem.TrySetFlightTarget(uid, localZ, flight.HoverOffset, flight);
+            }
+        }
+
+        steering.ZLevelRouteOwnsFlight = false;
+        steering.ZLevelFlightStage = NPCZLevelFlightStage.None;
+    }
+
+    private static bool IsSuccessfulFlightCommand(ZLevelFlightResult result)
+    {
+        return result is ZLevelFlightResult.Success or ZLevelFlightResult.NoChange;
     }
 
     private bool TryLoadCurrentZLevelLeg(
@@ -378,6 +609,7 @@ public sealed partial class NPCSteeringSystem
         steering.LoadedZLevelLegIndex = -1;
         steering.ZLevelPlannedTargetCoordinates = EntityCoordinates.Invalid;
         steering.ZLevelPendingTraversal = null;
+        ReleaseZLevelRouteFlight(uid, steering);
         steering.ZLevelValidatedTopologyRevision = -1;
         steering.ZLevelValidatedEnvironmentRevision = -1;
         steering.LastZLevelReplanReason = NPCZLevelReplanReason.None;
@@ -468,9 +700,7 @@ public sealed partial class NPCSteeringSystem
             return false;
 
         var leg = steering.ZLevelRoute.Legs[steering.ZLevelLegIndex];
-        return targetCoordinates.Equals(leg.Kind == ZLevelPathLegKind.Local
-            ? leg.End.Coordinates
-            : leg.Start.Coordinates) &&
+        return targetCoordinates.Equals(GetZLevelLegDestination(steering)) &&
             ourCoordinates.EntityId == targetCoordinates.EntityId;
     }
 
@@ -529,6 +759,9 @@ public readonly record struct NPCZLevelSteeringMetricsSnapshot(
     long RoutesCompleted,
     long TraversalsStarted,
     long TraversalsCompleted,
+    long FlightLegsStarted,
+    long FlightLegsCompleted,
+    long FlightLegsFailed,
     long Replans,
     long ExecutionFailures,
     long StaleResults);

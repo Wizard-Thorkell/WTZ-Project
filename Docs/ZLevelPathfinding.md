@@ -112,7 +112,8 @@ The completed route contract will be a sequence of specialized legs:
 
 The upper search chooses connector edges and local reachability; it does not
 copy local polygons into `ZLevelTrace` and does not pretend empty space is
-walkable. Flight will use separate navigation capabilities in P7.
+walkable. P7 flight extends the same route shape with a separate typed edge and
+an actor capability gate.
 
 ## P5.2 Floor-Specific Local Navigation
 
@@ -171,8 +172,8 @@ edges, time, and allocation.
 The typed route contract consists of:
 
 - `ZLevelPathEndpoint`, carrying map, exact coordinates, and world Z;
-- `ZLevelPathLeg`, discriminating a native same-floor polygon path from one
-  authored vertical traversal edge;
+- `ZLevelPathLeg`, discriminating a native same-floor polygon path, one authored
+  traversal edge, or one explicit flight edge;
 - `ZLevelPathRoute`, enforcing connected endpoints, one graph version, finite
   non-negative costs, and matching revisions for every traversal leg;
 - `ZLevelPathRouteResult`, with distinct no-path, cancellation, budget, topology,
@@ -305,10 +306,34 @@ extra eviction in P5; longer public-server endurance belongs to P8.
 P5 is complete. Authored static and dynamic vertical connectors now participate
 in floor-specific local navigation, bounded hierarchical planning, exact
 server-authoritative traversal, stale-route recovery, and map-scoped caching.
-P7.2 now supplies physical cabin edges through this same graph: each landing
+P7.2 supplies physical cabin edges through this same graph: each landing
 connects only to its nearest served neighbors, exact edge resolution preserves
 both directions at middle stops, and AI calls then rides the authoritative
-cabin. Flight remains later P7 content built on these contracts.
+cabin. P7.4b2b now adds capability-gated flight edges without changing the P5
+contract for ordinary actors.
+
+## P7.4b2b Explicit Flight Navigation
+
+`ZLevelFlightNavigationComponent` authors one bounded adjacent-floor corridor.
+The traversal graph indexes its supported source, aperture, and supported
+destination locations and emits deterministic forward/reverse edges only while
+the aperture passes `Body`. Flight edges share map-scoped topology/environment
+revisions and immutable snapshot lifetime with traversal edges, but retain a
+separate array, resolver, metrics, and typed leg.
+
+Actor-aware planner overloads include flight edges only after
+`CanUseFlightNavigation()` succeeds. The endpoint-only overload excludes them,
+so a caller cannot accidentally grant flight by choosing coordinates. Search
+budgets count every connector transition while diagnostics distinguish flight
+from traversal evaluations. Installation rechecks actor capability and exact
+live edge identity after asynchronous planning.
+
+Steering executes approach, crossing, and exit phases. XY steering reaches the
+authored aperture, the native flight solver performs the vertical crossing,
+and planar steering resumes only after the entity owns the destination floor.
+Owned flight is released on success, route invalidation, replacement, or clear;
+adopted pre-existing flight remains active. Internal approach tiles are
+mapper-authored cardinal steps and must remain physically clear.
 
 ## P5.1 Verification
 
@@ -396,8 +421,8 @@ are 7.8504, 13.9121, and 21.6865 ms; they remain comparison evidence rather than
 release thresholds. A full incremental `SpaceStation14.slnx` build completes
 with zero errors and 27 established warnings.
 
-P5.4a deliberately enables only static authored stairs, ladders, and shafts.
-Flight remains a separate P7 capability.
+At its phase gate, P5.4a deliberately enabled only static authored stairs,
+ladders, and shafts. P7.4b2b later added flight as a separate actor capability.
 
 ## P5.4b1 Verification
 
@@ -433,3 +458,12 @@ with 100% warmed boundary/gravity cache hits, zero PVS budget exhaustion or
 fail-open candidates, and 6,336 measured bytes each. Local times are 6.9267,
 13.2397, and 21.1442 ms. The full solution build completes with zero errors and
 27 established warnings.
+
+## P7.4b2b Verification
+
+Six focused flight-navigation cases pass. They cover capability-gated search,
+detached bidirectional edges, live boundary/support/rotation invalidation,
+physical steering, preservation of external flight, interruption cleanup, and
+replacement of a route that owns flight. The official mapping fixture loads
+one marker as two directed edges. Complete gate counts and build attribution
+are retained in `ZLevelImplementationLedger.md`.
